@@ -1,0 +1,32 @@
+{
+  "timestamp": "2026-10-12T14:59:18.371Z",
+  "toolchain": {
+    "node": "v24.15.0",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+    "ffmpeg": "ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers"
+  },
+  "ffmpegProbe": {
+    "h264Encoder": true,
+    "aacEncoder": true,
+    "version": "ffmpeg version 8.1.1-essentials_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers"
+  },
+  "documentBenchmark": {
+    "artboards": 6,
+    "totalElements": 120,
+    "byteSize": 25553,
+    "sha256": "169da2fd44a254a1c7eb03baafa2b0119eacfa941c2be41eb4e610579f075456",
+    "genDurationMs": 0.3700000000003456,
+    "hashDurationMs": 0.4193000000000211,
+    "patchDurationMs": 0.6881000000003041
+  },
+  "authBench": {
+    "opsPerSec": 150155
+  },
+  "sandboxPolicy": {
+    "sandboxDirectives": [
+      "allow-scripts"
+    ],
+    "cspPolicy": "default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; font-src data:; script-src 'unsafe-inline'"
+  }
+}

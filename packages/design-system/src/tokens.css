@@ -1,0 +1,109 @@
+:root {
+  color-scheme: light;
+  --cs-bg-app: #f5f7fb;
+  --cs-bg-panel: #ffffff;
+  --cs-bg-raised: #eef2f8;
+  --cs-bg-canvas: #dce3ee;
+  --cs-fg-primary: #182132;
+  --cs-fg-secondary: #526078;
+  --cs-fg-inverse: #ffffff;
+  --cs-border-subtle: #cbd5e3;
+  --cs-border-strong: #8f9db2;
+  --cs-accent: #334bd1;
+  --cs-accent-hover: #263dab;
+  --cs-focus: #1e47c7;
+  --cs-selection: #dce3ff;
+  --cs-success: #166847;
+  --cs-warning: #8c5700;
+  --cs-danger: #b02f3b;
+  --cs-status-info-bg: #e7ecff;
+  --cs-status-success-bg: #dff4e8;
+  --cs-status-warning-bg: #fff0ce;
+  --cs-status-danger-bg: #ffe6e8;
+  --cs-canvas-grid: #a7b4c8;
+  --cs-canvas-artboard: #ffffff;
+  --cs-canvas-guide: #3155d4;
+  --cs-timeline-track: #e6ebf4;
+  --cs-timeline-playhead: #c8304f;
+  --cs-progress-track: #d9e1ef;
+  --cs-progress-fill: #334bd1;
+  --cs-space-1: 4px;
+  --cs-space-2: 8px;
+  --cs-space-3: 12px;
+  --cs-space-4: 16px;
+  --cs-space-6: 24px;
+  --cs-space-8: 32px;
+  --cs-radius-sm: 3px;
+  --cs-radius-md: 6px;
+  --cs-panel-divider: 1px;
+  --cs-control-height: 36px;
+  --cs-hit-target: 44px;
+  --cs-font-ui: Inter, "Segoe UI", system-ui, sans-serif;
+  --cs-font-mono: "Cascadia Code", Consolas, monospace;
+  --cs-text-xs: 12px;
+  --cs-text-sm: 13px;
+  --cs-text-md: 15px;
+  --cs-text-lg: 18px;
+  --cs-line-body: 1.5;
+  --cs-shadow-panel: 0 8px 24px rgb(19 32 55 / 12%);
+  --cs-motion-duration: 150ms;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --cs-bg-app: #0b1020;
+  --cs-bg-panel: #141d30;
+  --cs-bg-raised: #1e2a40;
+  --cs-bg-canvas: #09101d;
+  --cs-fg-primary: #eff3fb;
+  --cs-fg-secondary: #b2bfd3;
+  --cs-fg-inverse: #0b1020;
+  --cs-border-subtle: #34425b;
+  --cs-border-strong: #64748f;
+  --cs-accent: #9aaaff;
+  --cs-accent-hover: #b8c3ff;
+  --cs-focus: #b6c3ff;
+  --cs-selection: #334171;
+  --cs-success: #8cdbaf;
+  --cs-warning: #ffd28a;
+  --cs-danger: #ff9aa5;
+  --cs-status-info-bg: #27345e;
+  --cs-status-success-bg: #1d4336;
+  --cs-status-warning-bg: #49341e;
+  --cs-status-danger-bg: #4b2630;
+  --cs-canvas-grid: #3d4c64;
+  --cs-canvas-artboard: #ffffff;
+  --cs-canvas-guide: #9aafff;
+  --cs-timeline-track: #213047;
+  --cs-timeline-playhead: #ff7892;
+  --cs-progress-track: #34425b;
+  --cs-progress-fill: #9aaaff;
+  --cs-shadow-panel: 0 8px 24px rgb(0 0 0 / 34%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --cs-motion-duration: 0ms;
+  }
+}
+
+/* Base utility classes using tokens */
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--cs-bg-app);
+  color: var(--cs-fg-primary);
+  font-family: var(--cs-font-ui);
+  font-size: var(--cs-text-md);
+  line-height: var(--cs-line-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+:focus-visible {
+  outline: 2px solid var(--cs-focus);
+  outline-offset: 2px;
+}

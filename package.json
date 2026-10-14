@@ -1,0 +1,16 @@
+{
+  "name": "local-content-studio-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local Content Studio — Standalone Desktop Creative Production Workspace",
+  "scripts": {
+    "dev": "pnpm --filter @studio/desktop-ui dev",
+    "build": "pnpm --recursive run build",
+    "test": "pnpm --recursive run test",
+    "typecheck": "pnpm --recursive run typecheck",
+    "lint": "pnpm --recursive run lint",
+    "cargo:check": "cargo check --workspace",
+    "cargo:test": "cargo test --workspace"
+  },
+  "packageManager": "pnpm@11.22.0"
+}

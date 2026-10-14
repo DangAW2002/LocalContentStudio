@@ -1,0 +1,50 @@
+# Dependencies & Package Managers
+node_modules/
+.pnpm-store/
+
+# Build outputs & caches
+target/
+dist/
+build/
+.cache/
+*.tsbuildinfo
+
+# Environment variables & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local agent brains and private states
+.local/
+.aw/
+
+# Storage & database runtime data
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+catalog.sqlite*
+managed/
+staging/
+backups/
+exports/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS & IDE files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
