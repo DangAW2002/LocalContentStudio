@@ -1,0 +1,217 @@
+# Studio catalog: third-party skill/MCP sources, curation and modules/kits (ADR-010).
+# Studio never bundles these sources; each machine fetches them at the pinned commit
+# into %LOCALAPPDATA%/LocalContentStudio/catalog/sources/<owner>__<repo>.
+schema: catalog@1
+updated: 2026-10-16
+
+sources:
+  anthropics/skills:
+    commit: dbd4588f9e1033efb41dad4bef2f7947c8993d44
+    license: "Apache-2.0; docx/pdf/pptx/xlsx: Anthropic proprietary (chỉ dùng cục bộ)"
+  charlie947/motion-graphics-skills:
+    commit: 229022ebca76972e119e36ada23a1648d51665ab
+    license: MIT
+  CloudAI-X/threejs-skills:
+    commit: b1c623076c661fc9b03dac19292e825a5d106823
+    license: "none (chỉ dùng cục bộ, không phân phối lại)"
+  elevenlabs/skills:
+    commit: 32f48f6ebf4a97e963a824ade7d5cb14beacf774
+    license: MIT
+  greensock/gsap-skills:
+    commit: aed9cfd3277740755f6bfc1155c7aa645403b760
+    license: MIT
+  remotion-dev/skills:
+    commit: 1441a11e95db35443bd76bb318386c0d3ca00053
+    license: "none (chỉ dùng cục bộ, không phân phối lại)"
+  heygen-com/hyperframes:
+    commit: 4e6fcdb3a9f310a9c483622d6a4ca5354a63fb22
+    license: Apache-2.0
+    sparse: [skills]
+  emilkowalski/skills:
+    commit: 2d228630ba1446365f614a108cb8252f1feda202
+    license: MIT
+  ahujasid/mcp-for-blender:
+    commit: 7a0373ec9199183cb460068c4f96aed9c579fb4f
+    license: MIT
+    kind: mcp
+  Dakkshin/after-effects-mcp:
+    commit: 88d5fbf08b7ae9f015ee98e5f8c4904095cf8202
+    license: MIT
+    kind: mcp
+
+# Never loaded. Reason is shown in the Tools screen.
+excluded:
+  anthropics/skills:
+    academy-guide: tự kích hoạt ở mọi câu trả lời về Claude
+    discernment-nudge: tự kích hoạt sau mọi câu trả lời
+    brand-guidelines: áp brand của Anthropic, xung đột với Brand của Studio
+    internal-comms: ngoài phạm vi nội dung
+    doc-coauthoring: ngoài phạm vi nội dung
+    claude-api: công cụ lập trình, bundle rất lớn
+    webapp-testing: công cụ lập trình
+    web-artifacts-builder: dành riêng cho artifact claude.ai
+    template-skill: mẫu rỗng
+    docx: ngoài phạm vi hiện tại
+    xlsx: ngoài phạm vi hiện tại
+  elevenlabs/skills:
+    update-skills-from-changelog: skill nội bộ của maintainer
+    agents: dựng voice agent, ngoài phạm vi
+    speech-engine: dựng voice agent, ngoài phạm vi
+    setup-api-key: Studio quản lý key bằng Credential Manager
+  emilkowalski/skills:
+    animate-expo: React Native
+    write-swift: Swift
+    ask-sonner: thư viện toast React
+    mobile-native: tối ưu web app mobile
+    break-ui: kiểm thử UI
+    pick-ui-library: chọn thư viện frontend
+    prototype: prototype UI
+    find-animation-opportunities: rà codebase app
+  greensock/gsap-skills:
+    gsap-scrolltrigger: animation theo cuộn trang web, không dùng cho render video
+    gsap-frameworks: Vue/Svelte
+  heygen-com/hyperframes:
+    hyperframes-studio: giao diện Studio riêng của HyperFrames
+    remotion-to-hyperframes: chuyển mã Remotion sang HyperFrames
+  remotion-dev/skills:
+    remotion-saas: dựng app SaaS
+  charlie947/motion-graphics-skills:
+    model-showdown: chạy cùng brief trên 3 model để so sánh, tốn phí
+
+# Loaded only through a Studio wrapper; the upstream copy is never edited.
+adapt:
+  charlie947/motion-graphics-skills/brand-intake: >-
+    Đọc Brand qua MCP brand.get (brands/<slug>/brand.yaml); không ghi brand.md/MOTION.md, không sửa CLAUDE.md.
+  heygen-com/hyperframes/media-use: >-
+    Tìm/nhập media qua Studio Library (asset.*); script chạy dưới chính sách quyền của turn.
+  heygen-com/hyperframes/hyperframes-creative: >-
+    Design spec lấy từ Studio Brand + Channel thay vì frame.md/design.md tự tạo.
+
+# Agent-run installers that bypass the catalog are denied in Studio turns.
+denied_commands:
+  - "npx skills add"
+  - "npx skills install"
+
+modules:
+  studio.core:
+    always: true
+    description: Skill lõi của Studio (Studio MCP, Brand, Channel, checkpoint). Do Studio viết.
+    skills: []
+  render.hyperframes:
+    level: { dependency: hyperframes, capability: render.html_video@1 }
+    needs: [bin:node, bin:ffmpeg, bin:chromium]
+    router: heygen-com/hyperframes/hyperframes
+    skills:
+      heygen-com/hyperframes: [hyperframes, hyperframes-core, hyperframes-animation, hyperframes-keyframes,
+        hyperframes-audio, hyperframes-cli, hyperframes-registry, hyperframes-creative, media-use]
+  render.remotion:
+    optional: true
+    level: { dependency: remotion, capability: render.remotion@1 }
+    needs: [bin:node, bin:chromium]
+    router: remotion-dev/skills/remotion-best-practices
+    skills:
+      remotion-dev/skills: [remotion-best-practices, remotion-create, remotion-render, remotion-studio,
+        remotion-markup, remotion-interactivity, remotion-captions, remotion-multimedia, remotion-docs,
+        remotion-upgrade, remotion-maps]
+  motion.gsap:
+    level: { dependency: gsap }
+    router: generated
+    skills:
+      greensock/gsap-skills: [gsap-core, gsap-timeline, gsap-utils, gsap-performance, gsap-plugins, gsap-react]
+  motion.craft:
+    description: Nguyên tắc chuyển động/thiết kế (Emil Kowalski)
+    router: generated
+    skills:
+      emilkowalski/skills: [animate, animation-vocabulary, apple-design, emil-design-eng, review-animations,
+        improve-animations, animation-performance]
+  3d.threejs:
+    level: { dependency: three }
+    router: generated
+    skills:
+      CloudAI-X/threejs-skills: [threejs-fundamentals, threejs-geometry, threejs-materials, threejs-lighting,
+        threejs-textures, threejs-loaders, threejs-animation, threejs-interaction, threejs-shaders,
+        threejs-postprocessing]
+  3d.blender:
+    optional: true
+    mcp: ahujasid/mcp-for-blender
+    needs: [app:blender, blender-addon:blender-mcp]
+    skills: {}
+  motion.aftereffects:
+    optional: true
+    mcp: Dakkshin/after-effects-mcp
+    needs: [app:after-effects]
+    skills: {}
+  voice.elevenlabs:
+    level:
+      provider_for: [tts.synthesize@1, stt.transcribe@1, audio.sfx.generate@1, music.generate@1,
+        audio.dub@1, voice.convert@1, audio.isolate_voice@1]
+    needs: [secret:ELEVENLABS_API_KEY]
+    skills:
+      elevenlabs/skills: [text-to-speech, speech-to-text, sound-effects, music, dubbing, voice-changer,
+        voice-isolator]
+  design.visual:
+    skills:
+      anthropics/skills: [canvas-design, frontend-design, theme-factory, algorithmic-art, slack-gif-creator]
+  docs.export:
+    optional: true
+    skills:
+      anthropics/skills: [pdf, pptx]
+  playbooks.hyperframes:
+    requires: [render.hyperframes]
+    skills:
+      heygen-com/hyperframes: [motion-graphics, product-launch-video, faceless-explainer, music-to-video,
+        slideshow, embedded-captions, talking-head-recut, general-video, pr-to-video, figma]
+  playbooks.charlie:
+    requires: [render.hyperframes]
+    skills:
+      charlie947/motion-graphics-skills: [brand-intake, motion-brief-writer, motion-prompt-writer,
+        reference-to-motion, launch-video, apple-launch-film, vox-explainer, animated-chart, milestone-reveal,
+        motion-effects, newsletter-promo, loop-cover, title-sequence-3d, reel-export]
+    skill_requires:
+      apple-launch-film: [motion.craft/apple-design]
+      title-sequence-3d: [3d.threejs]
+  dev.authoring:
+    optional: true
+    description: Tự viết skill/MCP mới cho Studio
+    skills:
+      anthropics/skills: [skill-creator, mcp-builder]
+
+# A kit selects modules, optionally narrowing each to a subset of skills.
+kits:
+  thumbnail-carousel:
+    title: Thumbnail, poster, carousel
+    use:
+      design.visual: [canvas-design, frontend-design, theme-factory]
+  motion-graphic:
+    title: Motion graphic ngắn
+    use:
+      render.hyperframes: all
+      playbooks.hyperframes: [motion-graphics]
+      motion.craft: [animate, animation-vocabulary, review-animations]
+      motion.gsap: [gsap-core, gsap-timeline]
+  shorts-reels:
+    title: Shorts / Reels có giọng đọc và phụ đề
+    use:
+      render.hyperframes: [hyperframes, hyperframes-core, hyperframes-keyframes, hyperframes-audio, media-use]
+      playbooks.hyperframes: [embedded-captions, talking-head-recut]
+      playbooks.charlie: [reel-export]
+      voice.elevenlabs: [text-to-speech, speech-to-text, sound-effects]
+  youtube-explainer:
+    title: Video YouTube giải thích
+    use:
+      render.hyperframes: [hyperframes, hyperframes-core, hyperframes-animation, hyperframes-audio, media-use]
+      playbooks.hyperframes: [faceless-explainer]
+      playbooks.charlie: [vox-explainer, animated-chart]
+      voice.elevenlabs: [text-to-speech, speech-to-text, music, sound-effects]
+  launch-promo:
+    title: Video ra mắt sản phẩm
+    use:
+      render.hyperframes: [hyperframes, hyperframes-core, hyperframes-animation, hyperframes-creative]
+      playbooks.charlie: [brand-intake, launch-video, apple-launch-film, newsletter-promo]
+      motion.craft: [apple-design]
+  title-3d:
+    title: Title sequence 3D
+    use:
+      render.hyperframes: [hyperframes, hyperframes-core]
+      playbooks.charlie: [title-sequence-3d]
+      3d.threejs: all
