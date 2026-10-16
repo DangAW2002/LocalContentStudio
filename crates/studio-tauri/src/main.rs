@@ -101,6 +101,11 @@ fn main() {
             commands::disk_usage,
             commands::agy_connect,
             commands::agy_disconnect,
+            commands::file_write,
+            commands::checkpoint_create,
+            commands::artifact_list,
+            commands::artifact_render,
+            commands::artifact_check,
         ])
         .run(tauri::generate_context!())
         .expect("không khởi động được Local Content Studio");

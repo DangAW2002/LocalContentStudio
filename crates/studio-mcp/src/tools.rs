@@ -348,7 +348,8 @@ async fn capability_run(
     Err(format!("Mọi provider đều lỗi: {}", errors.join("; ")))
 }
 
-fn check_run(ws: &Workspace, args: &Value) -> Result<Value, String> {
+/// Run brand/channel checkers on an artifact (shared by the MCP tool and the desktop app).
+pub fn check_run(ws: &Workspace, args: &Value) -> Result<Value, String> {
     let dir = ws
         .scoped_path(required(args, "artifact_dir")?)
         .map_err(|e| e.to_string())?;

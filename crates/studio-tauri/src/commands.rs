@@ -800,3 +800,106 @@ pub fn agy_disconnect() -> CmdResult<Value> {
     studio_tools::remove_agy().map_err(|e| CmdError::msg(e.to_string()))?;
     Ok(json!({ "connected": false }))
 }
+
+// ───────────────────────── Editing, artifacts ─────────────────────────
+
+/// Write a text file (direct edits on the Stage). Paths outside the workspace or in read-only layers are rejected.
+#[tauri::command]
+pub fn file_write(
+    state: State<'_, AppState>,
+    project: Option<String>,
+    path: String,
+    text: String,
+) -> CmdResult<Value> {
+    let ws = state.workspace()?;
+    let rel_path = match &project {
+        Some(slug) if !Path::new(&path).starts_with("projects") => {
+            Path::new("projects").join(slug).join(&path)
+        }
+        _ => PathBuf::from(&path),
+    };
+    let full = ws.scoped_path(&rel_path)?;
+    if !ws.can_write(&full) {
+        return Err(CmdError::msg("Tệp này thuộc tầng chỉ đọc."));
+    }
+    if let Some(dir) = full.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = full.with_extension("lcs-tmp");
+    std::fs::write(&tmp, text.as_bytes())?;
+    std::fs::rename(&tmp, &full)?;
+    Ok(json!({ "path": rel(&ws, &full), "size": text.len() }))
+}
+
+/// Manual checkpoint (e.g. before a series of direct edits).
+#[tauri::command]
+pub fn checkpoint_create(state: State<'_, AppState>, label: Option<String>) -> CmdResult<Value> {
+    let ws = state.workspace()?;
+    let id = CheckpointService::create(&ws, label.as_deref().unwrap_or("Lưu thủ công"), None)?;
+    Ok(json!({ "id": id }))
+}
+
+#[tauri::command]
+pub fn artifact_list(state: State<'_, AppState>, project: String) -> CmdResult<Vec<Value>> {
+    let ws = state.workspace()?;
+    let p = Project::open(&ws, &project)?;
+    let list = studio_artifacts::Artifact::list(&p).map_err(|e| CmdError::msg(e.to_string()))?;
+    Ok(list
+        .iter()
+        .map(|a| {
+            json!({
+                "id": a.id, "kind": a.kind, "title": a.title, "brand": a.brand, "channels": a.channels,
+                "dir": rel(&ws, &a.dir(&p)), "source": rel(&ws, &a.source_path(&p)),
+            })
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn artifact_render(
+    state: State<'_, AppState>,
+    project: String,
+    id: String,
+) -> CmdResult<Value> {
+    let ws = state.workspace()?;
+    let p = Project::open(&ws, &project)?;
+    let artifact =
+        studio_artifacts::Artifact::load(&p, &id).map_err(|e| CmdError::msg(e.to_string()))?;
+    let outcome = studio_artifacts::render(&ws, &p, &artifact, &state.scheduler)
+        .await
+        .map_err(|e| CmdError::msg(format!("Render lỗi: {e}")))?;
+    Ok(json!({
+        "cached": outcome.cached,
+        "outputs": outcome.outputs.iter().map(|o| rel(&ws, o)).collect::<Vec<_>>(),
+        "jobId": outcome.job_id,
+        "probes": outcome.probe_report.iter().map(|r| json!({ "name": r.name, "available": r.available, "note": r.note })).collect::<Vec<_>>(),
+    }))
+}
+
+#[tauri::command]
+pub fn artifact_check(
+    state: State<'_, AppState>,
+    project: String,
+    id: String,
+    channels: Option<Vec<String>>,
+) -> CmdResult<Value> {
+    let ws = state.workspace()?;
+    let p = Project::open(&ws, &project)?;
+    let a = studio_artifacts::Artifact::load(&p, &id).map_err(|e| CmdError::msg(e.to_string()))?;
+    let renders: Vec<String> = std::fs::read_dir(p.renders_dir().join(&a.id))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|d| std::fs::read_dir(d.path()).ok())
+        .flatten()
+        .flatten()
+        .map(|f| rel(&ws, &f.path()))
+        .collect();
+    let args = json!({
+        "artifact_dir": rel(&ws, &a.dir(&p)),
+        "brand": a.brand.clone().unwrap_or_else(|| "example".into()),
+        "channels": channels.unwrap_or_else(|| a.channels.clone()),
+        "renders": renders,
+    });
+    studio_mcp::tools::check_run(&ws, &args).map_err(CmdError::msg)
+}
