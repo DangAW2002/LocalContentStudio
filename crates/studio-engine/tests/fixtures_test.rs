@@ -309,3 +309,16 @@ async fn test_live_agy_probe_and_turn() {
         }
     }
 }
+
+#[test]
+fn agy_result_error_is_surfaced() {
+    let mut p = studio_engine::AgyParser::default();
+    let line = r#"{"event":"result","result":{"conversation_id":"c1","status":"ERROR","response":"","error":"Individual quota reached.","usage":{"input_tokens":0,"output_tokens":0}}}"#;
+    let events = p.feed(line);
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, studio_engine::Event::Error(m) if m.contains("quota"))));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, studio_engine::Event::Done { .. })));
+}

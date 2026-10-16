@@ -105,6 +105,31 @@ fn activate(app: &AppHandle, state: &AppState, ws: &Workspace) -> CmdResult<()> 
         let _ = db.record_workspace_open(&ws.root().to_string_lossy());
     }
     let _ = app.asset_protocol_scope().allow_directory(ws.root(), true);
+    // Turns left "running" by a crash or forced quit can never finish: close them.
+    if let Ok(db) = WorkspaceDb::open(ws) {
+        let live: Vec<String> = state
+            .turns
+            .lock()
+            .map(|t| t.keys().cloned().collect())
+            .unwrap_or_default();
+        if let Ok(mut stmt) = db
+            .conn()
+            .prepare("SELECT id FROM turns WHERE status = 'running'")
+        {
+            let stale: Vec<String> = stmt
+                .query_map([], |r| r.get::<_, String>(0))
+                .map(|rows| rows.flatten().filter(|id| !live.contains(id)).collect())
+                .unwrap_or_default();
+            for id in stale {
+                let done = json!({ "type": "Done", "status": "error", "text": "Lượt bị gián đoạn do ứng dụng đóng." });
+                let _ = turns::persist(&db, &id, &done);
+                let _ = db.conn().execute(
+                    "UPDATE turns SET status = 'error', completed_at = ?2 WHERE id = ?1",
+                    params![id, now()],
+                );
+            }
+        }
+    }
     *state
         .current
         .lock()

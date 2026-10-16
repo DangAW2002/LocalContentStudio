@@ -167,6 +167,13 @@ impl AgyParser {
                         });
                     }
 
+                    // Surface the engine's error (quota, auth, ...) instead of ending silently.
+                    if let Some(err) = res.get("error").and_then(|v| v.as_str()) {
+                        if !err.trim().is_empty() {
+                            events.push(Event::Error(err.to_string()));
+                        }
+                    }
+
                     // Denied actions
                     if let Some(denied) = res.get("denied_actions").and_then(|v| v.as_array()) {
                         for action_obj in denied {

@@ -22,7 +22,7 @@ pub fn setup_agy_at(settings_path: &Path, studio_mcp_exe: &Path, run_cli: bool) 
     if run_cli {
         let exe_str = studio_mcp_exe.to_string_lossy();
         let status = Command::new("agy")
-            .args(["mcp", "add", "studio", exe_str.as_ref(), "--shim"])
+            .args(["mcp", "add", "studio", "--", exe_str.as_ref(), "--shim"])
             .status();
 
         if let Err(err) = status {
