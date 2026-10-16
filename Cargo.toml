@@ -8,6 +8,11 @@ members = [
     "crates/studio-mcp",
     "crates/studio-worker",
     "crates/studio-tauri",
+    "crates/studio-workspace",
+    "crates/studio-jobs",
+    "crates/studio-engine",
+    "crates/studio-catalog",
+    "crates/studio-tools",
 ]
 
 [workspace.package]

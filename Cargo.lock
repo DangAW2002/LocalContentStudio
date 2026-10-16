@@ -1395,6 +1395,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "studio-catalog"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "studio-cli"
 version = "0.1.0"
 dependencies = [
@@ -1423,6 +1433,26 @@ dependencies = [
  "sha2",
  "thiserror 1.0.69",
  "uuid",
+]
+
+[[package]]
+name = "studio-engine"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "studio-jobs"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1475,6 +1505,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "studio-tools"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "studio-worker"
 version = "0.1.0"
 dependencies = [
@@ -1489,6 +1529,16 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "studio-workspace"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

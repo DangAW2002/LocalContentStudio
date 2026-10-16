@@ -1,0 +1,45 @@
+# AGENTS.md — Local Content Studio
+
+Personal, AI-first desktop studio (Tauri 2 + Rust core + React). Source of truth for design:
+`D:/Users/Dang/LocalContentStudio/.aw/` (read-only for you): `plans/2026-10-15-0009-personal-ai-first-reset.md`,
+`decisions/ADR-007..ADR-010`, and the task file you are given. If code and docs disagree, follow the docs and say so in your report.
+
+## Crate map (new architecture)
+
+| Crate | Owns |
+| --- | --- |
+| `studio-workspace` | Org/workspace folders, scope chain app→org→workspace, path scoping, SQLite (`.studio/studio.db`, `app.db`), migrations, file index, checkpoints (CAS), disk GC |
+| `studio-jobs` | Job scheduler, resource pools, admission, Windows Job Objects, process supervision, `Worker` trait |
+| `studio-engine` | Agent engine adapters (`claude`, `agy`): spawn CLI, parse stream-json, normalized `Event`s |
+| `studio-catalog` | Skill catalog (`catalog/catalog.yaml`), inventory, curation checks, kit resolution, per-turn skill plugin dir |
+| `studio-tools` | Capability + tool registry, manifests, provider routing, secrets (Credential Manager), tool proxy |
+| `studio-mcp` | Studio MCP server (Streamable HTTP loopback + token; stdio shim) |
+| `studio-tauri` | Desktop shell + IPC |
+| `studio-cli` | `studio` CLI |
+| `packages/desktop-ui` | React UI |
+
+Legacy crates `studio-app`, `studio-storage`, `studio-worker`, old parts of `studio-core` (actor/session/scope/handoff) belong to the
+previous multi-user design. Do not extend them; you may copy useful code (SQLite WAL/migration/backup/blob CAS from `studio-storage`,
+ffmpeg from `studio-worker`) into your crate.
+
+## Rules
+
+- Touch only the crate(s)/paths named in your task. Do not edit the root `Cargo.toml` workspace members; declare dependencies with
+  explicit versions in your own crate's `Cargo.toml` (you may use `{ workspace = true }` for deps already in `[workspace.dependencies]`).
+- Library code: no `unwrap()`/`expect()` outside tests; errors via `thiserror`; public API documented with `///`.
+- Windows is the primary target (paths, process trees, Credential Manager). Code must still compile on other targets
+  (`#[cfg(windows)]` with a simple fallback).
+- Never fake capabilities: probes must run the real binary; tests for external CLIs use recorded fixtures.
+- Never write secrets to files, logs or test fixtures.
+- UI copy is Vietnamese; no raw enums shown to users.
+
+## Gate (must pass before you report done)
+
+```
+cargo fmt --all -- --check
+cargo clippy -p <your-crate> --all-targets -- -D warnings
+cargo test -p <your-crate>
+```
+For UI: `pnpm --filter @studio/desktop-ui typecheck` and `pnpm --filter @studio/desktop-ui build`.
+
+Commit your work on your branch with a conventional message. Report: what you built, public API, tests, gate output, known gaps.
