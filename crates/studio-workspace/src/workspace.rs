@@ -34,6 +34,12 @@ pub struct ProjectMeta {
     pub title: String,
     /// Created timestamp in RFC3339 format
     pub created_at: String,
+    /// Catalog modules enabled for this project (kit + additions), see ADR-010.
+    #[serde(default)]
+    pub kit: Option<String>,
+    /// Enabled catalog module ids.
+    #[serde(default)]
+    pub modules: Vec<String>,
 }
 
 /// Project handle.
@@ -59,6 +65,8 @@ impl Project {
             slug: slug.to_string(),
             title: title.to_string(),
             created_at: chrono::Utc::now().to_rfc3339(),
+            kit: None,
+            modules: Vec::new(),
         };
 
         let yaml = serde_yaml::to_string(&meta)
@@ -89,6 +97,28 @@ impl Project {
             title: meta.title,
             root: proj_root,
         })
+    }
+
+    /// Read the project's metadata file.
+    pub fn meta(&self) -> Result<ProjectMeta> {
+        let content = fs::read_to_string(self.root.join("project.yaml"))?;
+        serde_yaml::from_str(&content).map_err(|e| WorkspaceError::Serialization(e.to_string()))
+    }
+
+    /// Set the kit and enabled catalog modules (deduplicated, order kept).
+    pub fn set_modules(&self, kit: Option<String>, modules: &[String]) -> Result<ProjectMeta> {
+        let mut meta = self.meta()?;
+        meta.kit = kit;
+        meta.modules.clear();
+        for m in modules {
+            if !meta.modules.contains(m) {
+                meta.modules.push(m.clone());
+            }
+        }
+        let yaml = serde_yaml::to_string(&meta)
+            .map_err(|e| WorkspaceError::Serialization(e.to_string()))?;
+        fs::write(self.root.join("project.yaml"), yaml)?;
+        Ok(meta)
     }
 
     /// Project slug.
