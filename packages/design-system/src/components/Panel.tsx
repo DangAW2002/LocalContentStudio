@@ -26,7 +26,7 @@ export const Panel: React.FC<PanelProps> = ({
         flexDirection: "column",
         backgroundColor: "var(--cs-bg-panel)",
         border: "1px solid var(--cs-border-subtle)",
-        borderRadius: "var(--cs-radius-md)",
+        borderRadius: "var(--cs-radius-none)",
         overflow: "hidden",
         height: "100%",
         ...style,

@@ -1,0 +1,413 @@
+import React from "react";
+import { Icon } from "../components/Icon";
+import { Button, Chip, Select, Callout, EmptyState, ErrorState, Badge } from "@studio/design-system";
+import { studioApi } from "../api/client";
+import type {
+  ProjectSummary,
+  JobSnapshot,
+  CatalogKit,
+  EngineType,
+} from "../api/types";
+
+export interface HomeViewProps {
+  onOpenProject: (slug: string, threadId?: string) => void;
+  onNavigateSettings: () => void;
+}
+
+function slugify(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "")
+    .slice(0, 36) || "du-an-moi";
+}
+
+export const HomeView: React.FC<HomeViewProps> = ({
+  onOpenProject,
+  onNavigateSettings,
+}) => {
+  const [prompt, setPrompt] = React.useState("");
+  const [engine, setEngine] = React.useState<EngineType>("claude");
+  const [model, setModel] = React.useState<string>("claude-3-5-sonnet");
+  const [selectedKit, setSelectedKit] = React.useState<string | null>(null);
+  const [suggestedKits, setSuggestedKits] = React.useState<CatalogKit[]>([]);
+
+  const [projects, setProjects] = React.useState<ProjectSummary[]>([]);
+  const [jobs, setJobs] = React.useState<JobSnapshot[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
+
+  // Load initial data
+  const loadData = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [projList, jobList] = await Promise.all([
+        studioApi.getProjects(),
+        studioApi.getJobsSnapshot(),
+      ]);
+      setProjects(projList);
+      setJobs(jobList);
+    } catch (err: any) {
+      setError(err?.message || "Chưa kết nối Studio core");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Debounced suggest kit
+  React.useEffect(() => {
+    if (!prompt.trim() || prompt.length < 3) {
+      setSuggestedKits([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        const res = await studioApi.suggestCatalog({ text: prompt });
+        setSuggestedKits(res.suggestedKits || []);
+      } catch {
+        // Silently skip if core is not connected
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [prompt]);
+
+  // Handle request submission
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!prompt.trim() || submitting) return;
+
+    setSubmitting(true);
+    setError(null);
+    try {
+      const slug = `${slugify(prompt)}-${Date.now().toString(36).slice(-4)}`;
+      const title = prompt.trim().slice(0, 60);
+
+      // 1. Create project
+      const proj = await studioApi.createProject({
+        slug,
+        title,
+        kit: selectedKit || undefined,
+      });
+
+      // 2. Create initial thread
+      const thread = await studioApi.createThread({
+        project: proj.slug,
+        engine,
+        model: model || undefined,
+      });
+
+      // 3. Start first turn
+      await studioApi.startTurn({
+        threadId: thread.id,
+        prompt: prompt.trim(),
+      });
+
+      // 4. Open project view with the new thread
+      onOpenProject(proj.slug, thread.id);
+    } catch (err: any) {
+      setError(err?.message || "Không thể khởi tạo dự án với agent.");
+      setSubmitting(false);
+    }
+  };
+
+  const runningJobs = jobs.filter((j) => j.state === "RUNNING");
+
+  return (
+    <div
+      style={{
+        flex: 1,
+        overflowY: "auto",
+        padding: "var(--cs-space-6)",
+        backgroundColor: "var(--cs-bg-app)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+      }}
+    >
+      <div style={{ width: "100%", maxWidth: 840, display: "flex", flexDirection: "column", gap: "var(--cs-space-6)" }}>
+        {error && (
+          <ErrorState
+            title="Kết nối Studio core"
+            reason={error}
+            safetyNote="Khi chạy độc lập không qua Tauri shell, vui lòng kiểm tra backend Rust hoặc mở ứng dụng desktop."
+            onRetry={loadData}
+          />
+        )}
+
+        {/* Big Request Box */}
+        <section
+          style={{
+            backgroundColor: "var(--cs-bg-panel)",
+            border: "1px solid var(--cs-border-subtle)",
+            boxShadow: "0 2px 8px rgb(0 0 0 / 4%)",
+            padding: "var(--cs-space-5)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--cs-space-4)",
+          }}
+        >
+          <div>
+            <h1
+              style={{
+                margin: "0 0 4px 0",
+                fontSize: "var(--cs-text-lg)",
+                fontWeight: 700,
+                color: "var(--cs-fg-primary)",
+              }}
+            >
+              Bạn muốn tạo nội dung gì hôm nay?
+            </h1>
+            <p style={{ margin: 0, fontSize: "var(--cs-text-sm)", color: "var(--cs-fg-secondary)" }}>
+              Giao việc cho agent. Agent sẽ tự chọn công cụ, áp dụng Brand và dựng sản phẩm cho bạn.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-3)" }}>
+            {/* Engine & Model Selectors */}
+            <div style={{ display: "flex", gap: "var(--cs-space-3)", alignItems: "center" }}>
+              <div style={{ width: 180 }}>
+                <Select
+                  size="sm"
+                  label="Agent Engine"
+                  value={engine}
+                  onChange={(e) => {
+                    const next = e.target.value as EngineType;
+                    setEngine(next);
+                    setModel(next === "claude" ? "claude-3-5-sonnet" : "gemini-2.0-flash");
+                  }}
+                  options={[
+                    { value: "claude", label: "Claude Code CLI" },
+                    { value: "agy", label: "Antigravity CLI (agy)" },
+                  ]}
+                />
+              </div>
+
+              <div style={{ width: 220 }}>
+                <Select
+                  size="sm"
+                  label="Mô hình (Model)"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  options={
+                    engine === "claude"
+                      ? [
+                          { value: "claude-3-5-sonnet", label: "Claude 3.5 Sonnet" },
+                          { value: "claude-3-7-sonnet", label: "Claude 3.7 Sonnet" },
+                          { value: "claude-3-5-haiku", label: "Claude 3.5 Haiku" },
+                        ]
+                      : [
+                          { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+                          { value: "gemini-2.0-pro", label: "Gemini 2.0 Pro" },
+                        ]
+                  }
+                />
+              </div>
+
+              {selectedKit && (
+                <div style={{ marginTop: 18 }}>
+                  <Chip
+                    label={`Kit: ${selectedKit}`}
+                    selected
+                    onRemove={() => setSelectedKit(null)}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Prompt Textarea */}
+            <div style={{ position: "relative" }}>
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                rows={4}
+                placeholder="Ví dụ: Làm video YouTube phân tích iPhone 16 kèm 3 Shorts và thumbnail nổi bật theo Brand..."
+                style={{
+                  width: "100%",
+                  padding: "var(--cs-space-3)",
+                  fontFamily: "var(--cs-font-ui)",
+                  fontSize: "var(--cs-text-md)",
+                  lineHeight: 1.5,
+                  backgroundColor: "var(--cs-bg-panel)",
+                  color: "var(--cs-fg-primary)",
+                  border: "1px solid var(--cs-border-subtle)",
+                  borderRadius: "var(--cs-radius-control)",
+                  outline: "none",
+                  resize: "vertical",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+
+            {/* Suggested Kit Chips */}
+            {suggestedKits.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
+                  Gợi ý Kit:
+                </span>
+                {suggestedKits.map((kit) => (
+                  <Chip
+                    key={kit.id}
+                    label={`+ ${kit.name}`}
+                    selected={selectedKit === kit.id}
+                    onClick={() => setSelectedKit(kit.id)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Action Bar */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4 }}>
+              <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
+                Nhấn Enter hoặc bấm nút để tạo dự án và bắt đầu hội thoại
+              </span>
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={!prompt.trim() || submitting}
+                busy={submitting}
+                busyText="Đang khởi tạo dự án..."
+                leftIcon={<Icon name="sparkles" size={16} />}
+              >
+                Bắt đầu dự án
+              </Button>
+            </div>
+          </form>
+        </section>
+
+        {/* Running Jobs Section (if any) */}
+        {runningJobs.length > 0 && (
+          <section
+            style={{
+              backgroundColor: "var(--cs-bg-panel)",
+              border: "1px solid var(--cs-border-subtle)",
+              padding: "var(--cs-space-4)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--cs-space-3)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <h2 style={{ margin: 0, fontSize: "var(--cs-text-sm)", fontWeight: 600 }}>
+                Tác vụ nền đang chạy ({runningJobs.length})
+              </h2>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {runningJobs.map((j) => (
+                <div
+                  key={j.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "8px 12px",
+                    backgroundColor: "var(--cs-bg-raised)",
+                    border: "1px solid var(--cs-border-subtle)",
+                    fontSize: "var(--cs-text-sm)",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <Icon name="loader" size={16} color="var(--cs-accent)" />
+                    <span style={{ fontWeight: 600 }}>{j.title}</span>
+                    <span style={{ color: "var(--cs-fg-muted)", fontSize: "var(--cs-text-xs)" }}>
+                      ({j.stageName || "Đang xử lý"})
+                    </span>
+                  </div>
+                  <Badge variant="info">Đang chạy</Badge>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Recent Projects Section */}
+        <section
+          style={{
+            backgroundColor: "var(--cs-bg-panel)",
+            border: "1px solid var(--cs-border-subtle)",
+            padding: "var(--cs-space-4)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--cs-space-3)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <h2 style={{ margin: 0, fontSize: "var(--cs-text-sm)", fontWeight: 600 }}>
+              Dự án gần đây
+            </h2>
+          </div>
+
+          {loading ? (
+            <div style={{ padding: "var(--cs-space-4)", textAlign: "center", color: "var(--cs-fg-muted)" }}>
+              Đang tải danh sách dự án...
+            </div>
+          ) : projects.length === 0 ? (
+            <EmptyState
+              icon={<Icon name="folder" size={24} />}
+              title="Chưa có dự án nào"
+              description="Nhập yêu cầu vào ô phía trên để bắt đầu dự án sáng tạo đầu tiên của bạn."
+            />
+          ) : (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
+                gap: "var(--cs-space-3)",
+              }}
+            >
+              {projects.map((proj) => (
+                <div
+                  key={proj.slug}
+                  onClick={() => onOpenProject(proj.slug)}
+                  style={{
+                    padding: "var(--cs-space-3)",
+                    border: "1px solid var(--cs-border-subtle)",
+                    backgroundColor: "var(--cs-bg-panel)",
+                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                    transition: "border-color var(--cs-motion-duration) ease, background-color var(--cs-motion-duration) ease",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = "var(--cs-accent)";
+                    e.currentTarget.style.backgroundColor = "var(--cs-bg-hover)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = "var(--cs-border-subtle)";
+                    e.currentTarget.style.backgroundColor = "var(--cs-bg-panel)";
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span style={{ fontWeight: 600, fontSize: "var(--cs-text-sm)", color: "var(--cs-fg-primary)" }}>
+                      {proj.title}
+                    </span>
+                    {proj.kit && <Badge variant="neutral">{proj.kit}</Badge>}
+                  </div>
+                  <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)", fontFamily: "var(--cs-font-mono)" }}>
+                    {proj.slug}
+                  </span>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 4, fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)" }}>
+                    <span>{proj.artifactCount ? `${proj.artifactCount} thành phẩm` : "Chưa có thành phẩm"}</span>
+                    <span>{proj.updatedAt ? new Date(proj.updatedAt).toLocaleDateString("vi-VN") : ""}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+};

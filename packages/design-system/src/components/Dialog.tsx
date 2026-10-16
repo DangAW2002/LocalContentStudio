@@ -6,6 +6,7 @@ export interface DialogProps {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
+  actions?: React.ReactNode;
   footer?: React.ReactNode;
 }
 
@@ -14,6 +15,7 @@ export const Dialog: React.FC<DialogProps> = ({
   title,
   onClose,
   children,
+  actions,
   footer,
 }) => {
   React.useEffect(() => {
@@ -28,18 +30,19 @@ export const Dialog: React.FC<DialogProps> = ({
 
   if (!open) return null;
 
+  const footerContent = actions || footer;
+
   return (
     <div
       role="presentation"
       style={{
         position: "fixed",
         inset: 0,
-        backgroundColor: "rgba(0, 0, 0, 0.45)",
+        backgroundColor: "var(--cs-overlay)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         zIndex: 1000,
-        backdropFilter: "blur(2px)",
       }}
       onClick={onClose}
     >
@@ -51,9 +54,9 @@ export const Dialog: React.FC<DialogProps> = ({
           width: "100%",
           maxWidth: "520px",
           backgroundColor: "var(--cs-bg-panel)",
-          borderRadius: "var(--cs-radius-md)",
-          boxShadow: "var(--cs-shadow-panel)",
-          border: "1px solid var(--cs-border-subtle)",
+          borderRadius: "var(--cs-radius-none)",
+          boxShadow: "var(--cs-shadow-overlay)",
+          border: "1px solid var(--cs-border-strong)",
           overflow: "hidden",
           display: "flex",
           flexDirection: "column",
@@ -63,8 +66,9 @@ export const Dialog: React.FC<DialogProps> = ({
       >
         <div
           style={{
-            padding: "var(--cs-space-4)",
+            padding: "var(--cs-space-3) var(--cs-space-4)",
             borderBottom: "1px solid var(--cs-border-subtle)",
+            backgroundColor: "var(--cs-bg-raised)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
@@ -74,14 +78,14 @@ export const Dialog: React.FC<DialogProps> = ({
             id="dialog-title"
             style={{
               margin: 0,
-              fontSize: "var(--cs-text-lg)",
+              fontSize: "var(--cs-text-md)",
               fontWeight: 600,
               color: "var(--cs-fg-primary)",
             }}
           >
             {title}
           </h2>
-          <Button variant="quiet" onClick={onClose} aria-label="Đóng hộp thoại">
+          <Button size="sm" variant="quiet" onClick={onClose} aria-label="Đóng hộp thoại">
             ✕
           </Button>
         </div>
@@ -90,7 +94,7 @@ export const Dialog: React.FC<DialogProps> = ({
           {children}
         </div>
 
-        {footer && (
+        {footerContent && (
           <div
             style={{
               padding: "var(--cs-space-3) var(--cs-space-4)",
@@ -98,10 +102,11 @@ export const Dialog: React.FC<DialogProps> = ({
               backgroundColor: "var(--cs-bg-raised)",
               display: "flex",
               justifyContent: "flex-end",
+              alignItems: "center",
               gap: "var(--cs-space-2)",
             }}
           >
-            {footer}
+            {footerContent}
           </div>
         )}
       </div>
