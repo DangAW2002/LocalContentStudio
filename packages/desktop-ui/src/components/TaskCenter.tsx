@@ -1,165 +1,211 @@
 import React from "react";
-import { Badge, Button } from "@studio/design-system";
-
-export interface TaskJob {
-  id: string;
-  type: string;
-  state: "PENDING" | "RUNNING" | "VERIFYING" | "READY" | "FAILED" | "CANCELLED";
-  progress: number;
-  stageName: string;
-  errorMessage?: string;
-}
+import { Icon } from "./Icon";
+import { Tabs, Badge, EmptyState, Button } from "@studio/design-system";
+import type { JobSnapshot } from "../api/types";
 
 export interface TaskCenterProps {
-  jobs: TaskJob[];
-  onCancelJob: (jobId: string) => void;
+  open: boolean;
+  onClose: () => void;
+  jobs: JobSnapshot[];
 }
 
-export const TaskCenter: React.FC<TaskCenterProps> = ({ jobs, onCancelJob }) => {
-  const [expanded, setExpanded] = React.useState(false);
+export const TaskCenter: React.FC<TaskCenterProps> = ({
+  open,
+  onClose,
+  jobs,
+}) => {
+  const [activeTab, setActiveTab] = React.useState<string>("running");
 
-  const getBadgeVariant = (state: TaskJob["state"]) => {
-    switch (state) {
-      case "READY":
-        return "success";
-      case "RUNNING":
-      case "VERIFYING":
-        return "info";
-      case "FAILED":
-        return "danger";
-      case "PENDING":
-      case "CANCELLED":
-      default:
-        return "warning";
-    }
-  };
+  if (!open) return null;
+
+  const runningJobs = jobs.filter((j) => j.state === "RUNNING" || j.state === "PENDING" || j.state === "VERIFYING");
+  const failedJobs = jobs.filter((j) => j.state === "FAILED");
+  const completedJobs = jobs.filter((j) => j.state === "DONE" || j.state === "CANCELLED");
+
+  const tabItems = [
+    { id: "running", label: "Đang chạy", count: runningJobs.length },
+    { id: "failed", label: "Thất bại", count: failedJobs.length },
+    { id: "completed", label: "Hoàn tất", count: completedJobs.length },
+  ];
+
+  const currentList =
+    activeTab === "running"
+      ? runningJobs
+      : activeTab === "failed"
+      ? failedJobs
+      : completedJobs;
 
   return (
     <div
-      aria-label="Trung tâm tiến trình Task Center"
+      role="region"
+      aria-label="Task Center"
       style={{
-        borderTop: "1px solid var(--cs-border-subtle)",
-        backgroundColor: "var(--cs-bg-raised)",
+        position: "absolute",
+        left: "var(--cs-rail-w)",
+        right: 0,
+        bottom: "var(--cs-statusbar-h)",
+        height: 320,
+        backgroundColor: "var(--cs-bg-panel)",
+        borderTop: "1px solid var(--cs-border-strong)",
+        boxShadow: "var(--cs-shadow-overlay)",
         display: "flex",
         flexDirection: "column",
-        transition: "height var(--cs-motion-duration) ease",
+        zIndex: 30,
       }}
     >
+      {/* Drawer Header */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "var(--cs-space-1) var(--cs-space-4)",
-          height: "32px",
-          userSelect: "none",
+          padding: "var(--cs-space-2) var(--cs-space-4)",
+          borderBottom: "1px solid var(--cs-border-subtle)",
+          backgroundColor: "var(--cs-bg-raised)",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "var(--cs-space-3)" }}>
-          <button
-            onClick={() => setExpanded(!expanded)}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              fontSize: "var(--cs-text-xs)",
-              color: "var(--cs-fg-secondary)",
-              fontWeight: 600,
-            }}
-          >
-            {expanded ? "▼ Ẩn Task Center" : "▲ Task Center"} ({jobs.length} tiến trình)
-          </button>
-
-          {jobs.length > 0 && (
-            <div style={{ display: "flex", alignItems: "center", gap: "var(--cs-space-2)" }}>
-              <span style={{ fontSize: "var(--cs-text-xs)" }}>{jobs[0].stageName}</span>
-              <div
-                style={{
-                  width: "120px",
-                  height: "6px",
-                  backgroundColor: "var(--cs-progress-track)",
-                  borderRadius: "3px",
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    width: `${jobs[0].progress}%`,
-                    height: "100%",
-                    backgroundColor: "var(--cs-progress-fill)",
-                    transition: "width 200ms ease",
-                  }}
-                />
-              </div>
-              <span style={{ fontSize: "var(--cs-text-xs)", fontFamily: "var(--cs-font-mono)" }}>
-                {jobs[0].progress}%
-              </span>
-            </div>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600, fontSize: "var(--cs-text-sm)" }}>
+            <Icon name="activity" size={16} color="var(--cs-accent)" />
+            <span>Trung tâm Tác vụ (Task Center)</span>
+          </div>
+          <Tabs
+            items={tabItems}
+            activeId={activeTab}
+            onChange={setActiveTab}
+            size="sm"
+          />
         </div>
 
-        <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)" }}>
-          Worker supervisor: Online
-        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Đóng Task Center (Esc)"
+          style={{
+            background: "none",
+            border: "none",
+            padding: 4,
+            cursor: "pointer",
+            color: "var(--cs-fg-secondary)",
+            borderRadius: "var(--cs-radius-control)",
+            display: "inline-flex",
+          }}
+          title="Đóng (Esc)"
+        >
+          <Icon name="x" size={16} />
+        </button>
       </div>
 
-      {expanded && (
-        <div
-          style={{
-            padding: "var(--cs-space-3) var(--cs-space-4)",
-            maxHeight: "180px",
-            overflowY: "auto",
-            display: "flex",
-            flexDirection: "column",
-            gap: "var(--cs-space-2)",
-            backgroundColor: "var(--cs-bg-panel)",
-            borderTop: "1px solid var(--cs-border-subtle)",
-          }}
-        >
-          {jobs.length === 0 ? (
-            <span style={{ fontSize: "var(--cs-text-sm)", color: "var(--cs-fg-secondary)" }}>
-              Không có tiến trình nền nào đang chạy.
-            </span>
-          ) : (
-            jobs.map((job) => (
+      {/* Drawer Body */}
+      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+        {currentList.length === 0 ? (
+          <EmptyState
+            icon={<Icon name="check-circle" size={24} />}
+            title={
+              activeTab === "running"
+                ? "Không có tác vụ nào đang chạy"
+                : activeTab === "failed"
+                ? "Không có tác vụ nào bị lỗi"
+                : "Chưa có tác vụ nào hoàn tất"
+            }
+            description={
+              activeTab === "running"
+                ? "Các tiến trình render, xuất video, AI sinh ảnh sẽ hiển thị tại đây khi bắt đầu."
+                : undefined
+            }
+          />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {currentList.map((job) => (
               <div
                 key={job.id}
                 style={{
-                  display: "flex",
+                  display: "grid",
+                  gridTemplateColumns: "32px minmax(200px, 1.5fr) minmax(180px, 1fr) 120px",
                   alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "var(--cs-space-2)",
-                  borderRadius: "var(--cs-radius-sm)",
-                  backgroundColor: "var(--cs-bg-raised)",
+                  gap: "var(--cs-space-3)",
+                  padding: "8px var(--cs-space-4)",
+                  borderBottom: "1px solid var(--cs-border-subtle)",
                   fontSize: "var(--cs-text-sm)",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: "var(--cs-space-2)" }}>
-                  <Badge variant={getBadgeVariant(job.state)}>{job.state}</Badge>
-                  <span style={{ fontWeight: 600 }}>{job.type}</span>
-                  <span style={{ color: "var(--cs-fg-secondary)", fontSize: "var(--cs-text-xs)" }}>{job.stageName}</span>
-                  {job.errorMessage && (
-                    <span style={{ color: "var(--cs-danger)", fontSize: "var(--cs-text-xs)" }}>
-                      Lỗi: {job.errorMessage}
+                {/* State Icon */}
+                <div>
+                  {job.state === "RUNNING" && <Icon name="loader" size={16} color="var(--cs-accent)" />}
+                  {job.state === "PENDING" && <Icon name="clock" size={16} color="var(--cs-fg-muted)" />}
+                  {job.state === "DONE" && <Icon name="check-circle" size={16} color="var(--cs-success)" />}
+                  {job.state === "FAILED" && <Icon name="x-circle" size={16} color="var(--cs-danger)" />}
+                  {job.state === "CANCELLED" && <Icon name="x" size={16} color="var(--cs-fg-muted)" />}
+                </div>
+
+                {/* Job Title & Kind */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span style={{ fontWeight: 600, color: "var(--cs-fg-primary)" }}>{job.title}</span>
+                  <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)", fontFamily: "var(--cs-font-mono)" }}>
+                    {job.id} · {job.kind}
+                  </span>
+                </div>
+
+                {/* Stage & Progress */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)" }}>
+                    {job.stageName || (job.state === "RUNNING" ? "Đang xử lý..." : "Chờ")}
+                  </span>
+                  {typeof job.progress === "number" && (
+                    <div
+                      style={{
+                        height: 4,
+                        width: "100%",
+                        backgroundColor: "var(--cs-progress-track)",
+                        borderRadius: "var(--cs-radius-round)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${Math.min(100, Math.max(0, job.progress))}%`,
+                          backgroundColor: job.state === "FAILED" ? "var(--cs-danger)" : "var(--cs-progress-fill)",
+                        }}
+                      />
+                    </div>
+                  )}
+                  {job.error && (
+                    <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-danger)" }}>
+                      {job.error}
                     </span>
                   )}
                 </div>
 
-                <div style={{ display: "flex", alignItems: "center", gap: "var(--cs-space-3)" }}>
-                  <span style={{ fontFamily: "var(--cs-font-mono)", fontSize: "var(--cs-text-xs)" }}>
-                    {job.progress}%
-                  </span>
-                  {(job.state === "RUNNING" || job.state === "PENDING") && (
-                    <Button variant="quiet" style={{ height: "24px", padding: "0 6px" }} onClick={() => onCancelJob(job.id)}>
-                      Hủy
-                    </Button>
-                  )}
+                {/* Status Badge */}
+                <div style={{ textAlign: "right" }}>
+                  <Badge
+                    variant={
+                      job.state === "DONE"
+                        ? "success"
+                        : job.state === "FAILED"
+                        ? "danger"
+                        : job.state === "RUNNING"
+                        ? "info"
+                        : "neutral"
+                    }
+                  >
+                    {job.state === "RUNNING"
+                      ? "Đang chạy"
+                      : job.state === "DONE"
+                      ? "Hoàn tất"
+                      : job.state === "FAILED"
+                      ? "Thất bại"
+                      : job.state === "CANCELLED"
+                      ? "Đã hủy"
+                      : "Đang chờ"}
+                  </Badge>
                 </div>
               </div>
-            ))
-          )}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

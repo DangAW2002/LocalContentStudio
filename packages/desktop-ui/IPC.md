@@ -1,0 +1,341 @@
+# Local Content Studio — Tauri IPC Contract
+
+Phiên bản: v2 (2026-10-16)  
+Tài liệu này định nghĩa contract giao tiếp giữa Desktop UI (React 18 + TS) và Desktop Core (Rust Tauri 2) qua Tauri IPC.
+Tất cả tên command Tauri ở dạng `snake_case`, các tham số và trường payload TypeScript ở dạng `camelCase`.
+
+---
+
+## 1. Commands
+
+### 1.1 Quản lý Workspace
+
+#### `app_recent_workspaces`
+- **Mục đích**: Lấy danh sách các workspace đã mở gần đây.
+- **Input**: None
+- **Output**: `WorkspaceSummary[]`
+```ts
+interface WorkspaceSummary {
+  path: string;
+  name: string;
+  lastOpenedAt?: string;
+  isCurrent?: boolean;
+}
+```
+
+#### `workspace_create`
+- **Mục đích**: Khởi tạo workspace mới tại thư mục được chỉ định.
+- **Input**: `{ path: string, name: string }`
+- **Output**: `WorkspaceSummary`
+
+#### `workspace_open`
+- **Mục đích**: Mở workspace có sẵn từ đường dẫn trên đĩa.
+- **Input**: `{ path: string }`
+- **Output**: `WorkspaceSummary`
+
+#### `workspace_current`
+- **Mục đích**: Lấy thông tin workspace hiện tại cùng thông tin tổ chức và ngân sách.
+- **Input**: None
+- **Output**: `WorkspaceCurrentResponse`
+```ts
+interface WorkspaceCurrentResponse {
+  workspace: WorkspaceSummary;
+  org?: { id: string; name: string; path: string };
+  budget?: { currentSpendUsd: number; maxSpendUsd: number; warningThreshold: number };
+}
+```
+
+---
+
+### 1.2 Quản lý Dự án & Tệp
+
+#### `project_list`
+- **Mục đích**: Liệt kê các dự án trong workspace hiện tại.
+- **Input**: None
+- **Output**: `ProjectSummary[]`
+```ts
+interface ProjectSummary {
+  slug: string;
+  title: string;
+  kit?: string;
+  modules?: string[];
+  status: "active" | "archived" | "completed";
+  createdAt: string;
+  updatedAt: string;
+  artifactCount?: number;
+}
+```
+
+#### `project_create`
+- **Mục đích**: Tạo dự án mới kèm slug và kit/module ban đầu.
+- **Input**: `{ slug: string, title: string, kit?: string, modules?: string[] }`
+- **Output**: `ProjectSummary`
+
+#### `project_files`
+- **Mục đích**: Liệt kê cấu trúc tệp thuộc dự án.
+- **Input**: `{ project: string }`
+- **Output**: `ProjectFileEntry[]`
+```ts
+interface ProjectFileEntry {
+  path: string;
+  name: string;
+  isDir: boolean;
+  size: number;
+  kind: "markdown" | "text" | "image" | "video" | "audio" | "html" | "code" | "json" | "unknown";
+  updatedAt?: string;
+}
+```
+
+#### `file_read`
+- **Mục đích**: Đọc nội dung tệp hoặc lấy asset URL an toàn cho media.
+- **Input**: `{ project?: string, path: string }`
+- **Output**: `FileReadResult`
+```ts
+interface FileReadResult {
+  kind: "markdown" | "text" | "image" | "video" | "audio" | "html" | "code" | "json" | "unknown";
+  mime: string;
+  text?: string;
+  assetUrl?: string;
+  size: number;
+}
+```
+
+---
+
+### 1.3 Thread, Agent Engine & Lượt thực thi (Turn)
+
+#### `thread_list`
+- **Mục đích**: Lấy danh sách hội thoại của một dự án.
+- **Input**: `{ project: string }`
+- **Output**: `ThreadSummary[]`
+```ts
+interface ThreadSummary {
+  id: string;
+  project: string;
+  engine: "claude" | "agy";
+  model?: string;
+  title?: string;
+  turnCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+#### `thread_create`
+- **Mục đích**: Tạo thread mới với engine đã chọn (Claude hoặc agy).
+- **Input**: `{ project: string, engine: "claude" | "agy", model?: string }`
+- **Output**: `ThreadSummary`
+
+#### `thread_events`
+- **Mục đích**: Lấy lịch sử sự kiện của một thread.
+- **Input**: `{ threadId: string, cursor?: string, limit?: number }`
+- **Output**: `{ events: EngineTurnEvent[], nextCursor?: string, hasMore: boolean }`
+
+#### `turn_start`
+- **Mục đích**: Gửi prompt bắt đầu một lượt xử lý mới của agent.
+- **Input**: `{ threadId: string, prompt: string }`
+- **Output**: `{ turnId: string }`
+
+#### `turn_cancel`
+- **Mục đích**: Hủy lượt đang chạy (kill process tree của engine adapter).
+- **Input**: `{ turnId: string }`
+- **Output**: `{ success: boolean }`
+
+#### `turn_undo`
+- **Mục đích**: Hoàn tác các sửa đổi file của một turn về checkpoint trước đó.
+- **Input**: `{ turnId: string }`
+- **Output**: `{ success: boolean, restoredTurnId?: string }`
+
+#### `permission_respond`
+- **Mục đích**: Phản hồi yêu cầu cấp quyền tool (allow / deny).
+- **Input**: `{ requestId: string, allow: boolean }`
+- **Output**: `{ acknowledged: boolean }`
+
+---
+
+### 1.4 Checkpoint (CAS)
+
+#### `checkpoint_list`
+- **Mục đích**: Lấy danh sách các điểm khôi phục snapshot.
+- **Input**: None
+- **Output**: `CheckpointSummary[]`
+```ts
+interface CheckpointSummary {
+  id: string;
+  timestamp: string;
+  message: string;
+  filesChanged: number;
+  author?: string;
+}
+```
+
+#### `checkpoint_restore`
+- **Mục đích**: Phục hồi trạng thái tệp về một checkpoint.
+- **Input**: `{ id: string }`
+- **Output**: `{ success: boolean, restoredCheckpointId: string }`
+
+---
+
+### 1.5 Engines Probe & Catalog Skill
+
+#### `engines_probe`
+- **Mục đích**: Kiểm tra tình trạng cài đặt và khả năng tương thích của các công cụ bên ngoài (claude, agy, ffmpeg, chromium, node).
+- **Input**: None
+- **Output**: `EngineProbeResult[]`
+```ts
+interface EngineProbeResult {
+  id: string;
+  name: string;
+  installed: boolean;
+  version?: string;
+  path?: string;
+  supported: boolean;
+  notes?: string;
+}
+```
+
+#### `catalog_kits`
+- **Mục đích**: Lấy danh mục các kit sản phẩm có sẵn.
+- **Input**: None
+- **Output**: `CatalogKit[]`
+```ts
+interface CatalogKit {
+  id: string;
+  name: string;
+  description: string;
+  modules: string[];
+  tokenBudget: number;
+  tags: string[];
+}
+```
+
+#### `catalog_modules`
+- **Mục đích**: Lấy danh mục các module kỹ năng đã được tuyển chọn.
+- **Input**: None
+- **Output**: `CatalogModule[]`
+```ts
+interface CatalogModule {
+  id: string;
+  name: string;
+  description: string;
+  capabilities: string[];
+  skillCount: number;
+  tokenCount: number;
+}
+```
+
+#### `catalog_suggest`
+- **Mục đích**: Tự động đề xuất kit và module dựa trên văn bản yêu cầu người dùng gõ.
+- **Input**: `{ text: string }`
+- **Output**: `{ suggestedKits: CatalogKit[], suggestedModules: CatalogModule[] }`
+
+#### `project_modules_set`
+- **Mục đích**: Cập nhật danh sách module kích hoạt cho một dự án.
+- **Input**: `{ project: string, modules: string[] }`
+- **Output**: `{ project: string, modules: string[], totalTokenBudget: number }`
+
+---
+
+### 1.6 Phạm vi (Scope) & Thư viện (Assets)
+
+#### `scope_list`
+- **Mục đích**: Lấy danh sách các thực thể từ chuỗi kế thừa App -> Tổ chức -> Workspace.
+- **Input**: `{ kind: "brands" | "channels" | "playbooks" | "skills" | "tools" | "capabilities" }`
+- **Output**: `ScopeItem[]`
+```ts
+interface ScopeItem {
+  id: string;
+  name: string;
+  kind: string;
+  layer: "app" | "org" | "workspace";
+  path?: string;
+  summary?: string;
+  metadata?: Record<string, unknown>;
+}
+```
+
+#### `asset_list`
+- **Mục đích**: Danh sách tài nguyên trong thư viện workspace.
+- **Input**: `{ filter?: { kind?: string, search?: string, limit?: number } }`
+- **Output**: `AssetItem[]`
+```ts
+interface AssetItem {
+  id: string;
+  name: string;
+  kind: "image" | "video" | "audio" | "document" | "font" | "other";
+  mime: string;
+  size: number;
+  path: string;
+  previewUrl?: string;
+  createdAt: string;
+  metadata?: Record<string, unknown>;
+}
+```
+
+---
+
+### 1.7 Tác vụ (Jobs) & Đĩa (Disk)
+
+#### `jobs_snapshot`
+- **Mục đích**: Ảnh chụp trạng thái các tác vụ đang chạy, hoàn thành hoặc lỗi trong scheduler.
+- **Input**: None
+- **Output**: `JobSnapshot[]`
+```ts
+interface JobSnapshot {
+  id: string;
+  title: string;
+  kind: string;
+  state: "PENDING" | "RUNNING" | "VERIFYING" | "DONE" | "FAILED" | "CANCELLED";
+  progress?: number;
+  stageName?: string;
+  createdAt: string;
+  error?: string;
+}
+```
+
+#### `disk_usage`
+- **Mục đích**: Thống kê dung lượng đĩa sử dụng theo từng khu vực.
+- **Input**: None
+- **Output**: `DiskUsageReport`
+```ts
+interface DiskUsageReport {
+  blobsBytes: number;
+  cacheBytes: number;
+  projectsBytes: number;
+  libraryBytes: number;
+  totalBytes: number;
+  formatted: {
+    blobs: string;
+    cache: string;
+    projects: string;
+    library: string;
+    total: string;
+  };
+}
+```
+
+---
+
+## 2. Events
+
+### `turn-event`
+- **Payload**: `{ threadId: string, turnId: string, event: EngineEvent }`
+- **Các biến thể của `EngineEvent`**:
+  - `Session`: `{ type: "Session", id?: string }`
+  - `TextDelta`: `{ type: "TextDelta", text: string }`
+  - `Text`: `{ type: "Text", text: string }`
+  - `Thinking`: `{ type: "Thinking", text: string }`
+  - `ToolCall`: `{ type: "ToolCall", id: string, name: string, input: unknown }`
+  - `ToolResult`: `{ type: "ToolResult", id: string, outputPreview: string, isError: boolean }`
+  - `FileChange`: `{ type: "FileChange", path: string, op: "create" | "modify" | "delete" }`
+  - `PermissionRequest`: `{ type: "PermissionRequest", requestId: string, tool: string, input: unknown }`
+  - `PermissionDenied`: `{ type: "PermissionDenied", tool: string, input: unknown }`
+  - `Usage`: `{ type: "Usage", inputTokens: number, outputTokens: number, cacheReadTokens: number, costUsd?: number }`
+  - `Done`: `{ type: "Done", status: string, text?: string }`
+  - `Error`: `{ type: "Error", message: string }`
+
+### `job-event`
+- **Payload**: `{ jobId: string, event: JobSnapshot }`
+
+### `fs-event`
+- **Payload**: `{ paths: string[] }`

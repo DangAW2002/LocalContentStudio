@@ -25,9 +25,9 @@ export const Input: React.FC<InputProps> = ({
         <label
           htmlFor={inputId}
           style={{
-            fontSize: "var(--cs-text-sm)",
-            fontWeight: 500,
-            color: "var(--cs-fg-primary)",
+            fontSize: "var(--cs-text-xs)",
+            fontWeight: 600,
+            color: "var(--cs-fg-secondary)",
           }}
         >
           {label}
@@ -40,13 +40,14 @@ export const Input: React.FC<InputProps> = ({
         style={{
           height: "var(--cs-control-height)",
           padding: "0 var(--cs-space-3)",
-          borderRadius: "var(--cs-radius-md)",
+          borderRadius: "var(--cs-radius-control)",
           border: error ? "1px solid var(--cs-danger)" : "1px solid var(--cs-border-subtle)",
           backgroundColor: "var(--cs-bg-panel)",
           color: "var(--cs-fg-primary)",
           fontFamily: "var(--cs-font-ui)",
-          fontSize: "var(--cs-text-md)",
+          fontSize: "var(--cs-text-sm)",
           outline: "none",
+          transition: "border-color var(--cs-motion-duration) ease",
           ...style,
         }}
         {...props}
