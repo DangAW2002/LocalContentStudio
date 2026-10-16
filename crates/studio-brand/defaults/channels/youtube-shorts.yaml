@@ -1,0 +1,26 @@
+id: "youtube-shorts"
+platform: "youtube"
+title: "YouTube Shorts"
+formats:
+  - name: "shorts"
+    width: 1080
+    height: 1920
+    aspect: "9:16"
+    fps: 30.0
+    max_duration_s: 180.0
+    min_duration_s: 3.0
+    safe_zone:
+      top: 0.05
+      bottom: 0.20
+      left: 0.05
+      right: 0.15
+text:
+  title_max: 100
+  description_max: 5000
+  hashtags_max: 5
+captions_required: true
+loudness_lufs: -14.0
+file:
+  containers: ["mp4", "mov"]
+  max_size_mb: 500
+notes: "Video dọc ≤ 3 phút (YouTube mở rộng từ 10/2024; cần xác minh với nền tảng), tiêu đề ≤ 100 ký tự. Safe zone đáy 20% tránh bị che bởi tiêu đề và thanh điều khiển Shorts."

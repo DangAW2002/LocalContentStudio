@@ -1,0 +1,24 @@
+id: "youtube"
+platform: "youtube"
+title: "YouTube Video Chuẩn"
+formats:
+  - name: "standard"
+    width: 1920
+    height: 1080
+    aspect: "16:9"
+    fps: 30.0
+    safe_zone:
+      top: 0.05
+      bottom: 0.05
+      left: 0.05
+      right: 0.05
+text:
+  title_max: 100
+  description_max: 5000
+  hashtags_max: 15
+captions_required: false
+loudness_lufs: -14.0
+file:
+  containers: ["mp4", "mov"]
+  max_size_mb: 128000
+notes: "Chuẩn video ngang 16:9 cho YouTube dài."

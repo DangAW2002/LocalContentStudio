@@ -1,0 +1,30 @@
+id: "instagram-feed"
+platform: "instagram"
+title: "Instagram Feed"
+formats:
+  - name: "portrait-4-5"
+    width: 1080
+    height: 1350
+    aspect: "4:5"
+    safe_zone:
+      top: 0.05
+      bottom: 0.05
+      left: 0.05
+      right: 0.05
+  - name: "square-1-1"
+    width: 1080
+    height: 1080
+    aspect: "1:1"
+    safe_zone:
+      top: 0.05
+      bottom: 0.05
+      left: 0.05
+      right: 0.05
+text:
+  caption_max: 2200
+  hashtags_max: 30
+captions_required: false
+file:
+  containers: ["png", "jpg", "jpeg"]
+  max_size_mb: 30
+notes: "Tỷ lệ chuẩn tối ưu bảng tin là 4:5 (1080×1350) để chiếm nhiều diện tích màn hình điện thoại nhất."

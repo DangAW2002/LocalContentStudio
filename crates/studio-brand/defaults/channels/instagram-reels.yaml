@@ -1,0 +1,25 @@
+id: "instagram-reels"
+platform: "instagram"
+title: "Instagram Reels"
+formats:
+  - name: "reels"
+    width: 1080
+    height: 1920
+    aspect: "9:16"
+    fps: 30.0
+    max_duration_s: 180.0
+    min_duration_s: 3.0
+    safe_zone:
+      top: 0.10
+      bottom: 0.22
+      left: 0.05
+      right: 0.15
+text:
+  caption_max: 2200
+  hashtags_max: 30
+captions_required: true
+loudness_lufs: -14.0
+file:
+  containers: ["mp4", "mov"]
+  max_size_mb: 650
+notes: "Reels Instagram dọc 9:16, tối đa 3 phút (cần xác minh với nền tảng). Vùng dưới 22% bị che bởi caption tài khoản."
