@@ -1,0 +1,39 @@
+id: "facebook-feed"
+platform: "facebook"
+title: "Facebook Feed"
+formats:
+  - name: "feed-landscape"
+    width: 1200
+    height: 630
+    aspect: "1.91:1"
+    safe_zone:
+      top: 0.05
+      bottom: 0.05
+      left: 0.05
+      right: 0.05
+  - name: "feed-square"
+    width: 1080
+    height: 1080
+    aspect: "1:1"
+    safe_zone:
+      top: 0.05
+      bottom: 0.05
+      left: 0.05
+      right: 0.05
+  - name: "feed-portrait"
+    width: 1080
+    height: 1350
+    aspect: "4:5"
+    safe_zone:
+      top: 0.05
+      bottom: 0.05
+      left: 0.05
+      right: 0.05
+text:
+  caption_max: 63206
+  hashtags_max: 10
+captions_required: false
+file:
+  containers: ["png", "jpg", "jpeg", "mp4"]
+  max_size_mb: 100
+notes: "Tỷ lệ linh hoạt (1.91:1, 1:1, 4:5). Giới hạn ký tự lớn nhưng khuyến nghị dưới 250 ký tự để không bị ẩn xem thêm."

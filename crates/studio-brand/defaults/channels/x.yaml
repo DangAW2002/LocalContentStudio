@@ -1,0 +1,41 @@
+id: "x"
+platform: "x"
+title: "X (Twitter)"
+formats:
+  - name: "post-landscape"
+    width: 1200
+    height: 675
+    aspect: "16:9"
+    safe_zone:
+      top: 0.05
+      bottom: 0.05
+      left: 0.05
+      right: 0.05
+  - name: "post-square"
+    width: 1080
+    height: 1080
+    aspect: "1:1"
+    safe_zone:
+      top: 0.05
+      bottom: 0.05
+      left: 0.05
+      right: 0.05
+  - name: "video"
+    width: 1920
+    height: 1080
+    aspect: "16:9"
+    fps: 30.0
+    max_duration_s: 140.0
+    safe_zone:
+      top: 0.05
+      bottom: 0.05
+      left: 0.05
+      right: 0.05
+text:
+  caption_max: 280
+  hashtags_max: 4
+captions_required: false
+file:
+  containers: ["png", "jpg", "jpeg", "mp4"]
+  max_size_mb: 512
+notes: "Tài khoản thường tối đa 280 ký tự và 140 giây video (tài khoản Premium có giới hạn cao hơn, cần xác minh với nền tảng)."

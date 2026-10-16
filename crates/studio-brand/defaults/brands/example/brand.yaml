@@ -1,0 +1,40 @@
+name: "Example Studio"
+slogan: "Sáng tạo nội dung chất lượng cao cùng AI"
+colors:
+  primary: "#1E88E5"
+  accent: "#FFB300"
+  bg: "#FFFFFF"
+  text: "#111827"
+  extra:
+    - "#43A047"
+    - "#E53935"
+fonts:
+  heading: "Be Vietnam Pro"
+  body: "Inter"
+  files: []
+logos:
+  full: "logo.svg"
+  mark: "mark.svg"
+  min_size_px: 48
+  clear_space_ratio: 0.25
+  placement_rules:
+    - "Logo luôn ở góc trên trái, không đè lên chủ thể chính"
+voice: "voice.md"
+voice_words:
+  prefer:
+    - "đột phá"
+    - "chất lượng"
+    - "thực chiến"
+    - "hiệu quả"
+  avoid:
+    - "cam kết 100%"
+    - "rẻ nhất"
+    - "số 1 việt nam"
+    - "thần thánh"
+motion:
+  intro: "intro/"
+  outro: "outro/"
+rules:
+  - "Sử dụng màu primary (#1E88E5) cho các nút hành động và điểm nhấn thương hiệu"
+  - "Chữ trên nền tối phải đảm bảo tương phản WCAG AA"
+version: "brand@1"

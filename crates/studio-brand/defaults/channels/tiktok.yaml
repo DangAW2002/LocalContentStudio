@@ -1,0 +1,26 @@
+id: "tiktok"
+platform: "tiktok"
+title: "TikTok"
+formats:
+  - name: "tiktok-vertical"
+    width: 1080
+    height: 1920
+    aspect: "9:16"
+    fps: 30.0
+    max_duration_s: 600.0
+    min_duration_s: 3.0
+    safe_zone:
+      top: 0.10
+      bottom: 0.25
+      left: 0.05
+      right: 0.15
+text:
+  title_max: 2200
+  caption_max: 2200
+  hashtags_max: 8
+captions_required: true
+loudness_lufs: -14.0
+file:
+  containers: ["mp4", "mov"]
+  max_size_mb: 287
+notes: "Video dọc TikTok. Safe zone dưới 25% (caption + âm thanh), safe zone phải 15% (các nút like/share). Độ dài tối đa 10 phút, cần xác minh với nền tảng theo loại tài khoản."
