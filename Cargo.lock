@@ -1512,10 +1512,20 @@ dependencies = [
 name = "studio-artifacts"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "hex",
+ "rusqlite",
  "serde",
  "serde_json",
+ "serde_yaml",
+ "sha2",
+ "studio-jobs",
+ "studio-workspace",
  "tempfile",
  "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "walkdir",
 ]
 
 [[package]]
