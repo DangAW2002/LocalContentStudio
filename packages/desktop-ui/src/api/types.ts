@@ -218,6 +218,7 @@ export interface PermissionRespondResponse {
 // ==========================================
 
 export type EngineEvent =
+  | { type: "UserPrompt"; text: string }
   | { type: "Session"; id?: string }
   | { type: "TextDelta"; text: string }
   | { type: "Text"; text: string }

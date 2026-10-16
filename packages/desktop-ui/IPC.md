@@ -321,6 +321,7 @@ interface DiskUsageReport {
 ### `turn-event`
 - **Payload**: `{ threadId: string, turnId: string, event: EngineEvent }`
 - **Các biến thể của `EngineEvent`**:
+  - `UserPrompt`: `{ type: "UserPrompt", text: string }` — sự kiện đầu tiên của mỗi lượt (prompt của người dùng), lưu trong lịch sử
   - `Session`: `{ type: "Session", id?: string }`
   - `TextDelta`: `{ type: "TextDelta", text: string }`
   - `Text`: `{ type: "Text", text: string }`

@@ -17,7 +17,12 @@ pub struct CommandSpec {
     pub stdin_line: String,
     /// Temporary files created for this invocation that should be cleaned up after turn finishes.
     pub temp_files: Vec<PathBuf>,
+    /// Extra environment variables for the engine process.
+    pub env: Vec<(String, String)>,
 }
+
+/// How long Claude waits for a Studio MCP tool (incl. a permission dialog), in ms.
+pub const CLAUDE_MCP_TOOL_TIMEOUT_MS: &str = "600000";
 
 /// Builds the CLI command and arguments for Claude Code.
 ///
@@ -85,6 +90,12 @@ pub fn claude_command(
         args.push(plugin_dir.to_string_lossy().to_string());
     }
 
+    if req.mcp.is_some() {
+        // Studio's own tools are scoped and policed server-side: never prompt for them.
+        args.push("--allowedTools".to_string());
+        args.push("mcp__studio".to_string());
+    }
+
     args.push("--permission-mode".to_string());
     args.push("acceptEdits".to_string());
 
@@ -122,6 +133,10 @@ pub fn claude_command(
         args,
         stdin_line,
         temp_files,
+        env: vec![(
+            "MCP_TOOL_TIMEOUT".to_string(),
+            CLAUDE_MCP_TOOL_TIMEOUT_MS.to_string(),
+        )],
     })
 }
 
@@ -186,6 +201,7 @@ pub fn agy_command(
         args,
         stdin_line,
         temp_files: Vec::new(),
+        env: Vec::new(),
     })
 }
 

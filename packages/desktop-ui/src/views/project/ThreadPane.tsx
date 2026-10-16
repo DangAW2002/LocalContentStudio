@@ -43,6 +43,83 @@ export interface ThreadPaneProps {
   onSelectFile: (path: string) => void;
 }
 
+/**
+ * Pure reducer: fold one turn event into the message list. Used for the live stream and for history.
+ * Every agent-side event lands in the agent message of its turn (created on demand).
+ */
+export function applyTurnEvent(prev: ThreadMessage[], payload: EngineTurnEvent): ThreadMessage[] {
+  const event = payload.event;
+  if (event.type === "UserPrompt") {
+    const last = prev[prev.length - 1];
+    // The UI already appended the prompt optimistically: attach the turn id instead of duplicating.
+    if (last && last.role === "user" && !last.turnId && last.text === event.text) {
+      return [...prev.slice(0, -1), { ...last, turnId: payload.turnId }];
+    }
+    return [...prev, { id: `user-${payload.turnId}`, role: "user", text: event.text, turnId: payload.turnId }];
+  }
+  if (event.type === "Session") return prev;
+
+  let list = prev;
+  let idx = list.findIndex((m) => m.role === "agent" && m.turnId === payload.turnId);
+  if (idx === -1) {
+    list = [...list, { id: `turn-${payload.turnId}`, role: "agent", text: "", turnId: payload.turnId, isStreaming: true }];
+    idx = list.length - 1;
+  }
+  const msg = list[idx];
+  let next: ThreadMessage = msg;
+  switch (event.type) {
+    case "TextDelta":
+      next = { ...msg, text: msg.text + event.text };
+      break;
+    case "Text":
+      next = { ...msg, text: event.text };
+      break;
+    case "Thinking":
+      next = { ...msg, thinking: (msg.thinking || "") + event.text };
+      break;
+    case "ToolCall":
+      next = { ...msg, toolCalls: [...(msg.toolCalls || []), { id: event.id, name: event.name, input: event.input, expanded: false }] };
+      break;
+    case "ToolResult":
+      next = {
+        ...msg,
+        toolCalls: (msg.toolCalls || []).map((tc) =>
+          tc.id === event.id ? { ...tc, output: event.outputPreview, isError: event.isError } : tc
+        ),
+      };
+      break;
+    case "FileChange":
+      next = { ...msg, fileChanges: [...(msg.fileChanges || []), { path: event.path, op: event.op }] };
+      break;
+    case "PermissionRequest":
+      next = { ...msg, permissionRequests: [...(msg.permissionRequests || []), { requestId: event.requestId, tool: event.tool, input: event.input }] };
+      break;
+    case "PermissionDenied":
+      next = { ...msg, deniedActions: [...(msg.deniedActions || []), { tool: event.tool, input: event.input }] };
+      break;
+    case "Usage":
+      next = {
+        ...msg,
+        usage: {
+          inputTokens: event.inputTokens,
+          outputTokens: event.outputTokens,
+          cacheReadTokens: event.cacheReadTokens,
+          costUsd: event.costUsd,
+        },
+      };
+      break;
+    case "Done":
+      next = { ...msg, isStreaming: false, text: msg.text || event.text || "" };
+      break;
+    case "Error":
+      next = { ...msg, isStreaming: false, text: msg.text ? `${msg.text}\n\n⚠ ${event.message}` : `⚠ ${event.message}` };
+      break;
+  }
+  const out = list.slice();
+  out[idx] = next;
+  return out;
+}
+
 export const ThreadPane: React.FC<ThreadPaneProps> = ({
   projectSlug,
   activeThread,
@@ -66,6 +143,32 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Load persisted history of the active thread (same reducer as the live stream).
+  React.useEffect(() => {
+    let cancelled = false;
+    setMessages([]);
+    setRunningTurnId(null);
+    if (!activeThread) return;
+    (async () => {
+      try {
+        let folded: ThreadMessage[] = [];
+        let cursor: string | undefined;
+        for (let page = 0; page < 50; page++) {
+          const res = await studioApi.getThreadEvents({ threadId: activeThread.id, cursor, limit: 500 });
+          for (const ev of res.events) folded = applyTurnEvent(folded, ev);
+          if (!res.hasMore || !res.nextCursor) break;
+          cursor = res.nextCursor;
+        }
+        if (!cancelled) setMessages(folded.map((m) => ({ ...m, isStreaming: false })));
+      } catch (err: any) {
+        if (!cancelled) setError(err?.message || "Không tải được lịch sử hội thoại.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeThread?.id]);
+
   // Listen to turn-event
   React.useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -74,109 +177,12 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
       try {
         unlisten = await studioApi.onTurnEvent((payload) => {
           if (!activeThread || payload.threadId !== activeThread.id) return;
-
-          setMessages((prev) => {
-            const last = prev[prev.length - 1];
-            const event = payload.event;
-
-            if (event.type === "TextDelta") {
-              if (last && last.role === "agent" && last.turnId === payload.turnId) {
-                return [
-                  ...prev.slice(0, -1),
-                  { ...last, text: last.text + event.text },
-                ];
-              } else {
-                return [
-                  ...prev,
-                  {
-                    id: `turn-${payload.turnId}`,
-                    role: "agent",
-                    text: event.text,
-                    turnId: payload.turnId,
-                    isStreaming: true,
-                  },
-                ];
-              }
-            } else if (event.type === "Text") {
-              if (last && last.role === "agent" && last.turnId === payload.turnId) {
-                return [
-                  ...prev.slice(0, -1),
-                  { ...last, text: event.text },
-                ];
-              }
-            } else if (event.type === "Thinking") {
-              if (last && last.role === "agent" && last.turnId === payload.turnId) {
-                return [
-                  ...prev.slice(0, -1),
-                  { ...last, thinking: (last.thinking || "") + event.text },
-                ];
-              }
-            } else if (event.type === "ToolCall") {
-              const currentCalls = last?.toolCalls || [];
-              const updated = [
-                ...currentCalls,
-                { id: event.id, name: event.name, input: event.input, expanded: false },
-              ];
-              if (last && last.role === "agent") {
-                return [...prev.slice(0, -1), { ...last, toolCalls: updated }];
-              }
-            } else if (event.type === "ToolResult") {
-              if (last && last.role === "agent" && last.toolCalls) {
-                const calls = last.toolCalls.map((tc) =>
-                  tc.id === event.id
-                    ? { ...tc, output: event.outputPreview, isError: event.isError }
-                    : tc
-                );
-                return [...prev.slice(0, -1), { ...last, toolCalls: calls }];
-              }
-            } else if (event.type === "FileChange") {
-              const currentChanges = last?.fileChanges || [];
-              const updated = [...currentChanges, { path: event.path, op: event.op }];
-              if (last && last.role === "agent") {
-                return [...prev.slice(0, -1), { ...last, fileChanges: updated }];
-              }
-            } else if (event.type === "PermissionRequest") {
-              const currentReqs = last?.permissionRequests || [];
-              const updated = [
-                ...currentReqs,
-                { requestId: event.requestId, tool: event.tool, input: event.input },
-              ];
-              if (last && last.role === "agent") {
-                return [...prev.slice(0, -1), { ...last, permissionRequests: updated }];
-              }
-            } else if (event.type === "PermissionDenied") {
-              const currentDenied = last?.deniedActions || [];
-              const updated = [...currentDenied, { tool: event.tool, input: event.input }];
-              if (last && last.role === "agent") {
-                return [...prev.slice(0, -1), { ...last, deniedActions: updated }];
-              }
-            } else if (event.type === "Usage") {
-              if (last && last.role === "agent") {
-                return [
-                  ...prev.slice(0, -1),
-                  {
-                    ...last,
-                    usage: {
-                      inputTokens: event.inputTokens,
-                      outputTokens: event.outputTokens,
-                      cacheReadTokens: event.cacheReadTokens,
-                      costUsd: event.costUsd,
-                    },
-                  },
-                ];
-              }
-            } else if (event.type === "Done") {
-              setRunningTurnId(null);
-              if (last && last.role === "agent") {
-                return [...prev.slice(0, -1), { ...last, isStreaming: false }];
-              }
-            } else if (event.type === "Error") {
-              setRunningTurnId(null);
-              setError(event.message);
-            }
-
-            return prev;
-          });
+          setMessages((prev) => applyTurnEvent(prev, payload));
+          if (payload.event.type === "Done") setRunningTurnId(null);
+          if (payload.event.type === "Error") {
+            setRunningTurnId(null);
+            setError(payload.event.message);
+          }
         });
       } catch (err: any) {
         // Core absent

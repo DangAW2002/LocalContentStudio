@@ -5,13 +5,28 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
 [dependencies]
-studio-core = { path = "../studio-core" }
-studio-storage = { path = "../studio-storage" }
-studio-app = { path = "../studio-app" }
+tauri = { version = "2", features = ["protocol-asset"] }
+studio-workspace = { path = "../studio-workspace" }
+studio-engine = { path = "../studio-engine" }
+studio-jobs = { path = "../studio-jobs" }
+studio-catalog = { path = "../studio-catalog" }
+studio-tools = { path = "../studio-tools" }
+studio-brand = { path = "../studio-brand" }
+studio-artifacts = { path = "../studio-artifacts" }
+studio-mcp = { path = "../studio-mcp" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = "0.9"
 tokio = { workspace = true }
-anyhow = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+rusqlite = { workspace = true }
+thiserror = { workspace = true }
+notify = "6"
+
+[dev-dependencies]
+tempfile = { workspace = true }

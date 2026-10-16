@@ -250,6 +250,7 @@ async fn spawn_turn_process(
     is_claude: bool,
 ) -> Result<Turn, EngineError> {
     let mut cmd = Command::new(&spec.program);
+    cmd.envs(spec.env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
     cmd.args(&spec.args)
         .current_dir(&cwd)
         .stdin(Stdio::piped())
