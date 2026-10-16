@@ -146,6 +146,30 @@ fn test_path_scoping_and_escape_rejection() {
     let valid = ws.scoped_path("brands/main/logo.png").unwrap();
     assert_eq!(valid, ws_dir.join("brands/main/logo.png"));
 
+    // Root-relative and drive-relative forms are not `is_absolute()` on Windows but must be rejected
+    assert!(ws.scoped_path("\\Windows\\win.ini").is_err());
+    assert!(ws.scoped_path("/etc/passwd").is_err());
+    #[cfg(windows)]
+    assert!(ws.scoped_path("C:Windows").is_err());
+
+    // A junction in an intermediate directory must not let a new (non-existing) path escape
+    #[cfg(windows)]
+    {
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        let link = ws_dir.join("projects").join("evil");
+        let made = std::process::Command::new("cmd")
+            .args(["/c", "mklink", "/J"])
+            .arg(&link)
+            .arg(&outside)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if made {
+            assert!(ws.scoped_path("projects/evil/new/deep/file.txt").is_err());
+        }
+    }
+
     // Absolute path rejected
     let abs_path = if cfg!(windows) {
         PathBuf::from("C:\\Windows\\System32")

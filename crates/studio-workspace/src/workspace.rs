@@ -258,9 +258,12 @@ impl Workspace {
             });
         }
 
-        // 2. Rejects any `..` component
+        // 2. Rejects `..`, and root/prefix components (`\foo`, `C:foo` are not `is_absolute()` on Windows)
         for c in rel_path.components() {
-            if c == Component::ParentDir {
+            if matches!(
+                c,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            ) {
                 return Err(WorkspaceError::PathEscape {
                     path: rel_path.to_path_buf(),
                     root: self.root.clone(),
@@ -279,12 +282,11 @@ impl Workspace {
             if !canonical_target.starts_with(&canonical_ws) {
                 return Err(WorkspaceError::SymlinkEscape { path: full_path });
             }
-        } else if let Some(parent) = full_path.parent() {
-            if parent.exists() {
-                let canonical_parent = fs::canonicalize(parent)?;
-                if !canonical_parent.starts_with(&canonical_ws) {
-                    return Err(WorkspaceError::SymlinkEscape { path: full_path });
-                }
+        } else if let Some(ancestor) = full_path.ancestors().skip(1).find(|a| a.exists()) {
+            // Nearest existing ancestor: a junction in any intermediate directory must not escape.
+            let canonical_ancestor = fs::canonicalize(ancestor)?;
+            if !canonical_ancestor.starts_with(&canonical_ws) {
+                return Err(WorkspaceError::SymlinkEscape { path: full_path });
             }
         }
 
