@@ -1,0 +1,26 @@
+id: tts.windows-sapi
+kind: generator
+description: "Windows SAPI text-to-speech synthesizer using PowerShell System.Speech"
+provides:
+  - "tts.synthesize@1"
+run:
+  type: cli
+  command: "powershell"
+  args:
+    - "-NoProfile"
+    - "-ExecutionPolicy"
+    - "Bypass"
+    - "-Command"
+    - "$json = [Console]::In.ReadToEnd() | ConvertFrom-Json; $text = $json.text; $out = if ($json.output_path) { $json.output_path } else { [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), 'sapi-' + [System.Guid]::NewGuid().ToString() + '.wav') }; Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.SetOutputToWaveFile($out); $s.Speak($text); $s.Dispose(); [PSCustomObject]@{ audio_path = $out } | ConvertTo-Json -Compress"
+needs:
+  - "bin:powershell"
+cost:
+  unit: "character"
+  estimate: 0.0
+side_effect: none
+resources:
+  ram_mb: 256
+  cpu: light
+  gpu_vram_mb: 0
+  exclusive: []
+lifecycle: per_call

@@ -1647,10 +1647,20 @@ dependencies = [
 name = "studio-tools"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "rusqlite",
  "serde",
  "serde_json",
+ "serde_yaml",
+ "studio-jobs",
+ "studio-workspace",
  "tempfile",
  "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+ "walkdir",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

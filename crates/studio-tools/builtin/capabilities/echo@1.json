@@ -1,0 +1,12 @@
+{
+  "id": "echo",
+  "version": 1,
+  "title": "Echo Test",
+  "description": "Echoes back provided input for pipeline verification and testing",
+  "input_schema": {
+    "type": "object"
+  },
+  "output_schema": {
+    "type": "object"
+  }
+}

@@ -1,0 +1,27 @@
+id: ffmpeg.probe
+kind: checker
+description: "Inspect media metadata using ffprobe"
+provides:
+  - "ffmpeg.probe@1"
+run:
+  type: cli
+  command: "ffprobe"
+  args:
+    - "-v"
+    - "quiet"
+    - "-print_format"
+    - "json"
+    - "-show_format"
+    - "-show_streams"
+needs:
+  - "bin:ffmpeg"
+cost:
+  unit: "call"
+  estimate: 0.0
+side_effect: none
+resources:
+  ram_mb: 128
+  cpu: light
+  gpu_vram_mb: 0
+  exclusive: []
+lifecycle: per_call

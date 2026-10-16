@@ -1,0 +1,23 @@
+id: echo
+kind: generator
+description: "Echo tool for pipeline testing and verification"
+provides:
+  - "echo@1"
+run:
+  type: cli
+  command: "powershell"
+  args:
+    - "-NoProfile"
+    - "-Command"
+    - "$v = [Console]::In.ReadToEnd(); [Console]::Out.Write($v)"
+needs: []
+cost:
+  unit: "call"
+  estimate: 0.0
+side_effect: none
+resources:
+  ram_mb: 64
+  cpu: light
+  gpu_vram_mb: 0
+  exclusive: []
+lifecycle: per_call

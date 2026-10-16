@@ -14,6 +14,7 @@ pub type JobId = String;
 ///
 /// Order: Interactive (highest) > TurnBlocking > Background (lowest).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Priority {
     /// Background job (e.g. final render, batch exports, cache warmup).
     /// Lower OS priority class and CPU throttling apply.
@@ -26,6 +27,7 @@ pub enum Priority {
 
 /// Lifecycle model for worker execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Lifecycle {
     /// Worker process spawns for a single call and exits immediately.
     #[default]
