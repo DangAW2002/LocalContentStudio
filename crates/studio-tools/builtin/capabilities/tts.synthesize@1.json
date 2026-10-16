@@ -1,0 +1,33 @@
+{
+  "id": "tts.synthesize",
+  "version": 1,
+  "title": "Text-to-Speech Synthesis",
+  "description": "Synthesizes spoken audio from provided text",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "text": {
+        "type": "string",
+        "description": "Text to synthesize into audio"
+      },
+      "voice": {
+        "type": "string",
+        "description": "Optional voice identifier"
+      },
+      "output_path": {
+        "type": "string",
+        "description": "Relative output path in workspace for wav/mp3 file"
+      }
+    },
+    "required": ["text"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "audio_path": {
+        "type": "string"
+      }
+    },
+    "required": ["audio_path"]
+  }
+}

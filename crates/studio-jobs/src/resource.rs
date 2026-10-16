@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// CPU classification for admission and concurrency pools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CpuClass {
     /// Light CPU task (e.g. quick probe, token check, metadata extraction).
     Light,

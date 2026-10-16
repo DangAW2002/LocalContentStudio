@@ -1,0 +1,27 @@
+{
+  "id": "ffmpeg.probe",
+  "version": 1,
+  "title": "FFmpeg Probe",
+  "description": "Inspects audio and video container formats, codecs, and stream properties",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "asset": {
+        "type": "string",
+        "description": "Workspace relative path to audio or video asset"
+      }
+    },
+    "required": ["asset"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "format": {
+        "type": "object"
+      },
+      "streams": {
+        "type": "array"
+      }
+    }
+  }
+}

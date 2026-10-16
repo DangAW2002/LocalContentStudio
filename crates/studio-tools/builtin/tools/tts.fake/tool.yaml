@@ -1,0 +1,23 @@
+id: tts.fake
+kind: generator
+description: "Fake test TTS synthesizer for provider swap testing"
+provides:
+  - "tts.synthesize@1"
+run:
+  type: cli
+  command: "powershell"
+  args:
+    - "-NoProfile"
+    - "-Command"
+    - "Write-Output '{\"audio_path\":\"library/fake-voice.wav\"}'"
+needs: []
+cost:
+  unit: "character"
+  estimate: 0.0
+side_effect: none
+resources:
+  ram_mb: 32
+  cpu: light
+  gpu_vram_mb: 0
+  exclusive: []
+lifecycle: per_call
