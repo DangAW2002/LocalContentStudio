@@ -44,4 +44,4 @@ cargo test -p <your-crate>
 ```
 For UI: `pnpm --filter @studio/desktop-ui typecheck` and `pnpm --filter @studio/desktop-ui build`.
 
-Commit your work on your branch with a conventional message. Report: what you built, public API, tests, gate output, known gaps.
+Do not commit; the orchestrator reviews and commits. Report: what you built, public API, tests, gate output, known gaps.
