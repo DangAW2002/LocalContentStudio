@@ -13,6 +13,8 @@ members = [
     "crates/studio-engine",
     "crates/studio-catalog",
     "crates/studio-tools",
+    "crates/studio-artifacts",
+    "crates/studio-brand",
 ]
 
 [workspace.package]

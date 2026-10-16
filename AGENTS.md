@@ -13,6 +13,8 @@ Personal, AI-first desktop studio (Tauri 2 + Rust core + React). Source of truth
 | `studio-engine` | Agent engine adapters (`claude`, `agy`): spawn CLI, parse stream-json, normalized `Event`s |
 | `studio-catalog` | Skill catalog (`catalog/catalog.yaml`), inventory, curation checks, kit resolution, per-turn skill plugin dir |
 | `studio-tools` | Capability + tool registry, manifests, provider routing, secrets (Credential Manager), tool proxy |
+| `studio-brand` | Brand/Channel/Playbook schemas (brand@1, channel@1), loading via scope chain, checkers (palette, contrast, logo, safe zone, size/duration, char limits, captions, voice words) |
+| `studio-artifacts` | artifact.yaml model, kind registry, render dispatch (design HTML→PNG/PDF, motion HyperFrames, timeline FFmpeg), render cache by input hash, proxies |
 | `studio-mcp` | Studio MCP server (Streamable HTTP loopback + token; stdio shim) |
 | `studio-tauri` | Desktop shell + IPC |
 | `studio-cli` | `studio` CLI |
