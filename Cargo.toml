@@ -1,12 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/studio-core",
-    "crates/studio-storage",
-    "crates/studio-app",
     "crates/studio-cli",
     "crates/studio-mcp",
-    "crates/studio-worker",
     "crates/studio-tauri",
     "crates/studio-workspace",
     "crates/studio-jobs",

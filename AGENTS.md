@@ -20,9 +20,7 @@ Personal, AI-first desktop studio (Tauri 2 + Rust core + React). Source of truth
 | `studio-cli` | `studio` CLI |
 | `packages/desktop-ui` | React UI |
 
-Legacy crates `studio-app`, `studio-storage`, `studio-worker`, old parts of `studio-core` (actor/session/scope/handoff) belong to the
-previous multi-user design. Do not extend them; you may copy useful code (SQLite WAL/migration/backup/blob CAS from `studio-storage`,
-ffmpeg from `studio-worker`) into your crate.
+Legacy crates of the previous multi-user design were removed on 2026-10-16 (see git history).
 
 ## Rules
 
