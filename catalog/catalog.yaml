@@ -180,10 +180,28 @@ modules:
 kits:
   thumbnail-carousel:
     title: Thumbnail, poster, carousel
+    keywords:
+      - thumbnail
+      - poster
+      - carousel
+      - banner
+      - ảnh bìa
+      - đồ họa
+      - static
+      - visual
+      - canvas
     use:
       design.visual: [canvas-design, frontend-design, theme-factory]
   motion-graphic:
     title: Motion graphic ngắn
+    keywords:
+      - motion
+      - animation
+      - graphic
+      - gsap
+      - hyperframes
+      - chuyển động
+      - hiệu ứng
     use:
       render.hyperframes: all
       playbooks.hyperframes: [motion-graphics]
@@ -191,6 +209,17 @@ kits:
       motion.gsap: [gsap-core, gsap-timeline]
   shorts-reels:
     title: Shorts / Reels có giọng đọc và phụ đề
+    keywords:
+      - shorts
+      - reels
+      - tiktok
+      - caption
+      - voice
+      - voiceover
+      - phụ đề
+      - giọng đọc
+      - lồng tiếng
+      - video ngắn
     use:
       render.hyperframes: [hyperframes, hyperframes-core, hyperframes-keyframes, hyperframes-audio, media-use]
       playbooks.hyperframes: [embedded-captions, talking-head-recut]
@@ -198,6 +227,16 @@ kits:
       voice.elevenlabs: [text-to-speech, speech-to-text, sound-effects]
   youtube-explainer:
     title: Video YouTube giải thích
+    keywords:
+      - youtube
+      - explainer
+      - faceless
+      - chart
+      - giải thích
+      - biểu đồ
+      - hướng dẫn
+      - âm nhạc
+      - music
     use:
       render.hyperframes: [hyperframes, hyperframes-core, hyperframes-animation, hyperframes-audio, media-use]
       playbooks.hyperframes: [faceless-explainer]
@@ -205,13 +244,32 @@ kits:
       voice.elevenlabs: [text-to-speech, speech-to-text, music, sound-effects]
   launch-promo:
     title: Video ra mắt sản phẩm
+    keywords:
+      - launch
+      - promo
+      - product
+      - intro
+      - ra mắt
+      - giới thiệu
+      - quảng cáo
+      - sản phẩm
+      - brand
     use:
       render.hyperframes: [hyperframes, hyperframes-core, hyperframes-animation, hyperframes-creative]
       playbooks.charlie: [brand-intake, launch-video, apple-launch-film, newsletter-promo]
       motion.craft: [apple-design]
   title-3d:
     title: Title sequence 3D
+    keywords:
+      - 3d
+      - title
+      - intro
+      - sequence
+      - threejs
+      - không gian 3d
+      - tiêu đề 3d
     use:
       render.hyperframes: [hyperframes, hyperframes-core]
       playbooks.charlie: [title-sequence-3d]
       3d.threejs: all
+
