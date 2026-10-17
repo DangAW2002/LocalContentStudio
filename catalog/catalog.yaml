@@ -2,9 +2,16 @@
 # Studio never bundles these sources; each machine fetches them at the pinned commit
 # into %LOCALAPPDATA%/LocalContentStudio/catalog/sources/<owner>__<repo>.
 schema: catalog@1
-updated: 2026-10-16
+updated: 2026-10-17
 
 sources:
+  # Skills written/curated by Studio itself, bundled with the app (catalog/studio). Never fetched.
+  # shot-recipes / motion-aesthetics / promo-pipeline are rebuilt from Vincentwei1021/video-shotcraft
+  # (Apache-2.0) by scripts/catalog/build_studio_shotcraft.py; provenance in catalog/studio/NOTICE.md.
+  studio/local:
+    commit: bundled
+    license: "Studio + Apache-2.0 (video-shotcraft, xem NOTICE.md)"
+    kind: local
   anthropics/skills:
     commit: dbd4588f9e1033efb41dad4bef2f7947c8993d44
     license: "Apache-2.0; docx/pdf/pptx/xlsx: Anthropic proprietary (chỉ dùng cục bộ)"
@@ -170,6 +177,14 @@ modules:
     skill_requires:
       apple-launch-film: [motion.craft/apple-design]
       title-sequence-3d: [3d.threejs]
+  craft.shotcraft:
+    description: Thẻ công thức cảnh quay điện ảnh + quy tắc thẩm mỹ/âm thanh (dựng lại từ video-shotcraft)
+    skills:
+      studio/local: [shot-recipes, motion-aesthetics]
+  playbooks.studio:
+    requires: [render.hyperframes, craft.shotcraft]
+    skills:
+      studio/local: [promo-pipeline]
   dev.authoring:
     optional: true
     description: Tự viết skill/MCP mới cho Studio
@@ -206,6 +221,7 @@ kits:
       render.hyperframes: all
       playbooks.hyperframes: [motion-graphics]
       motion.craft: [animate, animation-vocabulary, review-animations]
+      craft.shotcraft: all
       motion.gsap: [gsap-core, gsap-timeline]
   shorts-reels:
     title: Shorts / Reels có giọng đọc và phụ đề
@@ -256,7 +272,9 @@ kits:
       - brand
     use:
       render.hyperframes: [hyperframes, hyperframes-core, hyperframes-animation, hyperframes-creative]
-      playbooks.charlie: [brand-intake, launch-video, apple-launch-film, newsletter-promo]
+      playbooks.studio: [promo-pipeline]
+      craft.shotcraft: all
+      playbooks.charlie: [brand-intake, launch-video]
       motion.craft: [apple-design]
   title-3d:
     title: Title sequence 3D

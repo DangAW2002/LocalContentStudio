@@ -68,6 +68,8 @@ pub fn check(catalog: &Catalog, inventory: &Inventory) -> Report {
     let pinned: HashMap<String, String> = catalog
         .sources
         .iter()
+        // Bundled sources have no git checkout to drift from.
+        .filter(|(_, src)| src.kind.as_deref() != Some("local"))
         .map(|(repo, src)| (repo.clone(), src.commit.clone()))
         .collect();
 

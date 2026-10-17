@@ -367,7 +367,18 @@ fn materialize_skills(
     dir: &Path,
 ) -> CmdResult<()> {
     let catalog = studio_catalog::Catalog::load_file(&state.catalog_path)?;
-    let extra: Vec<&str> = modules.iter().map(String::as_str).collect();
+    // project.yaml lists the kit's modules too; only modules the kit does not use are "extra".
+    // Passing the kit's own modules as extra would load them whole and bypass the kit's narrowing.
+    let kit_modules = kit
+        .as_deref()
+        .and_then(|k| catalog.kits.get(k))
+        .map(|k| k.use_modules.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let extra: Vec<&str> = modules
+        .iter()
+        .filter(|m| !kit_modules.contains(m))
+        .map(String::as_str)
+        .collect();
     let active = studio_catalog::resolve(&catalog, kit.as_deref(), &extra)?;
     studio_catalog::materialize_plugin(&active, &catalog, &state.sources_dir, dir)?;
     Ok(())

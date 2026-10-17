@@ -36,6 +36,10 @@ pub fn fetch<P: AsRef<Path>>(catalog: &Catalog, sources_dir: P) -> Result<(), Ca
     })?;
 
     for (repo_id, src) in &catalog.sources {
+        // Bundled with the app (installed by the shell), nothing to clone.
+        if src.kind.as_deref() == Some("local") {
+            continue;
+        }
         let repo_folder_name = repo_id.replace('/', "__");
         let target_repo_path = sdir.join(&repo_folder_name);
 

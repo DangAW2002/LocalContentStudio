@@ -89,7 +89,7 @@ def repo_entry(repo: Path) -> dict:
 
 def main() -> None:
     src, out = Path(sys.argv[1]), Path(sys.argv[2])
-    repos = [repo_entry(p) for p in sorted(src.iterdir()) if (p / ".git").exists()]
+    repos = [repo_entry(p) for p in sorted(src.iterdir()) if (p / ".git").exists() or p.name == "studio__local"]
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(repos, ensure_ascii=False, indent=2), encoding="utf-8")
     for r in repos:

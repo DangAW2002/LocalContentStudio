@@ -27,7 +27,7 @@ fn main() {
             let handle = app.handle().clone();
             let state = app.state::<AppState>();
             state.broker.attach(handle.clone());
-            if let Err(e) = defaults::install(&state.app_paths.shared_dir(), &state.catalog_path) {
+            if let Err(e) = defaults::install(&state.app_paths.shared_dir(), &state.catalog_path, &state.sources_dir) {
                 eprintln!("Không cài được dữ liệu mặc định: {e}");
             }
 

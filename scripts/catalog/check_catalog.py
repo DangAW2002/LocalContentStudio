@@ -20,7 +20,8 @@ def main() -> int:
     skills = {(r["repo"], s["name"]): s for r in inventory for s in r["skills"]}
     problems: list[str] = []
 
-    pinned = {repo: src["commit"] for repo, src in catalog["sources"].items()}
+    # Bundled (kind: local) sources have no git checkout to drift from.
+    pinned = {repo: src["commit"] for repo, src in catalog["sources"].items() if src.get("kind") != "local"}
     for r in inventory:
         if r["repo"] in pinned and pinned[r["repo"]] != r["commit"]:
             problems.append(f"commit drift {r['repo']}: catalog {pinned[r['repo']][:7]} != local {r['commit'][:7]}")

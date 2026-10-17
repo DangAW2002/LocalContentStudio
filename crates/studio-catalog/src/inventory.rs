@@ -223,7 +223,12 @@ impl Inventory {
                 source: e,
             })?
             .filter_map(|r| r.ok().map(|e| e.path()))
-            .filter(|p| p.is_dir() && p.join(".git").exists())
+            // Git checkouts, plus the app-bundled `studio__local` source (no .git).
+            .filter(|p| {
+                p.is_dir()
+                    && (p.join(".git").exists()
+                        || p.file_name().is_some_and(|n| n == "studio__local"))
+            })
             .collect();
 
         entries.sort();
