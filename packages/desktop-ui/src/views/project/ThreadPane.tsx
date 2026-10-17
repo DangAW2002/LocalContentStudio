@@ -29,7 +29,7 @@ export interface ThreadMessage {
     inputTokens: number;
     outputTokens: number;
     cacheReadTokens: number;
-    costUsd?: number;
+    costUsd?: number | null;
   };
   turnId?: string;
   isStreaming?: boolean;
@@ -634,7 +634,7 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
                   {/* Usage / Cost */}
                   <div>
                     {msg.usage ? (
-                      msg.usage.costUsd !== undefined ? (
+                      msg.usage.costUsd != null ? (
                         <span>
                           ${msg.usage.costUsd.toFixed(4)} · {(msg.usage.inputTokens + msg.usage.outputTokens).toLocaleString()} tokens
                         </span>

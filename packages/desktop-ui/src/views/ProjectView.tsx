@@ -1,4 +1,5 @@
 import React from "react";
+import { PaneBoundary } from "../components/PaneBoundary";
 import { ThreadPane } from "./project/ThreadPane";
 import { StagePane } from "./project/StagePane";
 import { OutputsPane } from "./project/OutputsPane";
@@ -225,7 +226,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
           // Single tab visible on narrow screens
           <div style={{ flex: 1, height: "100%", overflow: "hidden" }}>
             {narrowTab === "thread" && (
-              <ThreadPane
+              <PaneBoundary name="Hội thoại">
+<ThreadPane
                 projectSlug={currentSlug}
                 activeThread={activeThread}
                 projectFiles={projectFiles}
@@ -237,18 +239,22 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                   setNarrowTab("stage");
                 }}
               />
+</PaneBoundary>
             )}
             {narrowTab === "stage" && (
-              <StagePane
+              <PaneBoundary name="Stage">
+<StagePane
                 projectSlug={currentSlug}
                 selectedFilePath={selectedFilePath}
                 onClearSelection={() => setSelectedFilePath(null)}
                 onAskAi={handleAskAi}
                 onSelectFile={setSelectedFilePath}
               />
+</PaneBoundary>
             )}
             {narrowTab === "outputs" && (
-              <OutputsPane
+              <PaneBoundary name="Outputs">
+<OutputsPane
                 projectSlug={currentSlug}
                 projectFiles={projectFiles}
                 onSelectFile={(path) => {
@@ -256,6 +262,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                   setNarrowTab("stage");
                 }}
               />
+</PaneBoundary>
             )}
           </div>
         ) : (
@@ -263,7 +270,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
           <>
             {/* Thread Pane */}
             <div style={{ width: threadWidth, height: "100%", minWidth: 280, maxWidth: 600, flexShrink: 0 }}>
-              <ThreadPane
+              <PaneBoundary name="Hội thoại">
+<ThreadPane
                 projectSlug={currentSlug}
                 activeThread={activeThread}
                 projectFiles={projectFiles}
@@ -272,26 +280,31 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 onInsertConsumed={() => setPendingInsert(null)}
                 onSelectFile={setSelectedFilePath}
               />
+</PaneBoundary>
             </div>
 
             {/* Stage Center Pane */}
             <div style={{ flex: 1, height: "100%", minWidth: 320, overflow: "hidden" }}>
-              <StagePane
+              <PaneBoundary name="Stage">
+<StagePane
                 projectSlug={currentSlug}
                 selectedFilePath={selectedFilePath}
                 onClearSelection={() => setSelectedFilePath(null)}
                 onAskAi={handleAskAi}
                 onSelectFile={setSelectedFilePath}
               />
+</PaneBoundary>
             </div>
 
             {/* Outputs Pane */}
             <div style={{ width: outputsWidth, height: "100%", minWidth: 260, maxWidth: 500, flexShrink: 0 }}>
-              <OutputsPane
+              <PaneBoundary name="Outputs">
+<OutputsPane
                 projectSlug={currentSlug}
                 projectFiles={projectFiles}
                 onSelectFile={setSelectedFilePath}
               />
+</PaneBoundary>
             </div>
           </>
         )}

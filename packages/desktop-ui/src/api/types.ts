@@ -244,7 +244,7 @@ export type EngineEvent =
   | { type: "FileChange"; path: string; op: "create" | "modify" | "delete" }
   | { type: "PermissionRequest"; requestId: string; tool: string; input: unknown }
   | { type: "PermissionDenied"; tool: string; input: unknown }
-  | { type: "Usage"; inputTokens: number; outputTokens: number; cacheReadTokens: number; costUsd?: number }
+  | { type: "Usage"; inputTokens: number; outputTokens: number; cacheReadTokens: number; costUsd?: number | null }
   | { type: "Done"; status: string; text?: string }
   | { type: "Error"; message: string };
 
@@ -516,8 +516,8 @@ export interface JobEventPayload {
   progress?: number;
   message?: string;
   peakMemoryBytes?: number;
-  /** Legacy optional snapshot for backwards compatibility */
-  event?: JobSnapshot;
+  /** Snapshot-shaped view of the same job, used by the Jobs panel. */
+  event: JobSnapshot;
 }
 
 export interface FsEventPayload {

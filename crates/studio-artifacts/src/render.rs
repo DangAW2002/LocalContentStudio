@@ -10,6 +10,7 @@ use studio_workspace::{Project, Workspace};
 use crate::artifact::Artifact;
 use crate::cache::{compute_input_hash, hash12, lookup_render_cache, record_render_outputs};
 use crate::error::{ArtifactError, Result};
+use crate::kind::KindRegistry;
 use crate::probe::{probe_chromium, probe_ffmpeg, probe_ffprobe, probe_node_npx, ProbeReport};
 use crate::renderer::*;
 use crate::starter::DEFAULT_BRAND_CSS;
@@ -46,6 +47,8 @@ pub async fn render(
     let renderer_id = artifact
         .renderer
         .clone()
+        // artifact.yaml may omit `renderer`: fall back to the kind's default renderer.
+        .or_else(|| KindRegistry::get(&artifact.kind).and_then(|k| k.renderer))
         .unwrap_or_else(|| "default".into());
 
     // 1. Prepare brand.css if it's a design artifact and brand.css is missing
@@ -103,8 +106,7 @@ pub async fn render(
             expected_outputs.push(out_file.clone());
 
             let html_source = artifact.source_path(project);
-            let width = artifact.params["width"].as_u64().unwrap_or(1080) as u32;
-            let height = artifact.params["height"].as_u64().unwrap_or(1350) as u32;
+            let (width, height) = artboard_size(artifact, project).unwrap_or((1080, 1350));
 
             build_html_render_job(
                 &job_id,
@@ -234,9 +236,12 @@ pub async fn render(
             .to_lowercase();
 
         if ext == "png" {
-            let width = artifact.params["width"].as_u64().map(|w| w as u32);
-            let height = artifact.params["height"].as_u64().map(|h| h as u32);
-            validate_png(out_file, width, height)?;
+            let size = if artifact.kind == "design" {
+                artboard_size(artifact, project)
+            } else {
+                None
+            };
+            validate_png(out_file, size.map(|s| s.0), size.map(|s| s.1))?;
         } else if ext == "mp4" || ext == "webm" {
             validate_video(out_file, None, None)?;
         }
@@ -251,4 +256,15 @@ pub async fn render(
         job_id: Some(submitted_job_id),
         probe_report: probe_reports,
     })
+}
+
+/// Artboard size for an HTML artifact: `params.width/height` first, then what the HTML source declares.
+fn artboard_size(artifact: &Artifact, project: &Project) -> Option<(u32, u32)> {
+    let w = artifact.params["width"].as_u64();
+    let h = artifact.params["height"].as_u64();
+    if let (Some(w), Some(h)) = (w, h) {
+        return Some((w as u32, h as u32));
+    }
+    let html = fs::read_to_string(artifact.source_path(project)).ok()?;
+    detect_artboard_size(&html)
 }

@@ -9,6 +9,151 @@ use studio_jobs::{
 use crate::error::{ArtifactError, Result};
 use crate::probe::ProbeReport;
 
+/// `file://` URL for a local path. Strips the Windows verbatim prefix (`\\?\`), which browsers do not
+/// understand (Chrome silently opens a new-tab page instead), and percent-encodes spaces/non-ASCII.
+pub fn file_url_for(path: &Path) -> Result<String> {
+    let raw = path.to_string_lossy();
+    let plain = if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        raw.into_owned()
+    };
+    url::Url::from_file_path(&plain)
+        .map(|u| u.to_string())
+        .map_err(|_| {
+            ArtifactError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Không tạo được file URL cho {plain}"),
+            ))
+        })
+}
+
+/// Artboard size declared by an HTML source, in px. Looks, in order, at
+/// `<meta name="viewport" content="width=W, height=H">`, a `data-artboard="WxH"` attribute, and the first CSS
+/// rule whose selector mentions `artboard` or `frame` with `width: Wpx` and `height: Hpx`.
+pub fn detect_artboard_size(html: &str) -> Option<(u32, u32)> {
+    fn num_after(s: &str, key: &str) -> Option<u32> {
+        let at = s.find(key)? + key.len();
+        let digits: String = s[at..]
+            .trim_start_matches([' ', ':', '=', '"'])
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        digits.parse().ok().filter(|n| *n > 0)
+    }
+
+    let lower = html.to_ascii_lowercase();
+    // 1. viewport meta
+    for (i, _) in lower.match_indices("name=\"viewport\"") {
+        let tag_start = lower[..i].rfind('<').unwrap_or(0);
+        let tag_end = lower[i..].find('>').map(|e| i + e).unwrap_or(lower.len());
+        let tag = &lower[tag_start..tag_end];
+        if let (Some(w), Some(h)) = (num_after(tag, "width"), num_after(tag, "height")) {
+            return Some((w, h));
+        }
+    }
+    // 2. data-artboard="WxH"
+    if let Some(i) = lower.find("data-artboard=\"") {
+        let rest = &lower[i + "data-artboard=\"".len()..];
+        let value = &rest[..rest.find('"').unwrap_or(0)];
+        if let Some((w, h)) = value.split_once('x') {
+            if let (Ok(w), Ok(h)) = (w.trim().parse(), h.trim().parse()) {
+                return Some((w, h));
+            }
+        }
+    }
+    // 3. CSS rule for the artboard/frame element
+    let mut search = 0;
+    while let Some(open) = lower[search..].find('{').map(|o| search + o) {
+        let close = lower[open..].find('}').map(|c| open + c)?;
+        let selector_start = lower[..open].rfind(['}', '>']).map(|s| s + 1).unwrap_or(0);
+        let selector = &lower[selector_start..open];
+        if selector.contains("artboard") || selector.contains("frame") {
+            let body = &lower[open..close];
+            if let (Some(w), Some(h)) = (
+                num_after_prop(body, "width"),
+                num_after_prop(body, "height"),
+            ) {
+                return Some((w, h));
+            }
+        }
+        search = close + 1;
+    }
+    None
+}
+
+/// `width: 1280px` inside a CSS block, ignoring `min-width`/`max-width`/`line-height` style prefixes.
+fn num_after_prop(body: &str, prop: &str) -> Option<u32> {
+    for (i, _) in body.match_indices(prop) {
+        let prev = body[..i].chars().last();
+        if matches!(prev, Some(c) if c.is_ascii_alphanumeric() || c == '-') {
+            continue;
+        }
+        let rest = body[i + prop.len()..].trim_start();
+        let Some(rest) = rest.strip_prefix(':') else {
+            continue;
+        };
+        let digits: String = rest
+            .trim_start()
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
+        let after = &rest.trim_start()[digits.len()..];
+        if after.starts_with("px") {
+            if let Ok(n) = digits.parse::<u32>() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod artboard_tests {
+    use super::detect_artboard_size;
+
+    #[test]
+    fn viewport_meta() {
+        let html = r#"<meta name="viewport" content="width=1080, height=1350, initial-scale=1.0">"#;
+        assert_eq!(detect_artboard_size(html), Some((1080, 1350)));
+    }
+
+    #[test]
+    fn data_artboard_attr() {
+        assert_eq!(
+            detect_artboard_size(r#"<div data-artboard="1280x720"></div>"#),
+            Some((1280, 720))
+        );
+    }
+
+    #[test]
+    fn css_frame_rule() {
+        let html = "<style>html, body { margin: 0; }\n .frame {\n position: relative;\n max-width: 9px;\n width: 1280px;\n height: 720px;\n line-height: 3px; }</style>";
+        assert_eq!(detect_artboard_size(html), Some((1280, 720)));
+    }
+
+    #[test]
+    fn none_when_undeclared() {
+        assert_eq!(detect_artboard_size("<p>hi</p>"), None);
+    }
+}
+
+#[cfg(all(test, windows))]
+mod file_url_tests {
+    use super::file_url_for;
+    use std::path::Path;
+
+    #[test]
+    fn strips_verbatim_prefix_and_encodes() {
+        let url = file_url_for(Path::new(r"\\?\D:\Kênh thử\a b\index.html")).unwrap();
+        assert_eq!(url, "file:///D:/K%C3%AAnh%20th%E1%BB%AD/a%20b/index.html");
+        let plain = file_url_for(Path::new(r"C:\x\index.html")).unwrap();
+        assert_eq!(plain, "file:///C:/x/index.html");
+    }
+}
+
 /// What to render and where: one HTML artboard to a PNG screenshot or a PDF.
 #[derive(Debug, Clone, Copy)]
 pub struct HtmlRenderTarget<'a> {
@@ -46,7 +191,7 @@ pub fn build_html_render_job(
         ArtifactError::ToolNotFound("Chromium browser is not available for HTML rendering".into())
     })?;
 
-    let file_url = format!("file:///{}", html_file.to_string_lossy().replace('\\', "/"));
+    let file_url = file_url_for(html_file)?;
 
     // A private, throwaway profile per job: never attach to (or open windows in) the user's running browser.
     let profile_dir = std::env::temp_dir().join(format!("lcs-browser-{}", job_id));

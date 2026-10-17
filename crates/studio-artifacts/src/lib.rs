@@ -23,7 +23,7 @@ pub use probe::{probe_chromium, probe_ffmpeg, probe_ffprobe, probe_node_npx, Pro
 pub use render::{render, RenderOutcome};
 pub use renderer::{
     build_html_render_job, build_hyperframes_render_job, build_proxy_job,
-    build_timeline_ffmpeg_args, build_timeline_render_job,
+    build_timeline_ffmpeg_args, build_timeline_render_job, detect_artboard_size, file_url_for,
 };
 pub use starter::*;
 pub use timeline::{Clip, TimelineDoc, Track, TrackKind, Transition};
