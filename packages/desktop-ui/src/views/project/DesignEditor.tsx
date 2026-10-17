@@ -1,6 +1,7 @@
 import React from "react";
 import { Button, Badge } from "@studio/design-system";
 import { Icon } from "../../components/Icon";
+import { detectArtboardSize } from "../../utils/artboard";
 
 /** Imperative API used by the Stage toolbar. */
 export interface DesignEditorHandle {
@@ -60,7 +61,7 @@ export const DesignEditor = React.forwardRef<DesignEditorHandle, DesignEditorPro
     const [layers, setLayers] = React.useState<LayerInfo[]>([]);
     const [selectedId, setSelectedId] = React.useState<string | null>(null);
     const [inspector, setInspector] = React.useState<InspectorState | null>(null);
-    const [size, setSize] = React.useState({ w: 1080, h: 1350 });
+    const [size, setSize] = React.useState(() => detectArtboardSize(html));
     const [scale, setScale] = React.useState(1);
     const undoStack = React.useRef<string[]>([]);
     const redoStack = React.useRef<string[]>([]);
@@ -85,6 +86,7 @@ export const DesignEditor = React.forwardRef<DesignEditorHandle, DesignEditorPro
     // External source change (load, agent edit, reload): reset history.
     React.useEffect(() => {
       setSrcDoc(html);
+      setSize(detectArtboardSize(html));
       undoStack.current = [];
       redoStack.current = [];
       onDirtyChange(false);
@@ -214,8 +216,9 @@ export const DesignEditor = React.forwardRef<DesignEditorHandle, DesignEditorPro
       style.id = EDITOR_STYLE_ID;
       style.textContent = `[data-layer]{cursor:pointer}[${SELECTED_ATTR}]{outline:2px solid ${focus} !important;outline-offset:2px}`;
       d.head.appendChild(style);
-      const w = Math.max(d.documentElement.scrollWidth, d.body?.scrollWidth ?? 0);
-      const h = Math.max(d.documentElement.scrollHeight, d.body?.scrollHeight ?? 0);
+      const detected = detectArtboardSize(srcDoc);
+      const w = Math.max(detected.w, d.documentElement.scrollWidth, d.body?.scrollWidth ?? 0);
+      const h = Math.max(detected.h, d.documentElement.scrollHeight, d.body?.scrollHeight ?? 0);
       if (w > 0 && h > 0) setSize({ w, h });
       setLayers(
         Array.from(d.querySelectorAll<HTMLElement>("[data-layer]")).map((el) => ({

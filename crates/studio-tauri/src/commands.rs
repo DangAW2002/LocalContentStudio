@@ -81,9 +81,24 @@ fn human(bytes: u64) -> String {
     }
 }
 
+/// Strip Windows verbatim prefixes (`\\?\` or `\\?\UNC\`) from a path for user display.
+pub fn strip_verbatim(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        raw.into_owned()
+    }
+}
+
 fn rel(ws: &Workspace, p: &Path) -> String {
-    p.strip_prefix(ws.root())
-        .unwrap_or(p)
+    let clean_root = PathBuf::from(strip_verbatim(ws.root()));
+    let clean_p = PathBuf::from(strip_verbatim(p));
+    clean_p
+        .strip_prefix(&clean_root)
+        .unwrap_or(&clean_p)
         .to_string_lossy()
         .replace('\\', "/")
 }
@@ -96,13 +111,13 @@ fn modified(p: &Path) -> Option<String> {
 // ───────────────────────── Workspace ─────────────────────────
 
 fn ws_summary(ws: &Workspace, current: bool) -> Value {
-    json!({ "path": ws.root(), "name": ws.name(), "lastOpenedAt": now(), "isCurrent": current })
+    json!({ "path": strip_verbatim(ws.root()), "name": ws.name(), "lastOpenedAt": now(), "isCurrent": current })
 }
 
 /// Make `path` the open workspace: record it, allow asset access, watch files.
 fn activate(app: &AppHandle, state: &AppState, ws: &Workspace) -> CmdResult<()> {
     if let Ok(db) = state.app_paths.open_app_db() {
-        let _ = db.record_workspace_open(&ws.root().to_string_lossy());
+        let _ = db.record_workspace_open(&strip_verbatim(ws.root()));
     }
     let _ = app.asset_protocol_scope().allow_directory(ws.root(), true);
     // Turns left "running" by a crash or forced quit can never finish: close them.
@@ -163,6 +178,7 @@ fn activate(app: &AppHandle, state: &AppState, ws: &Workspace) -> CmdResult<()> 
 #[tauri::command]
 pub fn app_recent_workspaces(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
     let current = state.current.lock().ok().and_then(|c| c.clone());
+    let current_clean = current.as_deref().map(strip_verbatim);
     let db = state.app_paths.open_app_db()?;
     Ok(db
         .list_recent_workspaces()?
@@ -170,9 +186,10 @@ pub fn app_recent_workspaces(state: State<'_, AppState>) -> CmdResult<Vec<Value>
         .filter_map(|r| {
             let path = PathBuf::from(&r.path);
             let ws = Workspace::open(&path).ok()?;
+            let clean_path = strip_verbatim(&path);
             Some(json!({
-                "path": r.path, "name": ws.name(), "lastOpenedAt": r.last_opened,
-                "isCurrent": current.as_deref() == Some(path.as_path()),
+                "path": clean_path, "name": ws.name(), "lastOpenedAt": r.last_opened,
+                "isCurrent": current_clean.as_deref() == Some(&clean_path),
             }))
         })
         .collect())
@@ -222,7 +239,7 @@ pub fn workspace_current(state: State<'_, AppState>) -> CmdResult<Value> {
     let org = ws.org();
     Ok(json!({
         "workspace": ws_summary(&ws, true),
-        "org": if org.is_implicit() { Value::Null } else { json!({ "id": org.name(), "name": org.name(), "path": org.root() }) },
+        "org": if org.is_implicit() { Value::Null } else { json!({ "id": org.name(), "name": org.name(), "path": strip_verbatim(org.root()) }) },
         "budget": { "currentSpendUsd": spent, "maxSpendUsd": max, "warningThreshold": 0.8 },
     }))
 }
@@ -297,12 +314,14 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<Value>) {
     };
     let mut entries: Vec<_> = rd.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
+    let clean_root = PathBuf::from(strip_verbatim(root));
     for e in entries {
         let p = e.path();
         let is_dir = p.is_dir();
         let (kind, _) = kind_of(&p);
+        let clean_p = PathBuf::from(strip_verbatim(&p));
         out.push(json!({
-            "path": p.strip_prefix(root).unwrap_or(&p).to_string_lossy().replace('\\', "/"),
+            "path": clean_p.strip_prefix(&clean_root).unwrap_or(&clean_p).to_string_lossy().replace('\\', "/"),
             "name": e.file_name().to_string_lossy(),
             "isDir": is_dir,
             "size": if is_dir { 0 } else { e.metadata().map(|m| m.len()).unwrap_or(0) },
@@ -690,7 +709,7 @@ pub fn scope_list(state: State<'_, AppState>, kind: String) -> CmdResult<Vec<Val
                 ("playbooks", Some(s)) => s.get_playbook(&item.id).map(|p| (p.frontmatter.name.clone(), Some(p.frontmatter.description.clone()))).unwrap_or((item.id.clone(), None)),
                 _ => (item.id.clone(), None),
             };
-            json!({ "id": item.id, "name": name, "kind": kind, "layer": layer, "path": item.path, "summary": summary })
+            json!({ "id": item.id, "name": name, "kind": kind, "layer": layer, "path": strip_verbatim(&item.path), "summary": summary })
         })
         .collect())
 }
@@ -927,4 +946,25 @@ pub fn artifact_check(
         "renders": renders,
     });
     studio_mcp::tools::check_run(&ws, &args).map_err(CmdError::msg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_verbatim() {
+        assert_eq!(
+            strip_verbatim(Path::new(r"\\?\D:\Studio\workspace")),
+            r"D:\Studio\workspace"
+        );
+        assert_eq!(
+            strip_verbatim(Path::new(r"\\?\UNC\server\share\dir")),
+            r"\\server\share\dir"
+        );
+        assert_eq!(
+            strip_verbatim(Path::new(r"D:\Normal\Path")),
+            r"D:\Normal\Path"
+        );
+    }
 }

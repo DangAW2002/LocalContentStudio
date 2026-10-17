@@ -33,6 +33,7 @@ export interface ThreadMessage {
   };
   turnId?: string;
   isStreaming?: boolean;
+  errorMessage?: string;
 }
 
 export interface ThreadPaneProps {
@@ -110,11 +111,26 @@ export function applyTurnEvent(prev: ThreadMessage[], payload: EngineTurnEvent):
         },
       };
       break;
-    case "Done":
-      next = { ...msg, isStreaming: false, text: msg.text || event.text || "" };
+    case "Done": {
+      const isErrorStatus = event.status === "error" || event.status === "failed";
+      let err = msg.errorMessage;
+      if (isErrorStatus && !msg.text && !event.text) {
+        err = err || "Lượt xử lý thất bại mà không có nội dung phản hồi từ engine.";
+      }
+      next = {
+        ...msg,
+        isStreaming: false,
+        text: msg.text || event.text || "",
+        errorMessage: err,
+      };
       break;
+    }
     case "Error":
-      next = { ...msg, isStreaming: false, text: msg.text ? `${msg.text}\n\n⚠ ${event.message}` : `⚠ ${event.message}` };
+      next = {
+        ...msg,
+        isStreaming: false,
+        errorMessage: event.message,
+      };
       break;
   }
   const out = list.slice();
@@ -462,7 +478,17 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
                 )}
 
                 {/* Main Text */}
-                {msg.text}
+                {msg.text && <div>{msg.text}</div>}
+
+                {/* Danger Callout inside bubble on error */}
+                {msg.errorMessage && (
+                  <div style={{ marginTop: msg.text ? 8 : 0 }}>
+                    <Callout variant="danger">
+                      <div style={{ fontWeight: 600 }}>Engine báo lỗi:</div>
+                      <div style={{ marginTop: 2 }}>{msg.errorMessage}</div>
+                    </Callout>
+                  </div>
+                )}
 
                 {/* Collapsed Tool Calls */}
                 {msg.toolCalls && msg.toolCalls.length > 0 && (

@@ -12,6 +12,7 @@ import {
   DesignEditor,
   type DesignEditorHandle,
 } from "./DesignEditor";
+import { PlainHtmlPreview } from "./PlainHtmlPreview";
 import type {
   ArtifactSummary,
   ArtifactRenderResult,
@@ -426,32 +427,9 @@ export const StagePane: React.FC<StagePaneProps> = ({
       );
     }
 
-    // 2. Plain HTML without data-layer
+    // 2. Plain HTML without data-layer (render at artboard size and scale to fit stage)
     if (fileData.kind === "html") {
-      return (
-        <div
-          style={{
-            flex: 1,
-            width: "100%",
-            height: "100%",
-            display: "flex",
-            backgroundColor: "var(--cs-bg-canvas)",
-            position: "relative",
-          }}
-        >
-          <iframe
-            title="HTML Sandbox Preview"
-            srcDoc={fileData.text}
-            sandbox="allow-scripts"
-            style={{
-              width: "100%",
-              height: "100%",
-              border: "none",
-              backgroundColor: "#ffffff",
-            }}
-          />
-        </div>
-      );
+      return <PlainHtmlPreview html={fileData.text || ""} />;
     }
 
     // 3. Text / Markdown / Code / JSON editor

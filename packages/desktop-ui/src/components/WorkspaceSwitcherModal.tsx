@@ -1,6 +1,7 @@
 import React from "react";
 import { Icon } from "./Icon";
 import { Button, Input, Callout } from "@studio/design-system";
+import { cleanDisplayPath } from "../utils/path";
 import type { WorkspaceSummary } from "../api/types";
 
 export interface WorkspaceSwitcherModalProps {
@@ -217,7 +218,7 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
                           {ws.name}
                         </span>
                         <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)", fontFamily: "var(--cs-font-mono)" }}>
-                          {ws.path}
+                          {cleanDisplayPath(ws.path)}
                         </span>
                       </div>
                       {isCurrent ? (

@@ -349,6 +349,20 @@ export class StudioApiClient {
   async checkArtifact(req: ArtifactCheckRequest): Promise<ArtifactCheckResult> {
     return invoke<ArtifactCheckResult>("artifact_check", { ...req });
   }
+
+  // ==========================================
+  // agy Integration
+  // ==========================================
+
+  /** Command: `agy_connect`. */
+  async agyConnect(): Promise<{ connected: boolean; shim?: string }> {
+    return invoke<{ connected: boolean; shim?: string }>("agy_connect");
+  }
+
+  /** Command: `agy_disconnect`. */
+  async agyDisconnect(): Promise<{ connected: boolean }> {
+    return invoke<{ connected: boolean }>("agy_disconnect");
+  }
 }
 
 export const studioApi = new StudioApiClient();

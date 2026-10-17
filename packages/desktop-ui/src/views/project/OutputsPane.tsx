@@ -2,6 +2,7 @@ import React from "react";
 import { Icon } from "../../components/Icon";
 import { Tabs, Button, Badge, Dialog, EmptyState } from "@studio/design-system";
 import { studioApi } from "../../api/client";
+import { ProjectFolderTree } from "./ProjectFolderTree";
 import type {
   ArtifactSummary,
   CheckpointSummary,
@@ -303,68 +304,10 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
               Cây tệp dự án ({projectFiles.length})
             </div>
 
-            {projectFiles.length === 0 ? (
-              <EmptyState
-                icon={<Icon name="package" size={24} />}
-                title="Chưa có thành phẩm"
-                description="Khi agent tạo hoặc xuất bản artifact (ảnh, video, văn bản), tệp sẽ xuất hiện tại đây."
-              />
-            ) : (
-              projectFiles.map((file) => (
-                <div
-                  key={file.path}
-                  onClick={() => onSelectFile(file.path)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "8px var(--cs-space-3)",
-                    borderBottom: "1px solid var(--cs-border-subtle)",
-                    cursor: "pointer",
-                    fontSize: "var(--cs-text-xs)",
-                    transition: "background-color var(--cs-motion-duration) ease",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--cs-bg-hover)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                    <Icon
-                      name={
-                        file.kind === "image"
-                          ? "image"
-                          : file.kind === "video"
-                          ? "video"
-                          : file.kind === "audio"
-                          ? "audio"
-                          : file.kind === "markdown" || file.kind === "text"
-                          ? "file-text"
-                          : "file"
-                      }
-                      size={14}
-                      color="var(--cs-accent)"
-                    />
-                    <span
-                      style={{
-                        fontWeight: 500,
-                        fontFamily: "var(--cs-font-mono)",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {file.path}
-                    </span>
-                  </div>
-
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <Badge variant="neutral">{file.kind}</Badge>
-                    <span style={{ color: "var(--cs-fg-muted)" }}>
-                      {(file.size / 1024).toFixed(1)}k
-                    </span>
-                  </div>
-                </div>
-              ))
-            )}
+            <ProjectFolderTree
+              files={projectFiles}
+              onSelectFile={onSelectFile}
+            />
           </div>
         )}
 

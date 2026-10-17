@@ -121,7 +121,7 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({
                 key={job.id}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "32px minmax(200px, 1.5fr) minmax(180px, 1fr) 120px",
+                  gridTemplateColumns: "32px minmax(180px, 1.2fr) minmax(200px, 1.5fr) 100px 110px",
                   alignItems: "center",
                   gap: "var(--cs-space-3)",
                   padding: "8px var(--cs-space-4)",
@@ -146,34 +146,62 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({
                   </span>
                 </div>
 
-                {/* Stage & Progress */}
+                {/* Stage Message & Progress Bar */}
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)" }}>
-                    {job.stageName || (job.state === "RUNNING" ? "Đang xử lý..." : "Chờ")}
+                    {job.stageName || (job.state === "RUNNING" ? "Đang xử lý..." : job.state === "DONE" ? "Hoàn tất" : "Đang chờ")}
                   </span>
                   {typeof job.progress === "number" && (
-                    <div
-                      style={{
-                        height: 4,
-                        width: "100%",
-                        backgroundColor: "var(--cs-progress-track)",
-                        borderRadius: "var(--cs-radius-round)",
-                        overflow: "hidden",
-                      }}
-                    >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
                       <div
                         style={{
-                          height: "100%",
-                          width: `${Math.min(100, Math.max(0, job.progress))}%`,
-                          backgroundColor: job.state === "FAILED" ? "var(--cs-danger)" : "var(--cs-progress-fill)",
+                          flex: 1,
+                          height: 5,
+                          backgroundColor: "var(--cs-progress-track)",
+                          borderRadius: "var(--cs-radius-round)",
+                          overflow: "hidden",
                         }}
-                      />
+                      >
+                        <div
+                          style={{
+                            height: "100%",
+                            width: `${Math.min(100, Math.max(0, job.progress))}%`,
+                            backgroundColor: job.state === "FAILED" ? "var(--cs-danger)" : "var(--cs-progress-fill)",
+                            transition: "width var(--cs-motion-duration) ease",
+                          }}
+                        />
+                      </div>
+                      <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)", minWidth: 32, textAlign: "right", fontFamily: "var(--cs-font-mono)" }}>
+                        {Math.round(job.progress)}%
+                      </span>
                     </div>
                   )}
                   {job.error && (
                     <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-danger)" }}>
                       {job.error}
                     </span>
+                  )}
+                </div>
+
+                {/* Peak Memory in MB */}
+                <div style={{ textAlign: "right" }}>
+                  {job.peakMemoryBytes && job.peakMemoryBytes > 0 ? (
+                    <span
+                      style={{
+                        fontSize: "var(--cs-text-xs)",
+                        color: "var(--cs-fg-secondary)",
+                        fontFamily: "var(--cs-font-mono)",
+                        padding: "2px 6px",
+                        backgroundColor: "var(--cs-bg-raised)",
+                        borderRadius: "var(--cs-radius-control)",
+                        border: "1px solid var(--cs-border-subtle)",
+                      }}
+                      title="Bộ nhớ đỉnh (Peak Memory)"
+                    >
+                      {(job.peakMemoryBytes / (1024 * 1024)).toFixed(1)} MB
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>—</span>
                   )}
                 </div>
 
