@@ -78,7 +78,7 @@ impl Artifact {
                 fs::write(art_dir.join(&default_source), MOTION_STARTER_HTML)?;
             }
             "timeline" => {
-                fs::write(art_dir.join(&default_source), TIMELINE_STARTER_JSON)?;
+                fs::write(art_dir.join(&default_source), TIMELINE_STARTER)?;
             }
             "text" => {
                 fs::write(art_dir.join(&default_source), TEXT_STARTER_MD)?;

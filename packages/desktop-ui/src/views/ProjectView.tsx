@@ -31,6 +31,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   const [playbooks, setPlaybooks] = React.useState<ScopeItem[]>([]);
   const [selectedFilePath, setSelectedFilePath] = React.useState<string | null>(null);
   const [pendingInsert, setPendingInsert] = React.useState<string | null>(null);
+  const [stageReloadNonce, setStageReloadNonce] = React.useState(0);
 
   // Layout states: resizable & narrow tab mode
   const [threadWidth, setThreadWidth] = React.useState(380);
@@ -241,6 +242,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                     setNarrowTab("stage");
                   }}
                   onNavigateSettings={onNavigateSettings}
+                  onUndoTurnSuccess={() => setStageReloadNonce((n) => n + 1)}
                 />
               </PaneBoundary>
             )}
@@ -252,6 +254,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                   onClearSelection={() => setSelectedFilePath(null)}
                   onAskAi={handleAskAi}
                   onSelectFile={setSelectedFilePath}
+                  reloadNonce={stageReloadNonce}
                 />
               </PaneBoundary>
             )}
@@ -283,6 +286,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                   onInsertConsumed={() => setPendingInsert(null)}
                   onSelectFile={setSelectedFilePath}
                   onNavigateSettings={onNavigateSettings}
+                  onUndoTurnSuccess={() => setStageReloadNonce((n) => n + 1)}
                 />
               </PaneBoundary>
             </div>
@@ -290,25 +294,26 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
             {/* Stage Center Pane */}
             <div style={{ flex: 1, height: "100%", minWidth: 320, overflow: "hidden" }}>
               <PaneBoundary name="Stage">
-<StagePane
-                projectSlug={currentSlug}
-                selectedFilePath={selectedFilePath}
-                onClearSelection={() => setSelectedFilePath(null)}
-                onAskAi={handleAskAi}
-                onSelectFile={setSelectedFilePath}
-              />
-</PaneBoundary>
+                <StagePane
+                  projectSlug={currentSlug}
+                  selectedFilePath={selectedFilePath}
+                  onClearSelection={() => setSelectedFilePath(null)}
+                  onAskAi={handleAskAi}
+                  onSelectFile={setSelectedFilePath}
+                  reloadNonce={stageReloadNonce}
+                />
+              </PaneBoundary>
             </div>
 
             {/* Outputs Pane */}
             <div style={{ width: outputsWidth, height: "100%", minWidth: 260, maxWidth: 500, flexShrink: 0 }}>
               <PaneBoundary name="Outputs">
-<OutputsPane
-                projectSlug={currentSlug}
-                projectFiles={projectFiles}
-                onSelectFile={setSelectedFilePath}
-              />
-</PaneBoundary>
+                <OutputsPane
+                  projectSlug={currentSlug}
+                  projectFiles={projectFiles}
+                  onSelectFile={setSelectedFilePath}
+                />
+              </PaneBoundary>
             </div>
           </>
         )}

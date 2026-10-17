@@ -860,3 +860,36 @@ async fn real_timeline_assembles_image_wav_srt_to_mp4() {
         meta.height
     );
 }
+
+#[test]
+fn test_timeline_starter_parses_and_validates() {
+    let doc: TimelineDoc = serde_json::from_str(studio_artifacts::TIMELINE_STARTER)
+        .expect("TIMELINE_STARTER must parse as TimelineDoc");
+    assert_eq!(doc.version, 1);
+    assert_eq!(doc.width, 1920);
+    assert_eq!(doc.height, 1080);
+    assert_eq!(doc.fps, 30.0);
+    assert_eq!(doc.tracks.len(), 3);
+
+    let video_track = doc
+        .tracks
+        .iter()
+        .find(|t| t.kind == TrackKind::Video)
+        .expect("Video track required");
+    assert!(
+        !video_track.clips.is_empty(),
+        "Video track must contain a placeholder clip"
+    );
+    assert_eq!(video_track.clips[0].duration, 5.0);
+
+    let caption_track = doc
+        .tracks
+        .iter()
+        .find(|t| t.kind.is_caption())
+        .expect("Caption track required");
+    assert_eq!(
+        caption_track.clips.len(),
+        2,
+        "Caption track must contain 2 captions"
+    );
+}

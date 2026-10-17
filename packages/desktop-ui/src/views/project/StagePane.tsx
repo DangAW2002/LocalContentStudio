@@ -27,6 +27,7 @@ export interface StagePaneProps {
   onClearSelection: () => void;
   onAskAi?: (text: string) => void;
   onSelectFile?: (path: string) => void;
+  reloadNonce?: number;
 }
 
 /** Check whether a file is an image, video or audio based on path extension */
@@ -151,6 +152,7 @@ export const StagePane: React.FC<StagePaneProps> = ({
   onClearSelection,
   onAskAi,
   onSelectFile,
+  reloadNonce,
 }) => {
   const [fileData, setFileData] = React.useState<FileReadResult | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -266,6 +268,14 @@ export const StagePane: React.FC<StagePaneProps> = ({
     setRenderResult(null);
     setCheckResult(null);
   }, [loadFile]);
+
+  // Reload file when reloadNonce changes (e.g., turn undone in ThreadPane)
+  React.useEffect(() => {
+    if (reloadNonce !== undefined && reloadNonce > 0) {
+      loadFile(false);
+      loadArtifacts();
+    }
+  }, [reloadNonce, loadFile, loadArtifacts]);
 
   // Listen to external change (fs-event touching this file or turn Done)
   React.useEffect(() => {
