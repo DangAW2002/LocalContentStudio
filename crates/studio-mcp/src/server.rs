@@ -33,6 +33,8 @@ pub struct ServerState {
     pub catalog_paths: Vec<PathBuf>,
     /// Secret the stdio shim must present to obtain a turn token.
     pub shim_secret: String,
+    /// Host-set API endpoint overrides by tool id.
+    pub endpoints: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
 }
 
 /// Handle of a running server.

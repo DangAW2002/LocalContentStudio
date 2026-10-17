@@ -390,6 +390,41 @@ interface ArtifactCheckResult {
 
 ---
 
+### 1.9 Quản lý Khoá bí mật & Endpoint
+
+#### `secret_status`
+- **Mục đích**: Lấy danh sách trạng thái tồn tại của tất cả các khoá API được khai báo trong tool manifest. Không bao giờ trả về giá trị khoá.
+- **Input**: None
+- **Output**: `SecretStatusItem[]`
+```ts
+interface SecretStatusItem {
+  name: string;
+  present: boolean;
+}
+```
+
+#### `secret_set`
+- **Mục đích**: Lưu giá trị khoá API vào Windows Credential Manager. Tên khoá phải thuộc danh sách được khai báo trong tool manifest.
+- **Input**: `{ name: string, value: string }`
+- **Output**: `void`
+
+#### `secret_delete`
+- **Mục đích**: Xoá khoá API khỏi Windows Credential Manager.
+- **Input**: `{ name: string }`
+- **Output**: `void`
+
+#### `provider_endpoint_get`
+- **Mục đích**: Lấy cấu hình URL endpoint tuỳ chỉnh theo từng tool provider từ `app.db`.
+- **Input**: None
+- **Output**: `Record<string, string>` (map `<tool_id>: base_url`)
+
+#### `provider_endpoint_set`
+- **Mục đích**: Cập nhật hoặc xoá URL endpoint tuỳ chỉnh của tool provider trong `app.db`. URL phải là https (cho phép http đối với 127.0.0.1/localhost) và không chứa userinfo/query/fragment.
+- **Input**: `{ toolId: string, baseUrl?: string | null }`
+- **Output**: `void`
+
+---
+
 ## 2. Events
 
 ### `turn-event`

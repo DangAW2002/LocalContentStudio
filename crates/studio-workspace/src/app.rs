@@ -254,4 +254,25 @@ impl AppDb {
             Ok(None)
         }
     }
+
+    /// Delete a key-value setting.
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        self.conn
+            .execute("DELETE FROM settings WHERE key = ?1", params![key])?;
+        Ok(())
+    }
+
+    /// List key-value pairs matching a key prefix.
+    pub fn list_settings_by_prefix(&self, prefix: &str) -> Result<Vec<(String, String)>> {
+        let pattern = format!("{prefix}%");
+        let mut stmt = self
+            .conn
+            .prepare("SELECT key, value FROM settings WHERE key LIKE ?1")?;
+        let rows = stmt.query_map(params![pattern], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
 }

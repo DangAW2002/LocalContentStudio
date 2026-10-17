@@ -23,6 +23,7 @@ fn state() -> Arc<ServerState> {
         broker: Arc::new(DefaultBroker),
         catalog_paths: vec![],
         shim_secret: "shim-secret".into(),
+        endpoints: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     })
 }
 

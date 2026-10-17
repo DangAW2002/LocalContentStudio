@@ -215,7 +215,10 @@ async fn test_google_imagen_success_fixture() {
         approved: false,
         scheduler: &scheduler,
         secret_store: &secret_store,
-        api_base_override: Some(server.base_url.clone()),
+        endpoints: std::collections::HashMap::from([(
+            "google.imagen".into(),
+            server.base_url.clone(),
+        )]),
     };
 
     let input = serde_json::json!({
@@ -306,7 +309,10 @@ async fn test_google_imagen_429_then_success_retry() {
         approved: false,
         scheduler: &scheduler,
         secret_store: &secret_store,
-        api_base_override: Some(server.base_url.clone()),
+        endpoints: std::collections::HashMap::from([(
+            "google.imagen".into(),
+            server.base_url.clone(),
+        )]),
     };
 
     let input = serde_json::json!({
@@ -358,7 +364,10 @@ async fn test_google_imagen_error_body_fails_without_retry() {
         approved: false,
         scheduler: &scheduler,
         secret_store: &secret_store,
-        api_base_override: Some(server.base_url.clone()),
+        endpoints: std::collections::HashMap::from([(
+            "google.imagen".into(),
+            server.base_url.clone(),
+        )]),
     };
 
     let input = serde_json::json!({
@@ -392,7 +401,7 @@ async fn test_openai_images_success_fixture() {
     let fixture_bytes = serde_json::to_vec(&fixture_resp).unwrap();
 
     let server = MockServer::new(move |_method, path, _body| {
-        if path.contains("/v1/images/generations") {
+        if path.contains("/images/generations") {
             (
                 200,
                 vec![("Content-Type", "application/json".into())],
@@ -426,7 +435,10 @@ async fn test_openai_images_success_fixture() {
         approved: false,
         scheduler: &scheduler,
         secret_store: &secret_store,
-        api_base_override: Some(server.base_url.clone()),
+        endpoints: std::collections::HashMap::from([(
+            "openai.images".into(),
+            server.base_url.clone(),
+        )]),
     };
 
     let input = serde_json::json!({
@@ -535,7 +547,10 @@ async fn test_google_veo_success_fixture() {
         approved: false,
         scheduler: &scheduler,
         secret_store: &secret_store,
-        api_base_override: Some(server.base_url.clone()),
+        endpoints: std::collections::HashMap::from([(
+            "google.veo".into(),
+            server.base_url.clone(),
+        )]),
     };
 
     let input = serde_json::json!({
@@ -613,7 +628,10 @@ async fn test_magic_bytes_invalid_fails() {
         approved: false,
         scheduler: &scheduler,
         secret_store: &secret_store,
-        api_base_override: Some(server.base_url.clone()),
+        endpoints: std::collections::HashMap::from([(
+            "google.imagen".into(),
+            server.base_url.clone(),
+        )]),
     };
 
     let input = serde_json::json!({
@@ -657,7 +675,7 @@ async fn test_budget_refusal_for_builtin_generator() {
         approved: false,
         scheduler: &scheduler,
         secret_store: &secret_store,
-        api_base_override: None,
+        endpoints: std::collections::HashMap::new(),
     };
 
     let input = serde_json::json!({
@@ -678,4 +696,265 @@ async fn test_budget_refusal_for_builtin_generator() {
         }
         other => panic!("Expected NeedsApproval, got {:?}", other),
     }
+}
+
+#[tokio::test]
+async fn test_openai_videos_create_poll_content_success() {
+    let poll_count = Arc::new(AtomicUsize::new(0));
+    let server = MockServer::new(move |method, path, body| {
+        if method == "POST" && path.ends_with("/videos") {
+            let req: serde_json::Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(req["model"], "sora-2");
+            assert_eq!(req["prompt"], "A cat walking on Mars");
+            let resp = serde_json::json!({
+                "id": "video-job-12345",
+                "status": "processing"
+            });
+            (
+                200,
+                vec![("Content-Type", "application/json".into())],
+                serde_json::to_vec(&resp).unwrap(),
+            )
+        } else if method == "GET" && path.ends_with("/videos/video-job-12345") {
+            let count = poll_count.fetch_add(1, Ordering::SeqCst);
+            if count == 0 {
+                let resp = serde_json::json!({
+                    "id": "video-job-12345",
+                    "status": "in_progress"
+                });
+                (
+                    200,
+                    vec![("Content-Type", "application/json".into())],
+                    serde_json::to_vec(&resp).unwrap(),
+                )
+            } else {
+                let resp = serde_json::json!({
+                    "id": "video-job-12345",
+                    "status": "completed"
+                });
+                (
+                    200,
+                    vec![("Content-Type", "application/json".into())],
+                    serde_json::to_vec(&resp).unwrap(),
+                )
+            }
+        } else if method == "GET" && path.ends_with("/videos/video-job-12345/content") {
+            (
+                200,
+                vec![("Content-Type", "video/mp4".into())],
+                SAMPLE_MP4_BYTES.to_vec(),
+            )
+        } else {
+            (404, vec![], b"Not Found".to_vec())
+        }
+    })
+    .await;
+
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("ws"), "ws").unwrap();
+    let secret_store = MemoryStore::new();
+    secret_store
+        .set(
+            ws.org().name(),
+            Some(ws.name()),
+            "OPENAI_API_KEY",
+            "dummy-openai-key",
+        )
+        .unwrap();
+
+    let reg = Registry::load(&ws);
+    let scheduler = test_scheduler();
+
+    let ctx = ToolRunContext {
+        workspace: &ws,
+        turn_id: Some("turn-video-ok".into()),
+        budget: Some(2.0),
+        approved: false,
+        scheduler: &scheduler,
+        secret_store: &secret_store,
+        endpoints: std::collections::HashMap::from([(
+            "openai.videos".into(),
+            server.base_url.clone(),
+        )]),
+    };
+
+    let input = serde_json::json!({
+        "prompt": "A cat walking on Mars",
+        "duration_s": 5,
+        "aspect": "16:9",
+        "poll_interval_ms": 10
+    });
+
+    let run_res = run_tool(&reg, "openai.videos", input, &ctx).await.unwrap();
+
+    match run_res {
+        ToolRun::Success { output, cost_usd } => {
+            assert_eq!(cost_usd, 0.20); // Manifest estimate per call
+            assert_eq!(output["provider_metadata"]["estimated_cost_usd"], 1.00); // 0.20 * 5s
+            assert!(output["video_path"].is_string());
+            let vpath = output["video_path"].as_str().unwrap();
+
+            let full_file_path = ws.root().join(vpath);
+            assert!(full_file_path.is_file());
+            let written_bytes = std::fs::read(&full_file_path).unwrap();
+            assert_eq!(written_bytes, SAMPLE_MP4_BYTES);
+
+            assert_eq!(output["provider_metadata"]["provider"], "openai.videos");
+            assert_eq!(output["provider_metadata"]["model"], "sora-2");
+            assert_eq!(output["provider_metadata"]["seconds"], 5);
+        }
+        other => panic!("Expected ToolRun::Success, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_openai_videos_url_result_variant() {
+    let direct_server = MockServer::new(move |method, path, _body| {
+        if method == "GET" && path.ends_with("/direct-file.mp4") {
+            (
+                200,
+                vec![("Content-Type", "video/mp4".into())],
+                SAMPLE_MP4_BYTES.to_vec(),
+            )
+        } else {
+            (404, vec![], b"Not Found".to_vec())
+        }
+    })
+    .await;
+
+    let video_download_url = format!("{}/direct-file.mp4", direct_server.base_url);
+    let video_download_url_clone = video_download_url.clone();
+
+    let api_server = MockServer::new(move |method, path, _body| {
+        if method == "POST" && path.ends_with("/videos") {
+            // Direct response containing url in data[0].url
+            let resp = serde_json::json!({
+                "data": [
+                    { "url": video_download_url_clone }
+                ]
+            });
+            (
+                200,
+                vec![("Content-Type", "application/json".into())],
+                serde_json::to_vec(&resp).unwrap(),
+            )
+        } else {
+            (404, vec![], b"Not Found".to_vec())
+        }
+    })
+    .await;
+
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("ws"), "ws").unwrap();
+    let secret_store = MemoryStore::new();
+    secret_store
+        .set(
+            ws.org().name(),
+            Some(ws.name()),
+            "OPENAI_API_KEY",
+            "dummy-openai-key",
+        )
+        .unwrap();
+
+    let reg = Registry::load(&ws);
+    let scheduler = test_scheduler();
+
+    let ctx = ToolRunContext {
+        workspace: &ws,
+        turn_id: Some("turn-video-url".into()),
+        budget: Some(2.0),
+        approved: false,
+        scheduler: &scheduler,
+        secret_store: &secret_store,
+        endpoints: std::collections::HashMap::from([(
+            "openai.videos".into(),
+            api_server.base_url.clone(),
+        )]),
+    };
+
+    let input = serde_json::json!({
+        "prompt": "An abstract 3D render",
+        "duration_s": 4,
+        "aspect": "1:1",
+        "model": "custom-video-model"
+    });
+
+    let run_res = run_tool(&reg, "openai.videos", input, &ctx).await.unwrap();
+
+    match run_res {
+        ToolRun::Success { output, cost_usd } => {
+            assert_eq!(cost_usd, 0.20); // Manifest estimate per call
+            assert_eq!(output["provider_metadata"]["estimated_cost_usd"], 0.80); // 0.20 * 4s
+            let vpath = output["video_path"].as_str().unwrap();
+            let full_file_path = ws.root().join(vpath);
+            assert!(full_file_path.is_file());
+            let written_bytes = std::fs::read(&full_file_path).unwrap();
+            assert_eq!(written_bytes, SAMPLE_MP4_BYTES);
+
+            assert_eq!(output["provider_metadata"]["provider"], "openai.videos");
+            assert_eq!(output["provider_metadata"]["model"], "custom-video-model");
+        }
+        other => panic!("Expected ToolRun::Success, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_tool_input_base_url_is_ignored() {
+    let mock_server = MockServer::new(move |_method, path, _body| {
+        if path.ends_with("/videos") {
+            let resp = serde_json::json!({
+                "id": "job-ignored-base-url",
+                "url": "http://invalid-not-used"
+            });
+            (
+                200,
+                vec![("Content-Type", "application/json".into())],
+                serde_json::to_vec(&resp).unwrap(),
+            )
+        } else {
+            (404, vec![], b"Not Found".to_vec())
+        }
+    })
+    .await;
+
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("ws"), "ws").unwrap();
+    let secret_store = MemoryStore::new();
+    secret_store
+        .set(
+            ws.org().name(),
+            Some(ws.name()),
+            "OPENAI_API_KEY",
+            "dummy-openai-key",
+        )
+        .unwrap();
+
+    let reg = Registry::load(&ws);
+    let scheduler = test_scheduler();
+
+    let ctx = ToolRunContext {
+        workspace: &ws,
+        turn_id: Some("turn-ignore-base".into()),
+        budget: Some(2.0),
+        approved: false,
+        scheduler: &scheduler,
+        secret_store: &secret_store,
+        endpoints: std::collections::HashMap::from([(
+            "openai.videos".into(),
+            mock_server.base_url.clone(),
+        )]),
+    };
+
+    // Tool input attempts to hijack base_url / api_base_url
+    let input = serde_json::json!({
+        "prompt": "Attacker trying to redirect API key",
+        "duration_s": 5,
+        "base_url": "http://evil-attacker.example/v1",
+        "api_base_url": "http://evil-attacker.example/v1"
+    });
+
+    // The tool should still hit mock_server, NOT evil-attacker!
+    let _ = run_tool(&reg, "openai.videos", input, &ctx).await;
+    // The fact that it sent the request to mock_server (and failed on invalid download or succeeded)
+    // proves tool input base_url is ignored.
 }

@@ -948,6 +948,162 @@ pub fn artifact_check(
     studio_mcp::tools::check_run(&ws, &args).map_err(CmdError::msg)
 }
 
+/// Secret status entry returned to the UI.
+#[derive(serde::Serialize)]
+pub struct SecretStatusItem {
+    pub name: String,
+    pub present: bool,
+}
+
+/// Retrieve status of all secrets referenced by registered tool manifests.
+#[tauri::command]
+pub async fn secret_status(state: State<'_, AppState>) -> CmdResult<Vec<SecretStatusItem>> {
+    let ws = state.workspace().ok();
+    let reg = match ws.as_ref() {
+        Some(w) => studio_tools::Registry::load(w),
+        None => studio_tools::Registry::with_builtins(),
+    };
+
+    let referenced = reg.referenced_secrets();
+    let org_name = ws.as_ref().map(|w| w.org().name()).unwrap_or("");
+    let ws_name = ws.as_ref().map(|w| w.name());
+
+    let mut out = Vec::new();
+    for name in referenced {
+        let present = state.secrets.get(org_name, ws_name, &name).is_some();
+        out.push(SecretStatusItem { name, present });
+    }
+    Ok(out)
+}
+
+/// Set a secret in Windows Credential Manager.
+#[tauri::command]
+pub async fn secret_set(state: State<'_, AppState>, name: String, value: String) -> CmdResult<()> {
+    let ws = state.workspace().ok();
+    let reg = match ws.as_ref() {
+        Some(w) => studio_tools::Registry::load(w),
+        None => studio_tools::Registry::with_builtins(),
+    };
+
+    let referenced = reg.referenced_secrets();
+    if !referenced.contains(&name) {
+        return Err(CmdError::msg(format!(
+            "Tên khoá bí mật không hợp lệ: '{name}'. Khoá phải thuộc danh sách khai báo trong tool manifest."
+        )));
+    }
+
+    let org_name = ws.as_ref().map(|w| w.org().name()).unwrap_or("");
+    let ws_name = ws.as_ref().map(|w| w.name());
+
+    state
+        .secrets
+        .set(org_name, ws_name, &name, value.trim())
+        .map_err(|e| CmdError::msg(format!("Lỗi lưu khoá vào Credential Manager: {e}")))?;
+    Ok(())
+}
+
+/// Delete a secret from Windows Credential Manager.
+#[tauri::command]
+pub async fn secret_delete(state: State<'_, AppState>, name: String) -> CmdResult<()> {
+    let ws = state.workspace().ok();
+    let reg = match ws.as_ref() {
+        Some(w) => studio_tools::Registry::load(w),
+        None => studio_tools::Registry::with_builtins(),
+    };
+
+    let referenced = reg.referenced_secrets();
+    if !referenced.contains(&name) {
+        return Err(CmdError::msg(format!(
+            "Tên khoá bí mật không hợp lệ: '{name}'. Khoá phải thuộc danh sách khai báo trong tool manifest."
+        )));
+    }
+
+    let org_name = ws.as_ref().map(|w| w.org().name()).unwrap_or("");
+    let ws_name = ws.as_ref().map(|w| w.name());
+
+    state
+        .secrets
+        .delete(org_name, ws_name, &name)
+        .map_err(|e| CmdError::msg(format!("Lỗi xoá khoá từ Credential Manager: {e}")))?;
+    Ok(())
+}
+
+/// Validate endpoint URL format according to requirements:
+/// Must parse as URL, scheme https (allow http only for 127.0.0.1/localhost), no userinfo/query/fragment.
+pub fn validate_endpoint_url(raw: &str) -> Result<String, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("URL endpoint không được để trống".into());
+    }
+    let parsed = url::Url::parse(raw).map_err(|e| format!("URL không hợp lệ: {e}"))?;
+
+    let scheme = parsed.scheme();
+    let host = parsed.host_str().unwrap_or("");
+
+    let is_loopback = host == "127.0.0.1" || host == "localhost";
+    if scheme == "http" {
+        if !is_loopback {
+            return Err("Giao thức http chỉ được phép dùng cho 127.0.0.1 hoặc localhost".into());
+        }
+    } else if scheme != "https" {
+        return Err("Chỉ hỗ trợ giao thức https (hoặc http cho localhost/127.0.0.1)".into());
+    }
+
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("URL endpoint không được chứa thông tin xác thực người dùng (userinfo)".into());
+    }
+
+    if parsed.query().is_some() {
+        return Err("URL endpoint không được chứa chuỗi truy vấn (query string)".into());
+    }
+
+    if parsed.fragment().is_some() {
+        return Err("URL endpoint không được chứa fragment (#)".into());
+    }
+
+    Ok(raw.trim_end_matches('/').to_string())
+}
+
+/// Get custom provider endpoints from `app.db`.
+#[tauri::command]
+pub async fn provider_endpoint_get(
+    state: State<'_, AppState>,
+) -> CmdResult<std::collections::HashMap<String, String>> {
+    let endpoints = state.endpoints.read().await.clone();
+    Ok(endpoints)
+}
+
+/// Set or remove a custom provider endpoint in `app.db`.
+#[tauri::command]
+pub async fn provider_endpoint_set(
+    state: State<'_, AppState>,
+    tool_id: String,
+    base_url: Option<String>,
+) -> CmdResult<()> {
+    let tool_id = tool_id.trim().to_string();
+    if tool_id.is_empty() {
+        return Err(CmdError::msg("Thiếu tool_id"));
+    }
+
+    let db = state.app_paths.open_app_db().map_err(CmdError::from)?;
+    let setting_key = format!("endpoint:{tool_id}");
+
+    match base_url {
+        Some(url_str) if !url_str.trim().is_empty() => {
+            let validated = validate_endpoint_url(&url_str).map_err(CmdError::msg)?;
+            db.set_setting(&setting_key, &validated)
+                .map_err(CmdError::from)?;
+            state.endpoints.write().await.insert(tool_id, validated);
+        }
+        _ => {
+            db.delete_setting(&setting_key).map_err(CmdError::from)?;
+            state.endpoints.write().await.remove(&tool_id);
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -966,5 +1122,41 @@ mod tests {
             strip_verbatim(Path::new(r"D:\Normal\Path")),
             r"D:\Normal\Path"
         );
+    }
+
+    #[test]
+    fn test_validate_endpoint_url_valid() {
+        assert_eq!(
+            validate_endpoint_url("https://api.openai.com/v1").unwrap(),
+            "https://api.openai.com/v1"
+        );
+        assert_eq!(
+            validate_endpoint_url("https://gateway.example.com/v1/").unwrap(),
+            "https://gateway.example.com/v1"
+        );
+        assert_eq!(
+            validate_endpoint_url("http://127.0.0.1:8080/v1").unwrap(),
+            "http://127.0.0.1:8080/v1"
+        );
+        assert_eq!(
+            validate_endpoint_url("http://localhost:3000/v1").unwrap(),
+            "http://localhost:3000/v1"
+        );
+    }
+
+    #[test]
+    fn test_validate_endpoint_url_invalid() {
+        // http non-localhost
+        assert!(validate_endpoint_url("http://remote.server/v1").is_err());
+        // userinfo
+        assert!(validate_endpoint_url("https://user:pass@api.openai.com/v1").is_err());
+        // query
+        assert!(validate_endpoint_url("https://api.openai.com/v1?test=1").is_err());
+        // fragment
+        assert!(validate_endpoint_url("https://api.openai.com/v1#heading").is_err());
+        // invalid URL
+        assert!(validate_endpoint_url("not a url").is_err());
+        // empty
+        assert!(validate_endpoint_url("").is_err());
     }
 }

@@ -330,6 +330,7 @@ async fn capability_run(
     if providers.is_empty() {
         return Err(format!("Chưa có provider nào cho \"{cap}\"."));
     }
+    let endpoints = state.endpoints.read().await.clone();
     let run_ctx = ToolRunContext {
         workspace: ws,
         turn_id: Some(ctx.turn_id.clone()),
@@ -337,7 +338,7 @@ async fn capability_run(
         approved: false,
         scheduler: &state.scheduler,
         secret_store: state.secrets.as_ref(),
-        api_base_override: None,
+        endpoints,
     };
     let mut errors = Vec::new();
     for provider in &providers {

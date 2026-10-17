@@ -30,6 +30,13 @@ impl Registry {
         Self::default()
     }
 
+    /// Create registry initialized with built-in capabilities and tools.
+    pub fn with_builtins() -> Self {
+        let mut reg = Self::new();
+        reg.load_builtins();
+        reg
+    }
+
     /// Load registry for a given workspace across the scope chain (App -> Org -> Workspace).
     /// Built-in tools and capabilities form the base layer.
     /// Does not fail hard on invalid manifests; records problems into `problems`.
@@ -84,6 +91,19 @@ impl Registry {
     /// List all registered tools.
     pub fn list_tools(&self) -> Vec<&ToolManifest> {
         self.tools.values().collect()
+    }
+
+    /// List all secret keys referenced in tool manifests across `needs`.
+    pub fn referenced_secrets(&self) -> std::collections::BTreeSet<String> {
+        let mut set = std::collections::BTreeSet::new();
+        for tool in self.tools.values() {
+            for need in &tool.needs {
+                if let Some(key) = need.strip_prefix("secret:") {
+                    set.insert(key.to_string());
+                }
+            }
+        }
+        set
     }
 
     /// List all manifest problems reported during loading.
@@ -147,6 +167,7 @@ impl Registry {
             include_str!("../builtin/tools/tts.fake/tool.yaml"),
             include_str!("../builtin/tools/google.imagen/tool.yaml"),
             include_str!("../builtin/tools/openai.images/tool.yaml"),
+            include_str!("../builtin/tools/openai.videos/tool.yaml"),
             include_str!("../builtin/tools/google.veo/tool.yaml"),
         ];
 

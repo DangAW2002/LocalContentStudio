@@ -57,6 +57,10 @@ import type {
   ArtifactRenderResult,
   ArtifactCheckRequest,
   ArtifactCheckResult,
+  SecretStatusItem,
+  SecretSetRequest,
+  SecretDeleteRequest,
+  ProviderEndpointSetRequest,
 } from "./types";
 
 export class StudioApiClient {
@@ -362,6 +366,35 @@ export class StudioApiClient {
   /** Command: `agy_disconnect`. */
   async agyDisconnect(): Promise<{ connected: boolean }> {
     return invoke<{ connected: boolean }>("agy_disconnect");
+  }
+
+  // ==========================================
+  // Secrets & Provider Endpoints
+  // ==========================================
+
+  /** Command: `secret_status`. */
+  async getSecretStatus(): Promise<SecretStatusItem[]> {
+    return invoke<SecretStatusItem[]>("secret_status");
+  }
+
+  /** Command: `secret_set`. */
+  async setSecret(req: SecretSetRequest): Promise<void> {
+    return invoke<void>("secret_set", { ...req });
+  }
+
+  /** Command: `secret_delete`. */
+  async deleteSecret(req: SecretDeleteRequest): Promise<void> {
+    return invoke<void>("secret_delete", { ...req });
+  }
+
+  /** Command: `provider_endpoint_get`. */
+  async getProviderEndpoints(): Promise<Record<string, string>> {
+    return invoke<Record<string, string>>("provider_endpoint_get");
+  }
+
+  /** Command: `provider_endpoint_set`. */
+  async setProviderEndpoint(req: ProviderEndpointSetRequest): Promise<void> {
+    return invoke<void>("provider_endpoint_set", { ...req });
   }
 }
 

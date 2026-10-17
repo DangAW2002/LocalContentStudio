@@ -533,3 +533,27 @@ export interface AgyConnectResult {
 export interface AgyDisconnectResult {
   connected: boolean;
 }
+
+// ==========================================
+// Secret & Provider Endpoint Types
+// ==========================================
+
+export interface SecretStatusItem {
+  name: string;
+  present: boolean;
+}
+
+export interface SecretSetRequest {
+  name: string;
+  value: string;
+}
+
+export interface SecretDeleteRequest {
+  name: string;
+}
+
+export interface ProviderEndpointSetRequest {
+  toolId: string;
+  baseUrl?: string | null;
+}
+

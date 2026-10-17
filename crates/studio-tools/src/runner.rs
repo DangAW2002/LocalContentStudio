@@ -33,8 +33,8 @@ pub struct ToolRunContext<'a> {
     pub scheduler: &'a Arc<Scheduler>,
     /// Secrets store.
     pub secret_store: &'a dyn SecretStore,
-    /// Host-set API base URL override (tests, local proxies). Never taken from tool input.
-    pub api_base_override: Option<String>,
+    /// Host-set API endpoint overrides by tool id (tests, local gateways). Never taken from tool input.
+    pub endpoints: std::collections::HashMap<String, String>,
 }
 
 /// Outcome of invoking a tool.
@@ -172,13 +172,14 @@ pub async fn run_tool(
             source: e,
         })?;
 
+        let endpoint_override = ctx.endpoints.get(&tool.id).map(String::as_str);
         let output_json = crate::providers::run_builtin(
             &tool.id,
             ctx.workspace,
             &turn_out_dir,
             &input,
             &api_key,
-            ctx.api_base_override.as_deref(),
+            endpoint_override,
         )
         .await?;
 
