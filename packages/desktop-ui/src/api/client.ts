@@ -33,6 +33,8 @@ import type {
   CheckpointRestoreRequest,
   CheckpointRestoreResponse,
   EngineProbeResult,
+  EngineModelOption,
+  EngineType,
   CatalogKit,
   CatalogModule,
   CatalogSuggestRequest,
@@ -222,6 +224,14 @@ export class StudioApiClient {
    */
   async probeEngines(): Promise<EngineProbeResult[]> {
     return invoke<EngineProbeResult[]>("engines_probe");
+  }
+
+  /**
+   * Models an engine accepts (claude: family aliases; agy: live `agy models`). First entry is the default.
+   * Command: `engine_models`
+   */
+  async getEngineModels(engine: EngineType): Promise<EngineModelOption[]> {
+    return invoke<EngineModelOption[]>("engine_models", { engine });
   }
 
   /**

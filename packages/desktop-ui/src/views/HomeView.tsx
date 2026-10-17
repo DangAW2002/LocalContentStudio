@@ -7,6 +7,7 @@ import type {
   JobSnapshot,
   CatalogKit,
   EngineType,
+  EngineModelOption,
 } from "../api/types";
 
 export interface HomeViewProps {
@@ -32,7 +33,36 @@ export const HomeView: React.FC<HomeViewProps> = ({
 }) => {
   const [prompt, setPrompt] = React.useState("");
   const [engine, setEngine] = React.useState<EngineType>("claude");
-  const [model, setModel] = React.useState<string>("claude-3-5-sonnet");
+  const [model, setModel] = React.useState<string>("");
+  const [modelOptions, setModelOptions] = React.useState<EngineModelOption[]>([]);
+  const [modelsLoading, setModelsLoading] = React.useState(false);
+  const [modelsError, setModelsError] = React.useState<string | null>(null);
+
+  // Model list comes from the engine itself, so new models show up without an app update.
+  React.useEffect(() => {
+    let alive = true;
+    setModelsLoading(true);
+    setModelsError(null);
+    studioApi
+      .getEngineModels(engine)
+      .then((options) => {
+        if (!alive) return;
+        setModelOptions(options);
+        const remembered = localStorage.getItem(`lcs.model.${engine}`);
+        const pick = options.find((o) => o.value === remembered) ?? options[0];
+        setModel(pick?.value ?? "");
+      })
+      .catch((err: any) => {
+        if (!alive) return;
+        setModelOptions([]);
+        setModel("");
+        setModelsError(typeof err === "string" ? err : err?.message || "Không lấy được danh sách model.");
+      })
+      .finally(() => alive && setModelsLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [engine]);
   const [selectedKit, setSelectedKit] = React.useState<string | null>(null);
   const [suggestedKits, setSuggestedKits] = React.useState<CatalogKit[]>([]);
 
@@ -185,7 +215,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   onChange={(e) => {
                     const next = e.target.value as EngineType;
                     setEngine(next);
-                    setModel(next === "claude" ? "claude-3-5-sonnet" : "gemini-2.0-flash");
                   }}
                   options={[
                     { value: "claude", label: "Claude Code CLI" },
@@ -199,20 +228,28 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   size="sm"
                   label="Mô hình (Model)"
                   value={model}
-                  onChange={(e) => setModel(e.target.value)}
+                  onChange={(e) => {
+                    setModel(e.target.value);
+                    localStorage.setItem(`lcs.model.${engine}`, e.target.value);
+                  }}
+                  disabled={modelsLoading || modelOptions.length === 0}
                   options={
-                    engine === "claude"
-                      ? [
-                          { value: "claude-3-5-sonnet", label: "Claude 3.5 Sonnet" },
-                          { value: "claude-3-7-sonnet", label: "Claude 3.7 Sonnet" },
-                          { value: "claude-3-5-haiku", label: "Claude 3.5 Haiku" },
-                        ]
-                      : [
-                          { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
-                          { value: "gemini-2.0-pro", label: "Gemini 2.0 Pro" },
-                        ]
+                    modelsLoading
+                      ? [{ value: "", label: "Đang tải danh sách model..." }]
+                      : modelOptions.length === 0
+                        ? [{ value: "", label: "Mặc định của engine" }]
+                        : modelOptions
                   }
                 />
+                {modelsError && (
+                  <div
+                    role="alert"
+                    title={modelsError}
+                    style={{ marginTop: 4, fontSize: "var(--cs-text-xs)", color: "var(--cs-danger)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  >
+                    Không lấy được model — dùng mặc định của engine
+                  </div>
+                )}
               </div>
 
               {selectedKit && (

@@ -322,3 +322,13 @@ fn agy_result_error_is_surfaced() {
         .iter()
         .any(|e| matches!(e, studio_engine::Event::Done { .. })));
 }
+
+#[test]
+fn agy_models_output_is_parsed() {
+    // Recorded from `agy models` (agy 1.4.0, 2026-10-17).
+    let raw = "Fetching available models...\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\ngemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\nclaude-opus-4-6-thinking\tClaude Opus 4.6 (Thinking)\n";
+    let models = studio_engine::parse_agy_models(raw);
+    assert_eq!(models.len(), 3);
+    assert_eq!(models[0].id, "gemini-3.8-flash-high");
+    assert_eq!(models[2].label, "Claude Opus 4.6 (Thinking)");
+}

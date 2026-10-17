@@ -12,8 +12,8 @@ pub mod types;
 
 pub use builder::{agy_command, claude_command, CommandSpec};
 pub use engine::{
-    kill_process_tree, AgyEngine, ClaudeEngine, Engine, Turn, SUPPORTED_AGY_VERSION,
-    SUPPORTED_CLAUDE_VERSION,
+    kill_process_tree, parse_agy_models, AgyEngine, ClaudeEngine, Engine, ModelInfo, Turn,
+    SUPPORTED_AGY_VERSION, SUPPORTED_CLAUDE_VERSION,
 };
 pub use parser_agy::AgyParser;
 pub use parser_claude::ClaudeParser;

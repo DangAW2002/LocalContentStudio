@@ -194,6 +194,11 @@ interface CheckpointSummary {
 
 ### 1.5 Engines Probe & Catalog Skill
 
+#### `engine_models`
+- **Mục đích**: Danh sách model engine chấp nhận cho `--model`. claude: alias họ model (`opus`, `sonnet`, `haiku`, `fable`, luôn trỏ bản mới nhất); agy: lấy trực tiếp từ `agy models` (cache 10 phút). Phần tử đầu là mặc định.
+- **Input**: `{ engine: "claude" | "agy" }`
+- **Output**: `{ value: string; label: string }[]`
+
 #### `engines_probe`
 - **Mục đích**: Kiểm tra tình trạng cài đặt và khả năng tương thích của các công cụ bên ngoài (claude, agy, ffmpeg, chromium, node).
 - **Input**: None

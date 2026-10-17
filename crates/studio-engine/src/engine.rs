@@ -187,6 +187,78 @@ impl Engine for AgyEngine {
     }
 }
 
+/// A model the engine CLI accepts for `--model`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ModelInfo {
+    /// Value passed to `--model`.
+    pub id: String,
+    /// Human-readable label.
+    pub label: String,
+}
+
+impl ClaudeEngine {
+    /// Models for Claude Code. The CLI has no listing command; aliases always resolve to the latest model
+    /// of each family, so this list does not go stale when new versions ship.
+    pub fn list_models(&self) -> Vec<ModelInfo> {
+        [
+            ("opus", "Opus (mới nhất)"),
+            ("sonnet", "Sonnet (mới nhất)"),
+            ("haiku", "Haiku (mới nhất, nhanh)"),
+            ("fable", "Fable (mới nhất)"),
+        ]
+        .into_iter()
+        .map(|(id, label)| ModelInfo {
+            id: id.into(),
+            label: label.into(),
+        })
+        .collect()
+    }
+}
+
+impl AgyEngine {
+    /// Models available to this agy install and account, from `agy models` (live, needs login).
+    pub async fn list_models(&self) -> Result<Vec<ModelInfo>, EngineError> {
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(45),
+            Command::new(&self.program_path)
+                .arg("models")
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output(),
+        )
+        .await
+        .map_err(|_| EngineError::Io(std::io::Error::other("agy models: quá thời gian chờ")))?
+        .map_err(EngineError::Io)?;
+        let models = parse_agy_models(&String::from_utf8_lossy(&output.stdout));
+        if models.is_empty() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(EngineError::Io(std::io::Error::other(format!(
+                "agy models không trả về model nào: {}",
+                stderr.trim()
+            ))));
+        }
+        Ok(models)
+    }
+}
+
+/// Parses `agy models` output: one `id<TAB>label` per line; other lines (progress text) are ignored.
+pub fn parse_agy_models(raw: &str) -> Vec<ModelInfo> {
+    raw.lines()
+        .filter_map(|line| {
+            let (id, label) = line.split_once('\t')?;
+            let id = id.trim();
+            if id.is_empty() || id.contains(' ') {
+                return None;
+            }
+            Some(ModelInfo {
+                id: id.to_string(),
+                label: label.trim().to_string(),
+            })
+        })
+        .collect()
+}
+
 async fn probe_cli(program: &Path, expected_version: &str) -> Probe {
     let output = match Command::new(program)
         .arg("--version")

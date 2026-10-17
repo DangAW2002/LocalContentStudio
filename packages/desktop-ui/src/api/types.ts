@@ -157,6 +157,12 @@ export interface ProjectCreateRequest {
 
 export type EngineType = "claude" | "agy";
 
+/** One entry of `engine_models`. */
+export interface EngineModelOption {
+  value: string;
+  label: string;
+}
+
 export interface ThreadSummary {
   /** Thread ID */
   id: string;

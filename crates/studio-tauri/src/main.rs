@@ -5,6 +5,7 @@
 mod broker;
 mod commands;
 mod defaults;
+mod engines;
 mod error;
 mod state;
 mod turns;
@@ -144,6 +145,7 @@ fn main() {
             commands::checkpoint_list,
             commands::checkpoint_restore,
             commands::engines_probe,
+            engines::engine_models,
             commands::catalog_kits,
             commands::catalog_modules,
             commands::catalog_suggest,
