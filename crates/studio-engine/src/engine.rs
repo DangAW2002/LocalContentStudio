@@ -15,7 +15,7 @@ use crate::types::{DoneStatus, EngineError, Event, Probe, TurnRequest};
 
 /// Known verified versions of CLI engines.
 pub const SUPPORTED_CLAUDE_VERSION: &str = "2.1.299";
-pub const SUPPORTED_AGY_VERSION: &str = "1.3.5";
+pub const SUPPORTED_AGY_VERSION: &str = "1.4.0";
 
 /// Trait implemented by agent engine adapters.
 pub trait Engine: Send + Sync {
