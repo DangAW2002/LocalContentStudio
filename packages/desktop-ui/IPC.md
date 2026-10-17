@@ -457,6 +457,72 @@ interface EnvProbeItem {
   version?: string | null;
   path?: string | null;
   hint: string;
+---
+
+### 1.10 Xuất bản & Đăng tải (Publishing)
+
+#### `publish_prepare`
+- **Mục đích**: Chuẩn bị bản nháp yêu cầu xuất bản, xác thực siêu dữ liệu theo giới hạn kênh (`channel@1` text limits) và kiểm tra sự tồn tại của tệp render mới nhất. Trả về mã yêu cầu với trạng thái `awaiting_confirmation` cùng danh sách cảnh báo/lỗi kiểm tra (findings).
+- **Input**: `{ project?: string, artifact: string, channel: string, target: PublishTarget, metadata: PublishMetadata }`
+- **Output**: `PublishPrepareOutcome`
+
+#### `publish_list`
+- **Mục đích**: Liệt kê các yêu cầu xuất bản trong workspace, tùy chọn lọc theo project.
+- **Input**: `{ project?: string }`
+- **Output**: `PublishRequest[]`
+
+#### `publish_get`
+- **Mục đích**: Lấy thông tin chi tiết một yêu cầu xuất bản theo id.
+- **Input**: `{ id: string }`
+- **Output**: `PublishRequest`
+
+#### `publish_update_metadata`
+- **Mục đích**: Cập nhật siêu dữ liệu (tiêu đề, mô tả, thẻ, chế độ hiển thị, lịch đăng, ảnh thu nhỏ) cho bản nháp hoặc bản đăng chờ xác nhận.
+- **Input**: `{ id: string, metadata: PublishMetadata }`
+- **Output**: `PublishRequest`
+
+#### `publish_confirm`
+- **Mục đích**: Xác nhận và tiến hành xuất bản/đăng tải (chạy dưới dạng tác vụ trong scheduler với sự kiện `job-event`). Đảm bảo tính bất biến (idempotent): bản đăng đã `published` không thể gửi lại; bản đăng `failed` cần người dùng xác nhận thử lại rõ ràng. Tuyệt đối không tự động thử lại (NEVER auto-retry).
+- **Input**: `{ id: string }`
+- **Output**: `PublishRequest`
+
+#### `publish_cancel`
+- **Mục đích**: Hủy yêu cầu xuất bản đang chờ xác nhận (chuyển về nháp) hoặc hủy tiến trình đang đăng.
+- **Input**: `{ id: string }`
+- **Output**: `PublishRequest`
+
+#### `youtube_connect`
+- **Mục đích**: Khởi chạy luồng ủy quyền OAuth 2.0 PKCE cho YouTube qua loopback server cục bộ trên trình duyệt hệ thống và lưu refresh token an toàn vào Credential Manager.
+- **Input**: None
+- **Output**: `string`
+
+```ts
+type PublishTarget = "youtube" | "facebook" | "tiktok" | "instagram" | "export";
+type PublishPrivacy = "private" | "unlisted" | "public";
+type PublishStatus = "draft" | "awaiting_confirmation" | "publishing" | "published" | "failed";
+
+interface PublishMetadata {
+  title: string;
+  description: string;
+  tags: string[];
+  privacy: PublishPrivacy;
+  schedule?: string;
+  thumbnail?: string;
+}
+
+interface PublishRequest {
+  id: string;
+  artifact: string;
+  project: string;
+  channel: string;
+  target: PublishTarget;
+  files: string[];
+  metadata: PublishMetadata;
+  status: PublishStatus;
+  resultUrl?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 ```
 

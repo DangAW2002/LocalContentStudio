@@ -66,6 +66,10 @@ import type {
   ProviderPricing,
   ProviderPricingSetRequest,
   EnvProbeItem,
+  PublishRequest,
+  PublishMetadata,
+  PublishPrepareRequest,
+  PublishPrepareOutcome,
 } from "./types";
 
 export class StudioApiClient {
@@ -423,6 +427,66 @@ export class StudioApiClient {
   /** Command: `env_probe`. */
   async envProbe(): Promise<EnvProbeItem[]> {
     return invoke<EnvProbeItem[]>("env_probe");
+  }
+
+  // ==========================================
+  // Publishing Commands
+  // ==========================================
+
+  /**
+   * Prepare a draft publish request with validation against channel limits.
+   * Command: `publish_prepare`
+   */
+  async publishPrepare(req: PublishPrepareRequest): Promise<PublishPrepareOutcome> {
+    return invoke<PublishPrepareOutcome>("publish_prepare", { ...req });
+  }
+
+  /**
+   * List publish requests in the workspace, optionally filtered by project slug.
+   * Command: `publish_list`
+   */
+  async publishList(project?: string): Promise<PublishRequest[]> {
+    return invoke<PublishRequest[]>("publish_list", { project });
+  }
+
+  /**
+   * Get details of a single publish request.
+   * Command: `publish_get`
+   */
+  async publishGet(id: string): Promise<PublishRequest> {
+    return invoke<PublishRequest>("publish_get", { id });
+  }
+
+  /**
+   * Update metadata for a draft or awaiting-confirmation publish request.
+   * Command: `publish_update_metadata`
+   */
+  async publishUpdateMetadata(id: string, metadata: PublishMetadata): Promise<PublishRequest> {
+    return invoke<PublishRequest>("publish_update_metadata", { id, metadata });
+  }
+
+  /**
+   * Confirm and run a publish request.
+   * Command: `publish_confirm`
+   */
+  async publishConfirm(id: string): Promise<PublishRequest> {
+    return invoke<PublishRequest>("publish_confirm", { id });
+  }
+
+  /**
+   * Cancel an in-progress or awaiting-confirmation publish request.
+   * Command: `publish_cancel`
+   */
+  async publishCancel(id: string): Promise<PublishRequest> {
+    return invoke<PublishRequest>("publish_cancel", { id });
+  }
+
+  /**
+   * Connect YouTube using OAuth 2.0 PKCE and loopback listener.
+   * Command: `youtube_connect`
+   */
+  async youtubeConnect(): Promise<string> {
+    return invoke<string>("youtube_connect");
   }
 }
 

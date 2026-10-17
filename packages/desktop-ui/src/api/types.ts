@@ -587,3 +587,79 @@ export interface EnvProbeItem {
   hint: string;
 }
 
+// ==========================================
+// Publishing Types
+// ==========================================
+
+export type PublishTarget = "youtube" | "facebook" | "tiktok" | "instagram" | "export";
+
+export type PublishPrivacy = "private" | "unlisted" | "public";
+
+export type PublishStatus = "draft" | "awaiting_confirmation" | "publishing" | "published" | "failed";
+
+export interface PublishMetadata {
+  title: string;
+  description: string;
+  tags: string[];
+  privacy: PublishPrivacy;
+  schedule?: string;
+  thumbnail?: string;
+}
+
+export interface PublishRequest {
+  id: string;
+  artifact: string;
+  project: string;
+  channel: string;
+  target: PublishTarget;
+  files: string[];
+  metadata: PublishMetadata;
+  status: PublishStatus;
+  resultUrl?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublishListRequest {
+  project?: string;
+}
+
+export interface PublishUpdateRequest {
+  id: string;
+  metadata: PublishMetadata;
+}
+
+export interface PublishFinding {
+  severity: "info" | "warn" | "error";
+  code: string;
+  message_vi: string;
+  location?: string;
+  fix_hint_vi?: string;
+}
+
+export interface PublishPrepareRequest {
+  project?: string;
+  artifact: string;
+  channel: string;
+  target: PublishTarget;
+  metadata: PublishMetadata;
+}
+
+export interface PublishPrepareOutcome {
+  id: string;
+  status: PublishStatus;
+  findings: PublishFinding[];
+  files: string[];
+  request: PublishRequest;
+}
+
+export interface PublishConfirmRequest {
+  id: string;
+}
+
+export interface PublishCancelRequest {
+  id: string;
+}
+
+

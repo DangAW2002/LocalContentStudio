@@ -7,6 +7,7 @@ mod commands;
 mod defaults;
 mod engines;
 mod error;
+mod publish;
 mod state;
 mod turns;
 
@@ -171,6 +172,13 @@ fn main() {
             commands::provider_pricing_get,
             commands::provider_pricing_set,
             commands::env_probe,
+            publish::publish_prepare,
+            publish::publish_list,
+            publish::publish_get,
+            publish::publish_update_metadata,
+            publish::publish_confirm,
+            publish::publish_cancel,
+            publish::youtube_connect,
         ])
         .run(tauri::generate_context!())
         .expect("không khởi động được Local Content Studio");

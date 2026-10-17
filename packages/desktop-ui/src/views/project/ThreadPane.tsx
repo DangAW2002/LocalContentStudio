@@ -5,9 +5,11 @@ import { studioApi } from "../../api/client";
 import type {
   EngineTurnEvent,
   ProjectFileEntry,
+  PublishRequest,
   ScopeItem,
   ThreadSummary,
 } from "../../api/types";
+import { PublishDialog } from "../../components/PublishDialog";
 
 export interface ThreadMessage {
   id: string;
@@ -156,6 +158,24 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
   const [pickerIndex, setPickerIndex] = React.useState(0);
   const [undoTurnTarget, setUndoTurnTarget] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [pendingPublishRequests, setPendingPublishRequests] = React.useState<PublishRequest[]>([]);
+  const [selectedPublishRequest, setSelectedPublishRequest] = React.useState<PublishRequest | null>(null);
+  const [publishDialogOpen, setPublishDialogOpen] = React.useState(false);
+
+  const loadPublishRequests = React.useCallback(async () => {
+    if (!projectSlug) return;
+    try {
+      const list = await studioApi.publishList(projectSlug);
+      const awaiting = list.filter((r) => r.status === "awaiting_confirmation");
+      setPendingPublishRequests(awaiting);
+    } catch {
+      // ignore
+    }
+  }, [projectSlug]);
+
+  React.useEffect(() => {
+    loadPublishRequests();
+  }, [loadPublishRequests]);
 
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -218,7 +238,10 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
         unlisten = await studioApi.onTurnEvent((payload) => {
           if (!activeThread || payload.threadId !== activeThread.id) return;
           setMessages((prev) => applyTurnEvent(prev, payload));
-          if (payload.event.type === "Done") setRunningTurnId(null);
+          if (payload.event.type === "Done") {
+            setRunningTurnId(null);
+            loadPublishRequests();
+          }
           if (payload.event.type === "Error") {
             setRunningTurnId(null);
             setError(payload.event.message);
@@ -233,7 +256,7 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
     return () => {
       if (unlisten) unlisten();
     };
-  }, [activeThread]);
+  }, [activeThread, loadPublishRequests]);
 
   // Handle send message
   const handleSend = async () => {
@@ -645,6 +668,46 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
                     </Button>
                   </div>
                 ))}
+
+                {/* Agent Publish Draft In-Turn Banner */}
+                {msg.toolCalls?.some((tc) => tc.name.includes("publish_prepare")) && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: "8px 12px",
+                      backgroundColor: "var(--cs-status-info-bg)",
+                      border: "1px solid var(--cs-accent)",
+                      borderRadius: "var(--cs-radius-control)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--cs-text-xs)", color: "var(--cs-accent)" }}>
+                      <Icon name="publishing" size={14} color="var(--cs-accent)" />
+                      <span style={{ fontWeight: 600 }}>Agent đã chuẩn bị bản đăng — xem lại và xác nhận</span>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={async () => {
+                        try {
+                          const list = await studioApi.publishList(projectSlug);
+                          const req = list.find((r) => r.status === "awaiting_confirmation") || list[0];
+                          if (req) {
+                            setSelectedPublishRequest(req);
+                            setPublishDialogOpen(true);
+                          }
+                        } catch {
+                          // ignore
+                        }
+                      }}
+                    >
+                      Xem lại & xác nhận
+                    </Button>
+                  </div>
+                )}
               </div>
 
               {/* Per-Turn Footer (Usage / Undo) */}
@@ -794,6 +857,40 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
         </div>
       )}
 
+      {/* Draft Publish Banner */}
+      {pendingPublishRequests.length > 0 && (
+        <div
+          style={{
+            margin: "0 var(--cs-space-3) var(--cs-space-2) var(--cs-space-3)",
+            padding: "8px 12px",
+            backgroundColor: "var(--cs-status-info-bg)",
+            border: "1px solid var(--cs-accent)",
+            borderRadius: "var(--cs-radius-control)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            <Icon name="publishing" size={16} color="var(--cs-accent)" />
+            <span style={{ fontSize: "var(--cs-text-xs)", fontWeight: 600, color: "var(--cs-accent)" }}>
+              Agent đã chuẩn bị bản đăng — xem lại và xác nhận
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={() => {
+              setSelectedPublishRequest(pendingPublishRequests[0]);
+              setPublishDialogOpen(true);
+            }}
+          >
+            Xem lại & xác nhận
+          </Button>
+        </div>
+      )}
+
       {/* Prompt Input Box */}
       <div
         style={{
@@ -875,6 +972,21 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
           </p>
         </Dialog>
       )}
+
+      {/* Publish Dialog */}
+      <PublishDialog
+        open={publishDialogOpen}
+        onClose={() => {
+          setPublishDialogOpen(false);
+          setSelectedPublishRequest(null);
+          loadPublishRequests();
+        }}
+        projectSlug={projectSlug}
+        initialRequest={selectedPublishRequest}
+        onPublished={() => {
+          loadPublishRequests();
+        }}
+      />
     </div>
   );
 };

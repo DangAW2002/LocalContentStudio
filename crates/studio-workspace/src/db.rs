@@ -96,6 +96,24 @@ impl WorkspaceDb {
             Self::apply_v1(conn)?;
         }
 
+        if current < 2 {
+            // Backup before applying v2 if database file already exists and has tables
+            if db_path.exists() {
+                let table_count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name != 'schema_migrations'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
+                if table_count > 0 {
+                    Self::perform_backup(conn, backup_dir, "v2")?;
+                }
+            }
+
+            Self::apply_v2(conn)?;
+        }
+
         Ok(())
     }
 
@@ -266,6 +284,42 @@ impl WorkspaceDb {
         let now = chrono::Utc::now().to_rfc3339();
         tx.execute(
             "INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (1, 'v1-workspace-schema', ?1)
+             ON CONFLICT(version) DO NOTHING",
+            [&now],
+        )?;
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn apply_v2(conn: &mut Connection) -> Result<()> {
+        let tx = conn.transaction()?;
+
+        tx.execute_batch(
+            "
+            -- 14. Publish Requests
+            CREATE TABLE IF NOT EXISTS publish_requests (
+                id TEXT PRIMARY KEY,
+                artifact TEXT NOT NULL,
+                project TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                target TEXT NOT NULL,
+                files_json TEXT NOT NULL,
+                metadata_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                result_url TEXT,
+                error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_publish_requests_proj ON publish_requests(project);
+            CREATE INDEX IF NOT EXISTS idx_publish_requests_status ON publish_requests(status);
+            ",
+        )?;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (2, 'v2-publish-requests', ?1)
              ON CONFLICT(version) DO NOTHING",
             [&now],
         )?;

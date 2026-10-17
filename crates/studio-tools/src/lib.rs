@@ -6,6 +6,7 @@ pub mod manifest;
 pub mod pricing;
 pub mod probe;
 pub mod providers;
+pub mod publish;
 pub mod registry;
 pub mod router;
 pub mod runner;

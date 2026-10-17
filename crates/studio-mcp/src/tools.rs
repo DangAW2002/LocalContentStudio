@@ -41,6 +41,33 @@ pub fn definitions() -> Vec<Value> {
         tool("capability_describe", "Mô tả một capability: schema vào/ra và các provider.", json!({ "id": s("vd tts.synthesize@1") }), &["id"]),
         tool("capability_run", "Chạy một capability qua provider đã chọn (hoặc mặc định, có dự phòng).", json!({ "capability": s("vd tts.synthesize@1"), "provider": s("id tool, tùy chọn"), "input": { "type": "object" } }), &["capability", "input"]),
         tool("check_run", "Kiểm artifact theo Brand và kênh (hãy render trước rồi kiểm tra — render first, then check).", json!({ "artifact_dir": s("thư mục artifact tương đối"), "brand": s("slug brand"), "channels": { "type": "array", "items": { "type": "string" } }, "renders": { "type": "array", "items": { "type": "string" } } }), &["artifact_dir", "brand", "channels"]),
+        tool(
+            "publish_prepare",
+            "Chuẩn bị bản nháp đăng tải (YouTube, Facebook, TikTok, Instagram, Export). Kiểm tra giới hạn kênh và bản render mới nhất, tạo bản nháp chờ người dùng xác nhận trên desktop.",
+            json!({
+                "artifact": s("ID artifact (vd thumb-01) hoặc đường dẫn tương đối"),
+                "project": s("Slug project, tùy chọn nếu artifact chứa đường dẫn hoặc trong ngữ cảnh project"),
+                "channel": s("ID kênh đích (vd youtube, youtube-shorts, facebook, tiktok, instagram)"),
+                "target": json!({
+                    "type": "string",
+                    "enum": ["youtube", "facebook", "tiktok", "instagram", "export"],
+                    "description": "Nền tảng xuất bản đích"
+                }),
+                "metadata": json!({
+                    "type": "object",
+                    "properties": {
+                        "title": s("Tiêu đề bài đăng hoặc video"),
+                        "description": s("Mô tả hoặc nội dung bài đăng"),
+                        "tags": json!({ "type": "array", "items": { "type": "string" }, "description": "Danh sách thẻ hoặc hashtag" }),
+                        "privacy": json!({ "type": "string", "enum": ["private", "unlisted", "public"], "description": "Chế độ hiển thị (mặc định private)" }),
+                        "schedule": s("Thời gian hẹn giờ đăng theo chuẩn ISO 8601 (tùy chọn)"),
+                        "thumbnail": s("Đường dẫn tệp ảnh thu nhỏ tùy chọn trong workspace")
+                    },
+                    "required": ["title"]
+                })
+            }),
+            &["artifact", "channel", "target", "metadata"]
+        ),
         tool("approve", "Nội bộ: xử lý yêu cầu cấp quyền của engine.", json!({ "tool_name": s("tên tool"), "input": { "type": "object" } }), &["tool_name", "input"]),
     ]
 }
@@ -190,6 +217,35 @@ pub async fn call(
             render_artifact_shared(&ws, &state.scheduler, &proj, &id, format_raw).await?
         }
         "check_run" => check_run(&ws, args)?,
+        "publish_prepare" => {
+            let artifact_raw = required(args, "artifact")?;
+            let project_raw = arg(args, "project");
+            let channel_raw = required(args, "channel")?;
+            let target_raw = required(args, "target")?;
+            let target = target_raw
+                .parse::<studio_tools::publish::PublishTarget>()
+                .map_err(|e| e.to_string())?;
+
+            let meta_val = args.get("metadata").cloned().unwrap_or(json!({}));
+            let metadata: studio_tools::publish::PublishMetadata = serde_json::from_value(meta_val)
+                .map_err(|e| format!("Dữ liệu metadata không hợp lệ: {e}"))?;
+
+            let db = studio_workspace::WorkspaceDb::open(&ws)
+                .map_err(|e| format!("Không mở được cơ sở dữ liệu: {e}"))?;
+
+            let outcome = studio_tools::publish::prepare_publish(
+                &ws,
+                db.conn(),
+                artifact_raw,
+                project_raw,
+                channel_raw,
+                target,
+                metadata,
+            )
+            .map_err(|e| e.to_string())?;
+
+            serde_json::to_value(outcome).map_err(|e| e.to_string())?
+        }
         other => return Err(format!("Không có tool \"{other}\".")),
     };
     Ok(inline_or_file(&ws, out))
