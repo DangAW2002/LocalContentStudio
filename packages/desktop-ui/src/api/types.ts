@@ -56,6 +56,22 @@ export interface FileReadResult {
   size: number;
 }
 
+export interface FileWriteRequest {
+  /** Project slug (optional if writing absolute or workspace-relative path) */
+  project?: string;
+  /** Target file path */
+  path: string;
+  /** UTF-8 string text content to write */
+  text: string;
+}
+
+export interface FileWriteResult {
+  /** Workspace-relative path written */
+  path: string;
+  /** Byte size written */
+  size: number;
+}
+
 // ==========================================
 // Workspace Types
 // ==========================================
@@ -264,6 +280,16 @@ export interface CheckpointRestoreResponse {
   restoredCheckpointId: string;
 }
 
+export interface CheckpointCreateRequest {
+  /** Optional human-readable checkpoint label */
+  label?: string;
+}
+
+export interface CheckpointCreateResult {
+  /** Checkpoint SHA-256 hash or ID */
+  id: string;
+}
+
 // ==========================================
 // Engines & Catalog Types
 // ==========================================
@@ -398,6 +424,70 @@ export interface DiskUsageReport {
     library: string;
     total: string;
   };
+}
+
+// ==========================================
+// Artifact Types
+// ==========================================
+
+export interface ArtifactSummary {
+  /** Unique artifact ID e.g. thumb-01, video-main */
+  id: string;
+  /** Artifact kind e.g. design, motion, timeline, text, audio */
+  kind: string;
+  /** User-facing title */
+  title: string;
+  /** Brand slug reference */
+  brand?: string;
+  /** Applicable platform channel IDs */
+  channels?: string[];
+  /** Workspace-relative directory path */
+  dir: string;
+  /** Workspace-relative main source path */
+  source: string;
+}
+
+export interface ArtifactRenderRequest {
+  project: string;
+  id: string;
+}
+
+export interface ArtifactProbe {
+  name: string;
+  available: boolean;
+  note?: string;
+}
+
+export interface ArtifactRenderResult {
+  cached: boolean;
+  outputs: string[];
+  jobId?: string;
+  probes: ArtifactProbe[];
+}
+
+export interface CheckFinding {
+  severity: "info" | "warn" | "error";
+  code: string;
+  message_vi: string;
+  location?: string;
+  fix_hint_vi?: string;
+}
+
+export interface ChannelCheckResult {
+  channel_id: string;
+  passed: boolean;
+  findings: CheckFinding[];
+}
+
+export interface ArtifactCheckRequest {
+  project: string;
+  id: string;
+  channels?: string[];
+}
+
+export interface ArtifactCheckResult {
+  passed: boolean;
+  channels: Record<string, ChannelCheckResult>;
 }
 
 // ==========================================

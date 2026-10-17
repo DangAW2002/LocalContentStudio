@@ -41,6 +41,8 @@ export interface ThreadPaneProps {
   projectFiles: ProjectFileEntry[];
   playbooks: ScopeItem[];
   onSelectFile: (path: string) => void;
+  pendingInsert?: string | null;
+  onInsertConsumed?: () => void;
 }
 
 /**
@@ -126,6 +128,8 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
   projectFiles,
   playbooks,
   onSelectFile,
+  pendingInsert,
+  onInsertConsumed,
 }) => {
   const [messages, setMessages] = React.useState<ThreadMessage[]>([]);
   const [inputPrompt, setInputPrompt] = React.useState("");
@@ -137,6 +141,24 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
 
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+  // Handle pending text insertion from StagePane (e.g. Ask AI about layer)
+  React.useEffect(() => {
+    if (pendingInsert) {
+      setInputPrompt((prev) => {
+        const separator = prev.length > 0 && !prev.endsWith(" ") && !prev.endsWith("\n") ? " " : "";
+        return prev + separator + pendingInsert;
+      });
+      onInsertConsumed?.();
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.selectionStart = textareaRef.current.value.length;
+          textareaRef.current.selectionEnd = textareaRef.current.value.length;
+        }
+      }, 0);
+    }
+  }, [pendingInsert, onInsertConsumed]);
 
   // Scroll to bottom on new messages
   React.useEffect(() => {

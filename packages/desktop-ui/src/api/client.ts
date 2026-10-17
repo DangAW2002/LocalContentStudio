@@ -48,6 +48,15 @@ import type {
   TurnEventPayload,
   JobEventPayload,
   FsEventPayload,
+  FileWriteRequest,
+  FileWriteResult,
+  CheckpointCreateRequest,
+  CheckpointCreateResult,
+  ArtifactSummary,
+  ArtifactRenderRequest,
+  ArtifactRenderResult,
+  ArtifactCheckRequest,
+  ArtifactCheckResult,
 } from "./types";
 
 export class StudioApiClient {
@@ -310,6 +319,35 @@ export class StudioApiClient {
    */
   async onFsEvent(callback: (payload: FsEventPayload) => void): Promise<() => void> {
     return listen<FsEventPayload>("fs-event", (e) => callback(e.payload));
+  }
+
+  // ==========================================
+  // Editing & Artifacts
+  // ==========================================
+
+  /** Command: `file_write` (direct edits on the Stage). */
+  async writeFile(req: FileWriteRequest): Promise<FileWriteResult> {
+    return invoke<FileWriteResult>("file_write", { ...req });
+  }
+
+  /** Command: `checkpoint_create`. */
+  async createCheckpoint(req: CheckpointCreateRequest = {}): Promise<CheckpointCreateResult> {
+    return invoke<CheckpointCreateResult>("checkpoint_create", { ...req });
+  }
+
+  /** Command: `artifact_list`. */
+  async listArtifacts(project: string): Promise<ArtifactSummary[]> {
+    return invoke<ArtifactSummary[]>("artifact_list", { project });
+  }
+
+  /** Command: `artifact_render`. */
+  async renderArtifact(req: ArtifactRenderRequest): Promise<ArtifactRenderResult> {
+    return invoke<ArtifactRenderResult>("artifact_render", { ...req });
+  }
+
+  /** Command: `artifact_check`. */
+  async checkArtifact(req: ArtifactCheckRequest): Promise<ArtifactCheckResult> {
+    return invoke<ArtifactCheckResult>("artifact_check", { ...req });
   }
 }
 
