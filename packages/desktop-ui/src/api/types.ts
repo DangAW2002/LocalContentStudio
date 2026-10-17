@@ -409,6 +409,7 @@ export interface JobSnapshot {
   stageName?: string;
   createdAt: string;
   error?: string;
+  peakMemoryBytes?: number;
 }
 
 export interface DiskUsageReport {
@@ -522,4 +523,13 @@ export interface JobEventPayload {
 
 export interface FsEventPayload {
   paths: string[];
+}
+
+export interface AgyConnectResult {
+  connected: boolean;
+  shim?: string;
+}
+
+export interface AgyDisconnectResult {
+  connected: boolean;
 }

@@ -1,5 +1,6 @@
 import React from "react";
 import { Icon } from "./Icon";
+import { cleanDisplayPath } from "../utils/path";
 import type { EngineProbeResult, JobSnapshot, DiskUsageReport } from "../api/types";
 
 export interface StatusBarProps {
@@ -52,9 +53,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
           }}
-          title={workspacePath || "Chưa mở workspace"}
+          title={cleanDisplayPath(workspacePath) || "Chưa mở workspace"}
         >
-          {workspacePath ? `Thư mục: ${workspacePath}` : "Chưa chọn workspace"}
+          {workspacePath ? `Thư mục: ${cleanDisplayPath(workspacePath)}` : "Chưa chọn workspace"}
         </span>
       </div>
 

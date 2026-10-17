@@ -16,6 +16,7 @@ import type {
   WorkspaceSummary,
   EngineProbeResult,
   JobSnapshot,
+  JobState,
   DiskUsageReport,
 } from "./api/types";
 
@@ -81,10 +82,33 @@ export const App: React.FC = () => {
         unlisten = await studioApi.onJobEvent((payload) => {
           setJobs((prev) => {
             const exists = prev.some((j) => j.id === payload.jobId);
+            const snapshotState: JobState =
+              payload.state === "queued" || payload.state === "admitted"
+                ? "PENDING"
+                : payload.state === "running"
+                ? "RUNNING"
+                : payload.state === "succeeded"
+                ? "DONE"
+                : payload.state === "failed"
+                ? "FAILED"
+                : "CANCELLED";
+
+            const updated: JobSnapshot = {
+              id: payload.jobId,
+              title: payload.kind,
+              kind: payload.kind,
+              state: snapshotState,
+              progress: payload.progress,
+              stageName: payload.message,
+              createdAt: payload.event?.createdAt || new Date().toISOString(),
+              error: payload.state === "failed" ? payload.message : undefined,
+              peakMemoryBytes: payload.peakMemoryBytes,
+            };
+
             if (exists) {
-              return prev.map((j) => (j.id === payload.jobId ? payload.event : j));
+              return prev.map((j) => (j.id === payload.jobId ? { ...j, ...updated } : j));
             } else {
-              return [payload.event, ...prev];
+              return [updated, ...prev];
             }
           });
         });

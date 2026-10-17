@@ -2,6 +2,7 @@ import React from "react";
 import { Icon } from "../components/Icon";
 import { Tabs, Badge, Button, EmptyState, ErrorState, Callout } from "@studio/design-system";
 import { studioApi } from "../api/client";
+import { cleanDisplayPath } from "../utils/path";
 import type {
   EngineProbeResult,
   CatalogKit,
@@ -18,6 +19,49 @@ export const SettingsView: React.FC = () => {
 
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+
+  const [agyBusy, setAgyBusy] = React.useState(false);
+  const [agyStatus, setAgyStatus] = React.useState<{ type: "success" | "danger"; message: string } | null>(null);
+
+  const handleAgyConnect = async () => {
+    setAgyBusy(true);
+    setAgyStatus(null);
+    try {
+      const res = await studioApi.agyConnect();
+      setAgyStatus({
+        type: "success",
+        message: `Đã kết nối thành công agy với Studio MCP entry 'studio' (shim: ${cleanDisplayPath(res.shim) || "studio-mcp"}).`,
+      });
+      loadData();
+    } catch (err: any) {
+      setAgyStatus({
+        type: "danger",
+        message: err?.message || "Không thể kết nối agy với Studio.",
+      });
+    } finally {
+      setAgyBusy(false);
+    }
+  };
+
+  const handleAgyDisconnect = async () => {
+    setAgyBusy(true);
+    setAgyStatus(null);
+    try {
+      await studioApi.agyDisconnect();
+      setAgyStatus({
+        type: "success",
+        message: "Đã ngắt kết nối agy khỏi Studio MCP thành công.",
+      });
+      loadData();
+    } catch (err: any) {
+      setAgyStatus({
+        type: "danger",
+        message: err?.message || "Không thể ngắt kết nối agy.",
+      });
+    } finally {
+      setAgyBusy(false);
+    }
+  };
 
   const loadData = React.useCallback(async () => {
     setLoading(true);
@@ -119,47 +163,13 @@ export const SettingsView: React.FC = () => {
                   }
                 />
               ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-3)" }}>
-                  {engines.map((eng) => (
-                    <div
-                      key={eng.id}
-                      style={{
-                        padding: "var(--cs-space-4)",
-                        backgroundColor: "var(--cs-bg-panel)",
-                        border: "1px solid var(--cs-border-subtle)",
-                        borderRadius: "var(--cs-radius-none)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontWeight: 700, fontSize: "var(--cs-text-md)" }}>
-                            {eng.name}
-                          </span>
-                          <Badge variant={eng.installed ? "success" : "warning"}>
-                            {eng.installed ? "Đã cài đặt" : "Chưa cài"}
-                          </Badge>
-                          {eng.supported && <Badge variant="info">Tương thích</Badge>}
-                        </div>
-
-                        <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
-                          {eng.version && <span>Phiên bản: {eng.version}</span>}
-                          {eng.path && (
-                            <span style={{ fontFamily: "var(--cs-font-mono)" }}>
-                              Đường dẫn: {eng.path}
-                            </span>
-                          )}
-                        </div>
-
-                        {eng.notes && (
-                          <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)", marginTop: 2 }}>
-                            {eng.notes}
-                          </div>
-                        )}
-                      </div>
-
+                <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-4)" }}>
+                  {/* Section: Agent Engines */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-3)" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <h2 style={{ margin: 0, fontSize: "var(--cs-text-md)", fontWeight: 700 }}>
+                        Agent Engines (Trí tuệ nhân tạo)
+                      </h2>
                       <Button
                         size="sm"
                         variant="secondary"
@@ -169,7 +179,161 @@ export const SettingsView: React.FC = () => {
                         Quét lại
                       </Button>
                     </div>
-                  ))}
+
+                    {engines
+                      .filter((e) => e.id === "claude" || e.id === "agy")
+                      .map((eng) => {
+                        const isAgy = eng.id === "agy";
+                        const isNotLoggedIn = eng.notes?.toLowerCase().includes("chưa đăng nhập");
+                        const loggedIn = eng.installed && !isNotLoggedIn;
+
+                        return (
+                          <div
+                            key={eng.id}
+                            style={{
+                              padding: "var(--cs-space-4)",
+                              backgroundColor: "var(--cs-bg-panel)",
+                              border: "1px solid var(--cs-border-subtle)",
+                              borderRadius: "var(--cs-radius-control)",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 12,
+                            }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <Icon name="bot" size={18} color="var(--cs-accent)" />
+                                <span style={{ fontWeight: 700, fontSize: "var(--cs-text-md)" }}>
+                                  {eng.name}
+                                </span>
+                                <Badge variant={eng.installed ? "success" : "warning"}>
+                                  {eng.installed ? "Đã cài đặt" : "Chưa cài"}
+                                </Badge>
+                                {eng.installed && (
+                                  <Badge variant={loggedIn ? "success" : "warning"}>
+                                    {loggedIn ? "Đã đăng nhập" : "Chưa đăng nhập"}
+                                  </Badge>
+                                )}
+                                {eng.supported && <Badge variant="info">Tương thích</Badge>}
+                              </div>
+                            </div>
+
+                            <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
+                              <span>Phiên bản: {eng.version || (eng.installed ? "Đã nhận diện" : "Không tìm thấy")}</span>
+                              {eng.path && (
+                                <span style={{ fontFamily: "var(--cs-font-mono)" }}>
+                                  Đường dẫn: {cleanDisplayPath(eng.path)}
+                                </span>
+                              )}
+                            </div>
+
+                            {eng.notes && (
+                              <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)" }}>
+                                {eng.notes}
+                              </div>
+                            )}
+
+                            {/* agy MCP Connection Controls */}
+                            {isAgy && (
+                              <div
+                                style={{
+                                  marginTop: 4,
+                                  padding: "var(--cs-space-3)",
+                                  backgroundColor: "var(--cs-bg-raised)",
+                                  border: "1px solid var(--cs-border-subtle)",
+                                  borderRadius: "var(--cs-radius-control)",
+                                }}
+                              >
+                                <div style={{ fontWeight: 600, fontSize: "var(--cs-text-sm)", marginBottom: 4 }}>
+                                  Tích hợp Antigravity (agy) MCP
+                                </div>
+                                <p style={{ margin: "0 0 10px 0", fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)", lineHeight: 1.5 }}>
+                                  Đăng ký MCP server <code>studio</code> toàn cục vào agy và thêm quy tắc cho phép <code>mcp(studio)</code> để agy tự động kết nối và điều khiển Studio MCP shim.
+                                </p>
+                                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                  <Button
+                                    size="sm"
+                                    variant="primary"
+                                    onClick={handleAgyConnect}
+                                    busy={agyBusy}
+                                    busyText="Đang kết nối..."
+                                    leftIcon={<Icon name="link" size={13} />}
+                                  >
+                                    Kết nối agy với Studio
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={handleAgyDisconnect}
+                                    disabled={agyBusy}
+                                    leftIcon={<Icon name="unlink" size={13} />}
+                                  >
+                                    Ngắt kết nối
+                                  </Button>
+                                </div>
+                                {agyStatus && (
+                                  <div style={{ marginTop: 8 }}>
+                                    <Callout variant={agyStatus.type}>
+                                      {agyStatus.message}
+                                    </Callout>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+
+                  {/* Section: Auxiliary tools */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-3)", marginTop: 8 }}>
+                    <h2 style={{ margin: 0, fontSize: "var(--cs-text-md)", fontWeight: 700 }}>
+                      Công cụ Kết xuất & Môi trường Phụ trợ
+                    </h2>
+                    {engines
+                      .filter((e) => e.id !== "claude" && e.id !== "agy")
+                      .map((eng) => (
+                        <div
+                          key={eng.id}
+                          style={{
+                            padding: "var(--cs-space-3) var(--cs-space-4)",
+                            backgroundColor: "var(--cs-bg-panel)",
+                            border: "1px solid var(--cs-border-subtle)",
+                            borderRadius: "var(--cs-radius-control)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                          }}
+                        >
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span style={{ fontWeight: 600, fontSize: "var(--cs-text-sm)" }}>
+                                {eng.name}
+                              </span>
+                              <Badge variant={eng.installed ? "success" : "warning"}>
+                                {eng.installed ? "Đã cài đặt" : "Chưa cài"}
+                              </Badge>
+                              {eng.supported && <Badge variant="info">Tương thích</Badge>}
+                            </div>
+
+                            <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
+                              {eng.version && <span>Phiên bản: {eng.version}</span>}
+                              {eng.path && (
+                                <span style={{ fontFamily: "var(--cs-font-mono)" }}>
+                                  Đường dẫn: {cleanDisplayPath(eng.path)}
+                                </span>
+                              )}
+                            </div>
+
+                            {eng.notes && (
+                              <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)" }}>
+                                {eng.notes}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
                 </div>
               )}
             </div>

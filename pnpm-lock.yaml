@@ -8,12 +8,6 @@ importers:
 
   .: {}
 
-  packages/contracts:
-    devDependencies:
-      typescript:
-        specifier: ^5.5.4
-        version: 5.9.3
-
   packages/design-system:
     devDependencies:
       '@types/react':
@@ -34,9 +28,6 @@ importers:
 
   packages/desktop-ui:
     dependencies:
-      '@studio/contracts':
-        specifier: workspace:*
-        version: link:../contracts
       '@studio/design-system':
         specifier: workspace:*
         version: link:../design-system
