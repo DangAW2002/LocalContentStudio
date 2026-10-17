@@ -1904,8 +1904,7 @@ fn get_windows_sapi_voices() -> Vec<String> {
 }
 
 /// Retrieves TTS status, installed providers, voices, and active configuration.
-#[tauri::command]
-pub async fn tts_status(state: State<'_, AppState>) -> CmdResult<TtsStatusResponse> {
+pub async fn tts_status_impl(state: &AppState) -> CmdResult<TtsStatusResponse> {
     let mut providers = Vec::new();
 
     // 1. VieNeu-TTS
@@ -2042,9 +2041,18 @@ pub async fn tts_status(state: State<'_, AppState>) -> CmdResult<TtsStatusRespon
     })
 }
 
-/// Generates download preview info (size, license terms) before downloading a model or binary.
+/// Retrieves TTS status, installed providers, voices, and active configuration.
 #[tauri::command]
-pub async fn tts_model_preview(provider: String, voice: String) -> CmdResult<TtsModelPreview> {
+pub async fn tts_status(state: State<'_, AppState>) -> CmdResult<TtsStatusResponse> {
+    tts_status_impl(&state).await
+}
+
+/// Generates download preview info (size, license terms) before downloading a model or binary.
+pub async fn tts_model_preview_impl(
+    _state: &AppState,
+    provider: String,
+    voice: String,
+) -> CmdResult<TtsModelPreview> {
     let p_lower = provider.to_lowercase();
     if p_lower == "tts.piper" || p_lower == "piper" {
         if voice == "binary" || voice == "piper-bin" {
@@ -2097,9 +2105,19 @@ pub async fn tts_model_preview(provider: String, voice: String) -> CmdResult<Tts
     )))
 }
 
-/// Downloads and installs a TTS model or binary with SHA-256 verification after confirmation.
+/// Generates download preview info (size, license terms) before downloading a model or binary.
 #[tauri::command]
-pub async fn tts_model_install(
+pub async fn tts_model_preview(
+    state: State<'_, AppState>,
+    provider: String,
+    voice: String,
+) -> CmdResult<TtsModelPreview> {
+    tts_model_preview_impl(&state, provider, voice).await
+}
+
+/// Downloads and installs a TTS model or binary with SHA-256 verification after confirmation.
+pub async fn tts_model_install_impl(
+    _state: &AppState,
     provider: String,
     voice: String,
 ) -> CmdResult<TtsModelInstallResult> {
@@ -2141,11 +2159,19 @@ pub async fn tts_model_install(
     )))
 }
 
-/// Synthesize speech for testing/preview in settings ("Nghe thử").
+/// Downloads and installs a TTS model or binary with SHA-256 verification after confirmation.
 #[tauri::command]
-pub async fn tts_synthesize_preview(
-    app: AppHandle,
+pub async fn tts_model_install(
     state: State<'_, AppState>,
+    provider: String,
+    voice: String,
+) -> CmdResult<TtsModelInstallResult> {
+    tts_model_install_impl(&state, provider, voice).await
+}
+
+/// Synthesize speech for testing/preview in settings ("Nghe thử").
+pub async fn tts_synthesize_preview_impl(
+    state: &AppState,
     req: TtsPreviewRequest,
 ) -> CmdResult<TtsPreviewResponse> {
     let text = req.text.trim();
@@ -2159,9 +2185,6 @@ pub async fn tts_synthesize_preview(
         .join("cache")
         .join("tts-previews");
     let _ = std::fs::create_dir_all(&preview_dir);
-    let _ = app
-        .asset_protocol_scope()
-        .allow_directory(&preview_dir, true);
 
     let target_wav = preview_dir.join(format!("preview-{}.wav", uuid::Uuid::new_v4()));
 
@@ -2392,9 +2415,28 @@ $s.Dispose();"#
     })
 }
 
-/// Get stored default TTS provider and voice.
+/// Synthesize speech for testing/preview in settings ("Nghe thử").
 #[tauri::command]
-pub fn tts_get_config(state: State<'_, AppState>) -> CmdResult<TtsConfigResponse> {
+pub async fn tts_synthesize_preview(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    req: TtsPreviewRequest,
+) -> CmdResult<TtsPreviewResponse> {
+    let preview_dir = state
+        .app_paths
+        .data_dir()
+        .join("cache")
+        .join("tts-previews");
+    let _ = std::fs::create_dir_all(&preview_dir);
+    let _ = app
+        .asset_protocol_scope()
+        .allow_directory(&preview_dir, true);
+
+    tts_synthesize_preview_impl(&state, req).await
+}
+
+/// Get stored default TTS provider and voice.
+pub fn tts_get_config_impl(state: &AppState) -> CmdResult<TtsConfigResponse> {
     let mut default_provider = None;
     let mut default_voice = None;
 
@@ -2409,9 +2451,14 @@ pub fn tts_get_config(state: State<'_, AppState>) -> CmdResult<TtsConfigResponse
     })
 }
 
-/// Save user's preferred default TTS provider and voice.
+/// Get stored default TTS provider and voice.
 #[tauri::command]
-pub fn tts_set_config(state: State<'_, AppState>, req: TtsSetConfigRequest) -> CmdResult<()> {
+pub fn tts_get_config(state: State<'_, AppState>) -> CmdResult<TtsConfigResponse> {
+    tts_get_config_impl(&state)
+}
+
+/// Save user's preferred default TTS provider and voice.
+pub fn tts_set_config_impl(state: &AppState, req: TtsSetConfigRequest) -> CmdResult<()> {
     let db = state.app_paths.open_app_db()?;
     if let Some(p) = req.default_provider {
         db.set_setting("tts:default_provider", &p)?;
@@ -2420,6 +2467,12 @@ pub fn tts_set_config(state: State<'_, AppState>, req: TtsSetConfigRequest) -> C
         db.set_setting("tts:default_voice", &v)?;
     }
     Ok(())
+}
+
+/// Save user's preferred default TTS provider and voice.
+#[tauri::command]
+pub fn tts_set_config(state: State<'_, AppState>, req: TtsSetConfigRequest) -> CmdResult<()> {
+    tts_set_config_impl(&state, req)
 }
 
 #[cfg(test)]
@@ -2521,7 +2574,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_tts_model_preview_binary_and_voices() {
-        let bin_preview = tts_model_preview("piper".into(), "binary".into())
+        let state = AppState::new();
+        let bin_preview = tts_model_preview_impl(&state, "piper".into(), "binary".into())
             .await
             .expect("piper binary preview failed");
         assert_eq!(bin_preview.provider, "tts.piper");
@@ -2529,16 +2583,18 @@ mod tests {
         assert!(bin_preview.size_bytes > 20_000_000);
         assert_eq!(bin_preview.license, "MIT");
 
-        let voice_preview = tts_model_preview("tts.piper".into(), "vi_VN-vais1000-medium".into())
-            .await
-            .expect("voice preview failed");
+        let voice_preview =
+            tts_model_preview_impl(&state, "tts.piper".into(), "vi_VN-vais1000-medium".into())
+                .await
+                .expect("voice preview failed");
         assert_eq!(voice_preview.voice, "vi_VN-vais1000-medium");
         assert!(voice_preview.size_bytes > 60_000_000);
         assert!(voice_preview
             .license_note
             .contains("cá nhân/phi thương mại"));
 
-        let invalid = tts_model_preview("piper".into(), "non_existent_voice".into()).await;
+        let invalid =
+            tts_model_preview_impl(&state, "piper".into(), "non_existent_voice".into()).await;
         assert!(invalid.is_err());
     }
 }

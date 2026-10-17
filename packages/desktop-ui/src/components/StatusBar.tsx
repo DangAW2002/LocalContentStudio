@@ -20,6 +20,19 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   onOpenTaskCenter,
   onOpenSettings,
 }) => {
+  const [windowWidth, setWindowWidth] = React.useState<number>(
+    typeof window !== "undefined" ? window.innerWidth : 1024
+  );
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const isUnder600 = windowWidth < 600;
+
   const runningJobs = jobs.filter((j) => j.state === "RUNNING");
   const failedJobs = jobs.filter((j) => j.state === "FAILED");
 
@@ -29,7 +42,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   return (
     <footer
       style={{
-        height: "var(--cs-statusbar-h)",
+        height: isUnder600 ? "auto" : "var(--cs-statusbar-h)",
         minHeight: "var(--cs-statusbar-h)",
         display: "flex",
         alignItems: "center",
@@ -41,6 +54,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         color: "var(--cs-fg-secondary)",
         userSelect: "none",
         zIndex: 20,
+        flexWrap: "wrap",
+        gap: "var(--cs-space-2)",
       }}
     >
       {/* Left: Workspace directory */}
@@ -59,70 +74,72 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         </span>
       </div>
 
-      {/* Center: Engines Probe status */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 5,
-            background: "none",
-            border: "none",
-            color: "inherit",
-            cursor: "pointer",
-            fontSize: "inherit",
-            padding: "2px 4px",
-            borderRadius: "var(--cs-radius-control)",
-          }}
-          title="Xem chi tiết engine (Claude & agy)"
-        >
-          <span
+      {/* Center: Engines Probe status - hide under 600px */}
+      {!isUnder600 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            type="button"
+            onClick={onOpenSettings}
             style={{
-              width: 7,
-              height: 7,
-              borderRadius: "50%",
-              backgroundColor: claudeProbe?.installed ? "var(--cs-success)" : "var(--cs-warning)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              background: "none",
+              border: "none",
+              color: "inherit",
+              cursor: "pointer",
+              fontSize: "inherit",
+              padding: "2px 4px",
+              borderRadius: "var(--cs-radius-control)",
             }}
-          />
-          <span>Claude: {claudeProbe?.installed ? (claudeProbe.version || "Sẵn sàng") : "Chưa cài"}</span>
-        </button>
+            title="Xem chi tiết engine (Claude & agy)"
+          >
+            <span
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: "50%",
+                backgroundColor: claudeProbe?.installed ? "var(--cs-success)" : "var(--cs-warning)",
+              }}
+            />
+            <span>Claude: {claudeProbe?.installed ? (claudeProbe.version || "Sẵn sàng") : "Chưa cài"}</span>
+          </button>
 
-        <span style={{ color: "var(--cs-border-subtle)" }}>|</span>
+          <span style={{ color: "var(--cs-border-subtle)" }}>|</span>
 
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 5,
-            background: "none",
-            border: "none",
-            color: "inherit",
-            cursor: "pointer",
-            fontSize: "inherit",
-            padding: "2px 4px",
-            borderRadius: "var(--cs-radius-control)",
-          }}
-          title="Xem chi tiết agy"
-        >
-          <span
+          <button
+            type="button"
+            onClick={onOpenSettings}
             style={{
-              width: 7,
-              height: 7,
-              borderRadius: "50%",
-              backgroundColor: agyProbe?.installed ? "var(--cs-success)" : "var(--cs-warning)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              background: "none",
+              border: "none",
+              color: "inherit",
+              cursor: "pointer",
+              fontSize: "inherit",
+              padding: "2px 4px",
+              borderRadius: "var(--cs-radius-control)",
             }}
-          />
-          <span>agy: {agyProbe?.installed ? (agyProbe.version || "Sẵn sàng") : "Chưa cài"}</span>
-        </button>
-      </div>
+            title="Xem chi tiết agy"
+          >
+            <span
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: "50%",
+                backgroundColor: agyProbe?.installed ? "var(--cs-success)" : "var(--cs-warning)",
+              }}
+            />
+            <span>agy: {agyProbe?.installed ? (agyProbe.version || "Sẵn sàng") : "Chưa cài"}</span>
+          </button>
+        </div>
+      )}
 
       {/* Right: Jobs snapshot + Disk Usage */}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        {diskUsage && (
+        {!isUnder600 && diskUsage && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
             <Icon name="hard-drive" size={12} color="var(--cs-fg-muted)" />
             <span>Đĩa: {diskUsage.formatted.total}</span>

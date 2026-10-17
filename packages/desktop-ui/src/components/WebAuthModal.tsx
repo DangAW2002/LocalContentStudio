@@ -81,6 +81,9 @@ export const WebAuthModal: React.FC<WebAuthModalProps> = ({ onLoginSuccess }) =>
     if (res.success) {
       setShowLogin(false);
       setLoginPassword("");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("studio:login-success"));
+      }
       if (onLoginSuccess) {
         onLoginSuccess();
       }
