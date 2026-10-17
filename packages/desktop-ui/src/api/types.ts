@@ -628,14 +628,15 @@ export interface ToolInstallPreview {
 
 export interface InstalledToolInfo {
   id: string;
-  version: string;
+  version?: string | null;
   scope: string;
   path: string;
   manifest: any;
   probe: {
     available: boolean;
     missing: string[];
-    noteVi: string;
+    noteVi?: string;
+    note_vi?: string;
   };
   canUninstall: boolean;
 }

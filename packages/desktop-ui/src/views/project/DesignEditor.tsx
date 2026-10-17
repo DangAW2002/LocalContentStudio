@@ -198,14 +198,24 @@ export const DesignEditor = React.forwardRef<DesignEditorHandle, DesignEditorPro
     const fit = React.useCallback(() => {
       const box = containerRef.current;
       if (!box) return;
-      const s = Math.min((box.clientWidth - 48) / size.w, (box.clientHeight - 48) / size.h, 1);
+      const padding = 32;
+      const availableW = Math.max(10, box.clientWidth - padding);
+      const availableH = Math.max(10, box.clientHeight - padding);
+      const s = Math.min(availableW / size.w, availableH / size.h, 1);
       setScale(s > 0 ? s : 1);
     }, [size]);
 
     React.useEffect(() => {
       fit();
+      const el = containerRef.current;
+      if (!el) return;
+      const ro = new ResizeObserver(() => fit());
+      ro.observe(el);
       window.addEventListener("resize", fit);
-      return () => window.removeEventListener("resize", fit);
+      return () => {
+        ro.disconnect();
+        window.removeEventListener("resize", fit);
+      };
     }, [fit]);
 
     const handleLoad = () => {
@@ -263,9 +273,9 @@ export const DesignEditor = React.forwardRef<DesignEditorHandle, DesignEditorPro
     );
 
     return (
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }} onKeyDown={handleKey} tabIndex={0} aria-label="Trình sửa thiết kế">
-        <div ref={containerRef} style={{ flex: 1, minWidth: 0, overflow: "auto", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "var(--cs-bg-canvas)" }}>
-          <div style={{ width: size.w * scale, height: size.h * scale, flexShrink: 0, boxShadow: "var(--cs-shadow-artboard)" }}>
+      <div style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }} onKeyDown={handleKey} tabIndex={0} aria-label="Trình sửa thiết kế">
+        <div ref={containerRef} style={{ flex: 1, minWidth: 0, minHeight: 0, overflowX: "hidden", overflowY: "auto", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "var(--cs-bg-canvas)", padding: "var(--cs-space-4)", boxSizing: "border-box" }}>
+          <div style={{ width: size.w * scale, height: size.h * scale, flexShrink: 0, boxShadow: "var(--cs-shadow-artboard)", overflow: "hidden", backgroundColor: "var(--cs-canvas-artboard)" }}>
             <iframe
               key={reloadKey}
               ref={iframeRef}
@@ -278,7 +288,7 @@ export const DesignEditor = React.forwardRef<DesignEditorHandle, DesignEditorPro
           </div>
         </div>
 
-        <aside style={{ width: 240, flexShrink: 0, borderLeft: "1px solid var(--cs-border-subtle)", backgroundColor: "var(--cs-bg-panel)", padding: "var(--cs-space-3)", overflowY: "auto", display: "flex", flexDirection: "column", gap: "var(--cs-space-3)", fontSize: "var(--cs-text-sm)" }}>
+        <aside style={{ width: 240, flexShrink: 0, borderLeft: "1px solid var(--cs-border-subtle)", backgroundColor: "var(--cs-bg-panel)", padding: "var(--cs-space-3)", overflowY: "auto", overflowX: "hidden", display: "flex", flexDirection: "column", gap: "var(--cs-space-3)", fontSize: "var(--cs-text-sm)" }}>
           <div>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>Lớp ({layers.length})</div>
             {layers.length === 0 ? (

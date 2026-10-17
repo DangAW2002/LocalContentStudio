@@ -276,6 +276,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
     <div
       style={{
         flex: 1,
+        minWidth: 0,
         display: "flex",
         flexDirection: "column",
         height: "100%",
@@ -291,12 +292,16 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
           height: 260,
           borderBottom: "1px solid var(--cs-border-subtle)",
           backgroundColor: "#0d0f12",
+          minWidth: 0,
+          width: "100%",
+          boxSizing: "border-box",
         }}
       >
         {/* Video Player Display */}
         <div
           style={{
             flex: 1,
+            minWidth: 0,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -430,12 +435,13 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
       </div>
 
       {/* Main Bottom Section: Multi-track Timeline & Side Inspector */}
-      <div style={{ flex: 1, display: "flex", minHeight: 0, overflow: "hidden" }}>
+      <div style={{ flex: 1, display: "flex", minHeight: 0, minWidth: 0, overflow: "hidden" }}>
         {/* Timeline Tracks Area */}
         <div
           ref={rulerRef}
           style={{
             flex: 1,
+            minWidth: 0,
             display: "flex",
             flexDirection: "column",
             overflow: "auto",

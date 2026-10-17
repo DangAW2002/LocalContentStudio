@@ -34,6 +34,7 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
   const [loading, setLoading] = React.useState(false);
   const [publishArtifact, setPublishArtifact] = React.useState<ArtifactSummary | null>(null);
   const [publishDialogOpen, setPublishDialogOpen] = React.useState(false);
+  const [showHiddenFiles, setShowHiddenFiles] = React.useState(false);
 
   // Load artifacts, checkpoints and catalog info
   const loadArtifactsData = React.useCallback(async () => {
@@ -305,25 +306,61 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
             )}
 
             {/* Project files tree section */}
-            <div
-              style={{
-                padding: "6px var(--cs-space-3)",
-                fontSize: "var(--cs-text-xs)",
-                fontWeight: 700,
-                color: "var(--cs-fg-muted)",
-                backgroundColor: "var(--cs-bg-panel)",
-                borderBottom: "1px solid var(--cs-border-subtle)",
-                borderTop: "1px solid var(--cs-border-subtle)",
-                textTransform: "uppercase",
-              }}
-            >
-              Cây tệp dự án ({projectFiles.length})
-            </div>
+            {(() => {
+              const isDotPath = (path: string) =>
+                path.split("/").some((part) => part.startsWith("."));
+              const visibleFiles = showHiddenFiles
+                ? projectFiles
+                : projectFiles.filter((f) => !isDotPath(f.path));
 
-            <ProjectFolderTree
-              files={projectFiles}
-              onSelectFile={onSelectFile}
-            />
+              return (
+                <>
+                  <div
+                    style={{
+                      padding: "6px var(--cs-space-3)",
+                      fontSize: "var(--cs-text-xs)",
+                      fontWeight: 700,
+                      color: "var(--cs-fg-muted)",
+                      backgroundColor: "var(--cs-bg-panel)",
+                      borderBottom: "1px solid var(--cs-border-subtle)",
+                      borderTop: "1px solid var(--cs-border-subtle)",
+                      textTransform: "uppercase",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <span>Cây tệp dự án ({visibleFiles.length})</span>
+                    <label
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        fontSize: 11,
+                        fontWeight: 500,
+                        textTransform: "none",
+                        cursor: "pointer",
+                        color: "var(--cs-fg-secondary)",
+                        userSelect: "none",
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={showHiddenFiles}
+                        onChange={(e) => setShowHiddenFiles(e.target.checked)}
+                        style={{ cursor: "pointer", margin: 0 }}
+                      />
+                      Hiện tệp ẩn
+                    </label>
+                  </div>
+
+                  <ProjectFolderTree
+                    files={visibleFiles}
+                    onSelectFile={onSelectFile}
+                  />
+                </>
+              );
+            })()}
           </div>
         )}
 
