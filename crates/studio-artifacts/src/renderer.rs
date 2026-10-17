@@ -255,7 +255,6 @@ pub const HYPERFRAMES_PACKAGE: &str = "hyperframes@0.8.167";
 /// `npx.cmd` (no cmd.exe quoting pitfalls); otherwise `cmd.exe /C` is used and paths containing cmd
 /// metacharacters are refused. Paths are stripped of the verbatim prefix (`\\?\`), which Node.js does not
 /// understand.
-
 pub fn build_hyperframes_render_job(
     job_id: &str,
     workspace_id: &str,
