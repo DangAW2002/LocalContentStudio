@@ -64,6 +64,59 @@ fn main() {
             if let Some(path) = recent.and_then(|r| r.into_iter().next()).map(|r| r.path) {
                 let _ = commands::workspace_open(handle.clone(), app.state::<AppState>(), path);
             }
+
+            // Subscribe to scheduler events and emit "job-event" to the frontend.
+            let mut job_rx = state.scheduler.subscribe();
+            let job_handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                use serde_json::json;
+                use tauri::Emitter;
+
+                loop {
+                    let evt = match job_rx.recv().await {
+                        Ok(evt) => evt,
+                        // A slow UI only loses old progress ticks; keep listening.
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    };
+                    let state_str = match evt.state {
+                        studio_jobs::event::JobState::Queued => "queued",
+                        studio_jobs::event::JobState::Admitted => "admitted",
+                        studio_jobs::event::JobState::Running => "running",
+                        studio_jobs::event::JobState::Succeeded => "succeeded",
+                        studio_jobs::event::JobState::Failed => "failed",
+                        studio_jobs::event::JobState::Cancelled => "cancelled",
+                    };
+                    let snapshot_state = match evt.state {
+                        studio_jobs::event::JobState::Queued | studio_jobs::event::JobState::Admitted => "PENDING",
+                        studio_jobs::event::JobState::Running => "RUNNING",
+                        studio_jobs::event::JobState::Succeeded => "DONE",
+                        studio_jobs::event::JobState::Failed => "FAILED",
+                        studio_jobs::event::JobState::Cancelled => "CANCELLED",
+                    };
+                    let payload = json!({
+                        "jobId": evt.job_id,
+                        "kind": evt.kind,
+                        "pool": evt.pool,
+                        "state": state_str,
+                        "progress": evt.progress,
+                        "message": evt.message,
+                        "peakMemoryBytes": evt.peak_memory_bytes,
+                        "event": {
+                            "id": evt.job_id,
+                            "title": evt.kind,
+                            "kind": evt.kind,
+                            "state": snapshot_state,
+                            "progress": evt.progress,
+                            "stageName": evt.message,
+                            "createdAt": chrono::Utc::now().to_rfc3339(),
+                            "error": if evt.state == studio_jobs::event::JobState::Failed { evt.message.clone() } else { None },
+                        }
+                    });
+                    let _ = job_handle.emit("job-event", payload);
+                }
+            });
+
             Ok(())
         })
         .on_window_event(|window, event| {

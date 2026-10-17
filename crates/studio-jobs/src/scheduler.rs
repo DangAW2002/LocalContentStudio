@@ -1,12 +1,10 @@
-//! Central job scheduler managing admission, resource pools, priority queues, and supervision.
-
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::{mpsc, Mutex, Notify};
+use tokio::sync::{broadcast, mpsc, Mutex, Notify};
 
 use crate::estimate::EstimateStore;
-use crate::event::{FailedReason, JobEvent};
+use crate::event::{FailedReason, JobBroadcastEvent, JobState, TaskEvent};
 use crate::handle::JobHandle;
 use crate::job::{JobId, JobSpec, JobStatus, JobWaitReason};
 use crate::probe::SystemProbe;
@@ -18,7 +16,7 @@ use crate::worker::{LocalWorker, Worker};
 struct QueuedJob {
     spec: JobSpec,
     submitted_at: Instant,
-    event_tx: mpsc::Sender<JobEvent>,
+    event_tx: mpsc::Sender<TaskEvent>,
     cancel_rx: Option<mpsc::Receiver<()>>,
     wait_reason: JobWaitReason,
 }
@@ -48,6 +46,7 @@ pub struct Scheduler {
     warm_pool: Arc<WarmPool>,
     state: Arc<Mutex<SchedulerState>>,
     notify: Arc<Notify>,
+    broadcast_tx: broadcast::Sender<JobBroadcastEvent>,
 }
 
 impl Scheduler {
@@ -76,6 +75,7 @@ impl Scheduler {
             exclusive_held: HashSet::new(),
         }));
         let notify = Arc::new(Notify::new());
+        let (broadcast_tx, _) = broadcast::channel(512);
 
         let scheduler = Arc::new(Self {
             config,
@@ -85,6 +85,7 @@ impl Scheduler {
             warm_pool,
             state,
             notify,
+            broadcast_tx,
         });
 
         // Spawn background admission loop
@@ -94,6 +95,49 @@ impl Scheduler {
         });
 
         scheduler
+    }
+
+    /// Subscribe to lifecycle events and progress updates across all jobs.
+    pub fn subscribe(&self) -> broadcast::Receiver<JobBroadcastEvent> {
+        self.broadcast_tx.subscribe()
+    }
+
+    /// Report progress for a running job.
+    pub async fn report_progress(
+        &self,
+        job_id: &str,
+        progress: Option<f32>,
+        message: Option<String>,
+    ) -> bool {
+        let state = self.state.lock().await;
+        if let Some(running) = state.running.get(job_id) {
+            let pool = match running.spec.resources.cpu {
+                CpuClass::Heavy => "cpu_heavy".to_string(),
+                CpuClass::Light => {
+                    if running.spec.tool_id.starts_with("engine:") {
+                        "engine".to_string()
+                    } else if running.spec.resources.gpu_vram_mb > 0
+                        || running.spec.resources.exclusive.iter().any(|e| e == "gpu")
+                    {
+                        "gpu".to_string()
+                    } else {
+                        "light".to_string()
+                    }
+                }
+            };
+            let _ = self.broadcast_tx.send(JobBroadcastEvent {
+                job_id: job_id.to_string(),
+                kind: running.spec.tool_id.clone(),
+                pool,
+                state: JobState::Running,
+                progress,
+                message,
+                peak_memory_bytes: None,
+            });
+            true
+        } else {
+            false
+        }
     }
 
     /// Submit a job to the scheduler.
@@ -106,6 +150,32 @@ impl Scheduler {
 
         let job_id = spec.id.clone();
         let initial_reason = JobWaitReason::PoolFull("Đang phân bổ".into());
+
+        let pool = match spec.resources.cpu {
+            CpuClass::Heavy => "cpu_heavy".to_string(),
+            CpuClass::Light => {
+                if spec.tool_id.starts_with("engine:") {
+                    "engine".to_string()
+                } else if spec.resources.gpu_vram_mb > 0
+                    || spec.resources.exclusive.iter().any(|e| e == "gpu")
+                {
+                    "gpu".to_string()
+                } else {
+                    "light".to_string()
+                }
+            }
+        };
+
+        // Emit initial Queued broadcast event
+        let _ = self.broadcast_tx.send(JobBroadcastEvent {
+            job_id: job_id.clone(),
+            kind: spec.tool_id.clone(),
+            pool,
+            state: JobState::Queued,
+            progress: None,
+            message: Some(initial_reason.to_vietnamese()),
+            peak_memory_bytes: None,
+        });
 
         {
             let mut state = self.state.lock().await;
@@ -138,9 +208,32 @@ impl Scheduler {
         // Check if queued
         if let Some(pos) = state.queued.iter().position(|q| q.spec.id == job_id) {
             let item = state.queued.remove(pos);
+            let pool = match item.spec.resources.cpu {
+                CpuClass::Heavy => "cpu_heavy".to_string(),
+                CpuClass::Light => {
+                    if item.spec.tool_id.starts_with("engine:") {
+                        "engine".to_string()
+                    } else if item.spec.resources.gpu_vram_mb > 0
+                        || item.spec.resources.exclusive.iter().any(|e| e == "gpu")
+                    {
+                        "gpu".to_string()
+                    } else {
+                        "light".to_string()
+                    }
+                }
+            };
+            let _ = self.broadcast_tx.send(JobBroadcastEvent {
+                job_id: job_id.to_string(),
+                kind: item.spec.tool_id.clone(),
+                pool,
+                state: JobState::Cancelled,
+                progress: None,
+                message: Some("Tác vụ đã bị hủy khi đang chờ".to_string()),
+                peak_memory_bytes: None,
+            });
             let _ = item
                 .event_tx
-                .send(JobEvent::Failed {
+                .send(TaskEvent::Failed {
                     reason: FailedReason::Cancelled,
                 })
                 .await;
@@ -350,7 +443,7 @@ impl Scheduler {
         for (pos, q) in state.queued.iter().enumerate() {
             let _ = q
                 .event_tx
-                .send(JobEvent::Queued {
+                .send(TaskEvent::Queued {
                     position: pos + 1,
                     reason: q.wait_reason.to_vietnamese(),
                 })
@@ -367,6 +460,32 @@ impl Scheduler {
             let job_id = item.spec.id.clone();
             let spec_clone = item.spec.clone();
 
+            let pool = match spec_clone.resources.cpu {
+                CpuClass::Heavy => "cpu_heavy".to_string(),
+                CpuClass::Light => {
+                    if spec_clone.tool_id.starts_with("engine:") {
+                        "engine".to_string()
+                    } else if spec_clone.resources.gpu_vram_mb > 0
+                        || spec_clone.resources.exclusive.iter().any(|e| e == "gpu")
+                    {
+                        "gpu".to_string()
+                    } else {
+                        "light".to_string()
+                    }
+                }
+            };
+
+            // Emit Admitted broadcast event
+            let _ = self.broadcast_tx.send(JobBroadcastEvent {
+                job_id: job_id.clone(),
+                kind: spec_clone.tool_id.clone(),
+                pool: pool.clone(),
+                state: JobState::Admitted,
+                progress: None,
+                message: None,
+                peak_memory_bytes: None,
+            });
+
             state.running.insert(
                 job_id.clone(),
                 RunningJob {
@@ -381,6 +500,7 @@ impl Scheduler {
             let scheduler_state = Arc::clone(&self.state);
             let worker = Arc::clone(&self.worker);
             let notify = Arc::clone(&self.notify);
+            let broadcast_tx = self.broadcast_tx.clone();
 
             tokio::spawn(async move {
                 // Forward handle cancellation to running cancel channel
@@ -399,45 +519,112 @@ impl Scheduler {
                 }
 
                 // Proxy event stream to intercept Started and terminal events
-                let (internal_tx, mut internal_rx) = mpsc::channel::<JobEvent>(128);
+                let (internal_tx, mut internal_rx) = mpsc::channel::<TaskEvent>(128);
                 let client_tx = item.event_tx;
                 let jid_clone = job_id.clone();
                 let state_clone = Arc::clone(&scheduler_state);
+                let b_tx = broadcast_tx.clone();
+                let tool_id_clone = spec_clone.tool_id.clone();
+                let pool_clone = pool.clone();
 
                 tokio::spawn(async move {
                     while let Some(evt) = internal_rx.recv().await {
                         match &evt {
-                            JobEvent::Started { pid } => {
-                                let mut st = state_clone.lock().await;
-                                if let Some(r) = st.running.get_mut(&jid_clone) {
-                                    r.pid = *pid;
+                            TaskEvent::Started { pid } => {
+                                {
+                                    let mut st = state_clone.lock().await;
+                                    if let Some(r) = st.running.get_mut(&jid_clone) {
+                                        r.pid = *pid;
+                                    }
                                 }
+                                let _ = b_tx.send(JobBroadcastEvent {
+                                    job_id: jid_clone.clone(),
+                                    kind: tool_id_clone.clone(),
+                                    pool: pool_clone.clone(),
+                                    state: JobState::Running,
+                                    progress: None,
+                                    message: None,
+                                    peak_memory_bytes: None,
+                                });
                             }
-                            JobEvent::Finished {
+                            TaskEvent::Progress { progress, message } => {
+                                let _ = b_tx.send(JobBroadcastEvent {
+                                    job_id: jid_clone.clone(),
+                                    kind: tool_id_clone.clone(),
+                                    pool: pool_clone.clone(),
+                                    state: JobState::Running,
+                                    progress: *progress,
+                                    message: message.clone(),
+                                    peak_memory_bytes: None,
+                                });
+                            }
+                            TaskEvent::Finished {
                                 exit_code,
                                 peak_memory_mb,
                                 duration_ms,
                             } => {
-                                let mut st = state_clone.lock().await;
-                                st.finished.insert(
-                                    jid_clone.clone(),
-                                    JobStatus::Finished {
-                                        id: jid_clone.clone(),
-                                        exit_code: *exit_code,
-                                        peak_memory_mb: *peak_memory_mb,
-                                        duration_ms: *duration_ms,
-                                    },
-                                );
+                                {
+                                    let mut st = state_clone.lock().await;
+                                    st.finished.insert(
+                                        jid_clone.clone(),
+                                        JobStatus::Finished {
+                                            id: jid_clone.clone(),
+                                            exit_code: *exit_code,
+                                            peak_memory_mb: *peak_memory_mb,
+                                            duration_ms: *duration_ms,
+                                        },
+                                    );
+                                }
+                                let _ = b_tx.send(JobBroadcastEvent {
+                                    job_id: jid_clone.clone(),
+                                    kind: tool_id_clone.clone(),
+                                    pool: pool_clone.clone(),
+                                    state: JobState::Succeeded,
+                                    progress: Some(1.0),
+                                    message: None,
+                                    peak_memory_bytes: Some(*peak_memory_mb * 1024 * 1024),
+                                });
                             }
-                            JobEvent::Failed { reason } => {
-                                let mut st = state_clone.lock().await;
-                                st.finished.insert(
-                                    jid_clone.clone(),
-                                    JobStatus::Failed {
-                                        id: jid_clone.clone(),
-                                        reason: reason.clone(),
-                                    },
-                                );
+                            TaskEvent::Failed { reason } => {
+                                {
+                                    let mut st = state_clone.lock().await;
+                                    st.finished.insert(
+                                        jid_clone.clone(),
+                                        JobStatus::Failed {
+                                            id: jid_clone.clone(),
+                                            reason: reason.clone(),
+                                        },
+                                    );
+                                }
+                                let (state, msg) = match reason {
+                                    FailedReason::Cancelled => {
+                                        (JobState::Cancelled, "Tác vụ đã bị hủy".to_string())
+                                    }
+                                    FailedReason::OutOfMemory => (
+                                        JobState::Failed,
+                                        "Vượt quá giới hạn bộ nhớ RAM".to_string(),
+                                    ),
+                                    FailedReason::Timeout => (
+                                        JobState::Failed,
+                                        "Quá thời gian chờ (timeout)".to_string(),
+                                    ),
+                                    FailedReason::SpawnError(err) => {
+                                        (JobState::Failed, format!("Lỗi khởi tạo process: {}", err))
+                                    }
+                                    FailedReason::Exit(code) => (
+                                        JobState::Failed,
+                                        format!("Tiến trình kết thúc với mã lỗi {}", code),
+                                    ),
+                                };
+                                let _ = b_tx.send(JobBroadcastEvent {
+                                    job_id: jid_clone.clone(),
+                                    kind: tool_id_clone.clone(),
+                                    pool: pool_clone.clone(),
+                                    state,
+                                    progress: None,
+                                    message: Some(msg),
+                                    peak_memory_bytes: None,
+                                });
                             }
                             _ => {}
                         }

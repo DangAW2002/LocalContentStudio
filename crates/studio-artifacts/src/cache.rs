@@ -71,9 +71,14 @@ pub fn compute_input_hash(
         hasher.update(b"\n");
     }
 
-    // 3. Brand version string
+    // 3. Brand version string and resolved brand content
     hasher.update(b"BRAND_VERSION:\n");
     hasher.update(brand_version.as_bytes());
+    hasher.update(b"\n");
+
+    let brand_content_hash = resolve_brand_content_hash(workspace, brand_version)?;
+    hasher.update(b"BRAND_CONTENT:\n");
+    hasher.update(brand_content_hash.as_bytes());
     hasher.update(b"\n");
 
     // 4. Renderer id / version
@@ -145,6 +150,78 @@ fn resolve_input_hash(workspace: &Workspace, project: &Project, input_ref: &str)
     let mut h = Sha256::new();
     h.update(input_ref.as_bytes());
     Ok(hex::encode(h.finalize()))
+}
+
+/// Resolve the content hash of a brand by slug or version.
+/// Hashes the resolved brand.yaml and any referenced logo/font files that exist.
+fn resolve_brand_content_hash(workspace: &Workspace, brand_ref: &str) -> Result<String> {
+    use studio_workspace::ScopeChain;
+
+    let slug = brand_ref.split('@').next().unwrap_or(brand_ref);
+    let scope = ScopeChain::new(workspace);
+    let resolved_brands = scope.resolve("brands");
+
+    let brand_dir = resolved_brands
+        .into_iter()
+        .find(|item| item.id == slug)
+        .map(|item| item.path)
+        .unwrap_or_else(|| workspace.root().join("brands").join(slug));
+
+    if !brand_dir.exists() || !brand_dir.is_dir() {
+        return Ok(String::new());
+    }
+
+    let mut hasher = Sha256::new();
+    let mut files_to_hash: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+
+    let brand_yaml_path = brand_dir.join("brand.yaml");
+    if brand_yaml_path.exists() && brand_yaml_path.is_file() {
+        if let Ok(bytes) = fs::read(&brand_yaml_path) {
+            files_to_hash.insert("brand.yaml".to_string(), bytes.clone());
+
+            // Parse brand.yaml to find referenced logo and font files
+            if let Ok(yaml_val) = serde_yaml::from_slice::<serde_yaml::Value>(&bytes) {
+                // Check logos
+                if let Some(logos) = yaml_val.get("logos") {
+                    for field in &["full", "mark", "light", "dark"] {
+                        if let Some(rel) = logos.get(field).and_then(|v| v.as_str()) {
+                            let path = brand_dir.join(rel);
+                            if path.exists() && path.is_file() {
+                                if let Ok(content) = fs::read(&path) {
+                                    files_to_hash.insert(rel.to_string(), content);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Check fonts
+                if let Some(fonts) = yaml_val.get("fonts") {
+                    if let Some(files) = fonts.get("files").and_then(|v| v.as_sequence()) {
+                        for item in files {
+                            if let Some(rel) = item.as_str() {
+                                let path = brand_dir.join(rel);
+                                if path.exists() && path.is_file() {
+                                    if let Ok(content) = fs::read(&path) {
+                                        files_to_hash.insert(rel.to_string(), content);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for (rel_path, content) in files_to_hash {
+        hasher.update(rel_path.as_bytes());
+        hasher.update(b":");
+        hasher.update(&content);
+        hasher.update(b"\n");
+    }
+
+    Ok(hex::encode(hasher.finalize()))
 }
 
 /// Render cache record in WorkspaceDb `renders` table.
