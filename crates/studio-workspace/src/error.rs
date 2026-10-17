@@ -44,6 +44,10 @@ pub enum WorkspaceError {
     #[error("Checkpoint not found: {0}")]
     CheckpointNotFound(String),
 
+    /// Turn already undone
+    #[error("Lượt này đã được hoàn tác trước đó.")]
+    TurnAlreadyUndone,
+
     /// Generic internal error
     #[error("{0}")]
     Internal(String),

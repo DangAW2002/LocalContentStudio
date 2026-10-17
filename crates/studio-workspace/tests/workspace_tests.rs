@@ -452,3 +452,149 @@ fn test_disk_usage() {
     assert_eq!(usage.library_bytes, 10);
     assert!(usage.total_bytes >= 15);
 }
+
+#[test]
+fn test_recent_workspaces_no_duplicate_verbatim_case_trailing_slash() {
+    let temp = tempdir().unwrap();
+    let app_paths = AppPaths::new(temp.path().join("app_data"));
+    let app_db = app_paths.open_app_db().unwrap();
+
+    let ws_dir = temp.path().join("my-cool-workspace");
+    let _ws = Workspace::create(&ws_dir, "Cool WS").unwrap();
+
+    // 1. Normal path
+    let spelling1 = ws_dir.to_string_lossy().to_string();
+    // 2. Verbatim with trailing slash
+    let spelling2 = format!(r"\\?\{}\", spelling1);
+    // 3. Case difference (on Windows) or with forward slashes
+    let spelling3 = format!("{}/", spelling1.to_uppercase());
+
+    app_db.record_workspace_open(&spelling1).unwrap();
+    app_db.record_workspace_open(&spelling2).unwrap();
+    app_db.record_workspace_open(&spelling3).unwrap();
+
+    let recents = app_db.list_recent_workspaces().unwrap();
+    assert_eq!(
+        recents.len(),
+        1,
+        "Recent workspaces must list the folder exactly once regardless of verbatim prefix, case, or trailing slash"
+    );
+
+    // Path must be clean and normalized
+    assert!(!recents[0].path.starts_with(r"\\?\"));
+    assert!(!recents[0].path.ends_with('\\'));
+    assert!(!recents[0].path.ends_with('/'));
+}
+
+#[test]
+fn test_turn_undo_workspace_level_semantics() {
+    let temp = tempdir().unwrap();
+    let ws_dir = temp.path().join("undo-ws");
+    let ws = Workspace::create(&ws_dir, "Undo Test Workspace").unwrap();
+
+    // Pre-turn files
+    let file1_path = ws_dir.join("file1.txt");
+    let untouched_path = ws_dir.join("untouched.txt");
+    fs::write(&file1_path, "version 1 content").unwrap();
+    fs::write(&untouched_path, "untouched original content").unwrap();
+
+    let turn_id = "turn-xyz-123";
+    let thread_id = "thread-abc-456";
+
+    // Set up turn record in WorkspaceDb
+    {
+        let db = WorkspaceDb::open(&ws).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO threads (id, project_slug, title, engine, created_at, updated_at) VALUES (?1, NULL, ?2, ?3, ?4, ?4)",
+                rusqlite::params![thread_id, "Test Thread", "claude", chrono::Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO turns (id, thread_id, turn_index, user_prompt, status, created_at) VALUES (?1, ?2, 1, ?3, 'running', ?4)",
+                rusqlite::params![turn_id, thread_id, "Make edits", chrono::Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO events (id, turn_id, event_type, payload_json, created_at) VALUES (?1, ?2, 'Text', '\"hello\"', ?3)",
+                rusqlite::params!["event-1", turn_id, chrono::Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+    }
+
+    // Checkpoint created before turn modifies files
+    let _cp =
+        CheckpointService::create(&ws, "Pre-turn checkpoint", Some(turn_id.to_string())).unwrap();
+
+    // Turn modifies file1.txt and creates file2.txt
+    let file2_path = ws_dir.join("file2.txt");
+    fs::write(&file1_path, "version 2 modified by agent").unwrap();
+    fs::write(&file2_path, "new file created during turn").unwrap();
+
+    // Verify modified state
+    assert_eq!(
+        fs::read_to_string(&file1_path).unwrap(),
+        "version 2 modified by agent"
+    );
+    assert!(file2_path.exists());
+    assert_eq!(
+        fs::read_to_string(&untouched_path).unwrap(),
+        "untouched original content"
+    );
+
+    // Perform turn undo
+    CheckpointService::undo_turn(&ws, turn_id).unwrap();
+
+    // Verify post-undo state:
+    // 1. file1.txt is restored to pre-turn content
+    assert_eq!(
+        fs::read_to_string(&file1_path).unwrap(),
+        "version 1 content",
+        "Modified file must be restored to pre-turn checkpoint"
+    );
+    // 2. file2.txt is deleted
+    assert!(
+        !file2_path.exists(),
+        "File created during the turn must be deleted"
+    );
+    // 3. untouched.txt is not changed
+    assert_eq!(
+        fs::read_to_string(&untouched_path).unwrap(),
+        "untouched original content",
+        "Untouched file must remain unchanged"
+    );
+
+    // 4. DB state: events deleted, turn status is 'undone'
+    {
+        let db = WorkspaceDb::open(&ws).unwrap();
+        let event_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE turn_id = ?1",
+                [turn_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(event_count, 0, "Events of undone turn must be deleted");
+
+        let status: String = db
+            .conn()
+            .query_row("SELECT status FROM turns WHERE id = ?1", [turn_id], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "undone", "Turn status must be 'undone'");
+    }
+
+    // 5. Undoing twice must be refused with a Vietnamese message
+    let second_undo = CheckpointService::undo_turn(&ws, turn_id);
+    assert!(second_undo.is_err(), "Undoing twice must fail");
+    let err_msg = second_undo.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("Lượt này đã được hoàn tác trước đó."),
+        "Error message must be in Vietnamese explaining turn was already undone. Got: {}",
+        err_msg
+    );
+}

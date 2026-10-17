@@ -195,8 +195,8 @@ impl Workspace {
         // Also record in AppDb if possible
         let app_paths = AppPaths::from_env();
         if let Ok(app_db) = app_paths.open_app_db() {
-            let canon = fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
-            let _ = app_db.record_workspace_open(&canon.to_string_lossy());
+            let norm = crate::app::normalize_workspace_path(&root);
+            let _ = app_db.record_workspace_open(&norm);
         }
 
         Ok(Self { root, name, org })
@@ -224,8 +224,8 @@ impl Workspace {
         // Record in AppDb
         let app_paths = AppPaths::from_env();
         if let Ok(app_db) = app_paths.open_app_db() {
-            let canon = fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
-            let _ = app_db.record_workspace_open(&canon.to_string_lossy());
+            let norm = crate::app::normalize_workspace_path(&root);
+            let _ = app_db.record_workspace_open(&norm);
         }
 
         Ok(Self {
