@@ -198,7 +198,7 @@ export const DesignEditor = React.forwardRef<DesignEditorHandle, DesignEditorPro
     const fit = React.useCallback(() => {
       const box = containerRef.current;
       if (!box) return;
-      const s = Math.min((box.clientWidth - 32) / size.w, (box.clientHeight - 32) / size.h, 1);
+      const s = Math.min((box.clientWidth - 48) / size.w, (box.clientHeight - 48) / size.h, 1);
       setScale(s > 0 ? s : 1);
     }, [size]);
 

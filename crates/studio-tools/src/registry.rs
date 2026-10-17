@@ -145,6 +145,10 @@ impl Registry {
                 "video.generate@1",
                 include_str!("../builtin/capabilities/video.generate@1.json"),
             ),
+            (
+                "media.import@1",
+                include_str!("../builtin/capabilities/media.import@1.json"),
+            ),
         ];
 
         for (id, content) in builtin_caps {
@@ -169,6 +173,7 @@ impl Registry {
             include_str!("../builtin/tools/openai.images/tool.yaml"),
             include_str!("../builtin/tools/openai.videos/tool.yaml"),
             include_str!("../builtin/tools/google.veo/tool.yaml"),
+            include_str!("../builtin/tools/media.import.yt-dlp/tool.yaml"),
         ];
 
         for (i, content) in builtin_tools.iter().enumerate() {

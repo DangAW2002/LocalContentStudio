@@ -13,6 +13,7 @@ import {
   type DesignEditorHandle,
 } from "./DesignEditor";
 import { PlainHtmlPreview } from "./PlainHtmlPreview";
+import { TimelineEditor } from "./TimelineEditor";
 import type {
   ArtifactSummary,
   ArtifactRenderResult,
@@ -204,6 +205,29 @@ export const StagePane: React.FC<StagePaneProps> = ({
     });
     setMatchingArtifact(match || null);
   }, [selectedFilePath, artifacts]);
+
+  // Timeline preview: asset URL of the newest rendered video (render outputs are workspace-relative).
+  const [timelinePreviewUrl, setTimelinePreviewUrl] = React.useState<string | undefined>(undefined);
+  const latestVideoOutput = renderResult?.outputs?.find((p) => /\.(mp4|webm|mov)$/i.test(p));
+  React.useEffect(() => {
+    let cancelled = false;
+    setTimelinePreviewUrl(undefined);
+    if (!latestVideoOutput) return;
+    const norm = latestVideoOutput.replace(/\\/g, "/");
+    const prefix = `projects/${projectSlug}/`;
+    const path = norm.startsWith(prefix) ? norm.slice(prefix.length) : norm;
+    studioApi
+      .readFile({ project: projectSlug, path })
+      .then((res) => {
+        if (!cancelled) setTimelinePreviewUrl(res.assetUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setTimelinePreviewUrl(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [latestVideoOutput, projectSlug]);
 
   // Load file content
   const loadFile = React.useCallback(async (keepDirtyState = false) => {
@@ -460,7 +484,29 @@ export const StagePane: React.FC<StagePaneProps> = ({
       return <PlainHtmlPreview html={fileData.text || ""} />;
     }
 
-    // 3. Text / Markdown / Code / JSON editor
+    // 3. Timeline editor for timeline.json or artifacts of kind 'timeline'
+    const isTimelineFile =
+      selectedFilePath?.endsWith("timeline.json") ||
+      matchingArtifact?.kind === "timeline";
+    if (isTimelineFile && (fileData.kind === "json" || fileData.kind === "text")) {
+      return (
+        <TimelineEditor
+          initialJson={textValue || fileData.text || "{}"}
+          previewVideoUrl={timelinePreviewUrl}
+          onChange={(newJson, _isValid) => {
+            setTextValue(newJson);
+            setIsDirty(true);
+          }}
+          onSaveRequest={handleSave}
+          onRenderRequest={matchingArtifact ? handleRenderArtifact : undefined}
+          onCheckRequest={matchingArtifact ? handleCheckArtifact : undefined}
+          rendering={rendering}
+          checking={checking}
+        />
+      );
+    }
+
+    // 4. Text / Markdown / Code / JSON editor
     if (
       fileData.kind === "markdown" ||
       fileData.kind === "text" ||

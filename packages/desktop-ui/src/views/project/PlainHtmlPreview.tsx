@@ -21,7 +21,7 @@ export const PlainHtmlPreview: React.FC<PlainHtmlPreviewProps> = ({ html }) => {
   const fit = React.useCallback(() => {
     const box = containerRef.current;
     if (!box) return;
-    const padding = 32;
+    const padding = 48;
     const availableW = Math.max(10, box.clientWidth - padding);
     const availableH = Math.max(10, box.clientHeight - padding);
     const s = Math.min(availableW / size.w, availableH / size.h, 1);
