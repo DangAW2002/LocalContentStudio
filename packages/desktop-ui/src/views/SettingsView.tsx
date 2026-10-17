@@ -20,14 +20,15 @@ import type {
 } from "../api/types";
 import { parseYouTubeError } from "../api/client";
 import { YouTubeGuideModal } from "../components/YouTubeGuideModal";
+import { WebAccessSection } from "./settings/WebAccessSection";
 import { VoicesSection } from "./settings/VoicesSection";
 
 export interface SettingsViewProps {
-  initialTab?: "engines" | "tools" | "voices" | "env" | "catalog" | "jobs" | "disk" | "api-keys" | "accounts";
+  initialTab?: "engines" | "tools" | "voices" | "env" | "catalog" | "jobs" | "disk" | "api-keys" | "accounts" | "web";
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engines" }) => {
-  const [activeTab, setActiveTab] = React.useState<"engines" | "tools" | "voices" | "env" | "catalog" | "jobs" | "disk" | "api-keys" | "accounts">(initialTab);
+  const [activeTab, setActiveTab] = React.useState<"engines" | "tools" | "voices" | "env" | "catalog" | "jobs" | "disk" | "api-keys" | "accounts" | "web">(initialTab);
 
   React.useEffect(() => {
     if (initialTab) {
@@ -499,6 +500,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engine
     { id: "catalog", label: "Catalog Modules & Kits" },
     { id: "jobs", label: "Cấu hình Tác vụ" },
     { id: "disk", label: "Dung lượng Đĩa" },
+    { id: "web", label: "Truy cập Web" },
   ];
 
   return (
@@ -2045,6 +2047,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engine
               )}
             </div>
           )}
+
+          {/* TAB 9: PERSONAL WEB MODE */}
+          {activeTab === "web" && <WebAccessSection />}
         </div>
       </div>
 

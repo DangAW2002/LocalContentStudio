@@ -1,6 +1,7 @@
 //! Process-wide state shared by all IPC commands.
 
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -22,8 +23,19 @@ pub struct RunningTurn {
     pub cancel: Arc<Notify>,
 }
 
-/// Shared application state.
-pub struct AppState {
+/// Shared application state handle.
+#[derive(Clone)]
+pub struct AppState(Arc<AppStateInner>);
+
+impl Deref for AppState {
+    type Target = AppStateInner;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// Inner state fields.
+pub struct AppStateInner {
     /// App data paths (`%APPDATA%/LocalContentStudio`).
     pub app_paths: AppPaths,
     /// Machine-wide job scheduler.
@@ -56,6 +68,12 @@ pub struct AppState {
     pub claude: ClaudeEngine,
     /// Antigravity engine adapter.
     pub agy: AgyEngine,
+    /// Desktop Tauri app handle (if attached).
+    pub app_handle: OnceLock<tauri::AppHandle>,
+    /// Global event broadcaster for web SSE and UI updates.
+    pub events_tx: tokio::sync::broadcast::Sender<studio_web::WebEvent>,
+    /// Active web server handle (if web access is enabled).
+    pub web_server: Mutex<Option<studio_web::RunningWebServer>>,
 }
 
 impl AppState {
@@ -74,7 +92,9 @@ impl AppState {
                 .join("catalog")
                 .join("sources")
         };
-        Self {
+        let (events_tx, _) = tokio::sync::broadcast::channel(256);
+
+        Self(Arc::new(AppStateInner {
             catalog_path: app_paths.data_dir().join("catalog").join("catalog.yaml"),
             sources_dir,
             app_paths: app_paths.clone(),
@@ -123,7 +143,22 @@ impl AppState {
             watcher: Mutex::new(None),
             claude: ClaudeEngine::new(),
             agy: AgyEngine::new(),
+            app_handle: OnceLock::new(),
+            events_tx,
+            web_server: Mutex::new(None),
+        }))
+    }
+}
+
+impl AppStateInner {
+    /// Emit an event to both Tauri window listeners and connected web SSE clients.
+    pub fn emit(&self, event: &str, payload: serde_json::Value) {
+        if let Some(app) = self.app_handle.get() {
+            let _ = tauri::Emitter::emit(app, event, &payload);
         }
+        let _ = self
+            .events_tx
+            .send(studio_web::WebEvent::new(event, payload));
     }
 
     /// The open workspace, or a Vietnamese error asking the user to open one.

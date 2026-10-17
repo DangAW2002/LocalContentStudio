@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use studio_engine::Engine;
 use studio_workspace::{CheckpointService, Project, ScopeChain, Workspace, WorkspaceDb};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
@@ -129,12 +129,15 @@ fn ws_summary(ws: &Workspace, current: bool) -> Value {
 }
 
 /// Make `path` the open workspace: record it, allow asset access, watch files.
-fn activate(app: &AppHandle, state: &AppState, ws: &Workspace) -> CmdResult<()> {
+/// Make `path` the open workspace: record it, allow asset access, watch files.
+fn activate(state: &AppState, ws: &Workspace) -> CmdResult<()> {
     let norm = normalize_workspace_path(ws.root());
     if let Ok(db) = state.app_paths.open_app_db() {
         let _ = db.record_workspace_open(&norm);
     }
-    let _ = app.asset_protocol_scope().allow_directory(ws.root(), true);
+    if let Some(app) = state.app_handle.get() {
+        let _ = app.asset_protocol_scope().allow_directory(ws.root(), true);
+    }
     // Turns left "running" by a crash or forced quit can never finish: close them.
     if let Ok(db) = WorkspaceDb::open(ws) {
         let live: Vec<String> = state
@@ -167,7 +170,7 @@ fn activate(app: &AppHandle, state: &AppState, ws: &Workspace) -> CmdResult<()> 
         Some(ws.root().to_path_buf());
 
     use notify::Watcher;
-    let handle = app.clone();
+    let state_clone = state.clone();
     let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(ev) = res {
             let paths: Vec<String> = ev
@@ -177,7 +180,7 @@ fn activate(app: &AppHandle, state: &AppState, ws: &Workspace) -> CmdResult<()> 
                 .map(|p| p.to_string_lossy().to_string())
                 .collect();
             if !paths.is_empty() {
-                let _ = handle.emit("fs-event", json!({ "paths": paths }));
+                state_clone.emit("fs-event", json!({ "paths": paths }));
             }
         }
     });
@@ -190,8 +193,7 @@ fn activate(app: &AppHandle, state: &AppState, ws: &Workspace) -> CmdResult<()> 
     Ok(())
 }
 
-#[tauri::command]
-pub fn app_recent_workspaces(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+pub fn app_recent_workspaces_impl(state: &AppState) -> CmdResult<Vec<Value>> {
     let current = state.current.lock().ok().and_then(|c| c.clone());
     let current_clean = current.as_deref().map(normalize_workspace_path);
     let db = state.app_paths.open_app_db()?;
@@ -234,30 +236,42 @@ pub fn app_recent_workspaces(state: State<'_, AppState>) -> CmdResult<Vec<Value>
 }
 
 #[tauri::command]
+pub fn app_recent_workspaces(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+    app_recent_workspaces_impl(&state)
+}
+
+pub fn workspace_create_impl(state: &AppState, path: String, name: String) -> CmdResult<Value> {
+    let ws = Workspace::create(&path, name)?;
+    activate(state, &ws)?;
+    Ok(ws_summary(&ws, true))
+}
+
+#[tauri::command]
 pub fn workspace_create(
-    app: AppHandle,
+    _app: AppHandle,
     state: State<'_, AppState>,
     path: String,
     name: String,
 ) -> CmdResult<Value> {
-    let ws = Workspace::create(&path, name)?;
-    activate(&app, &state, &ws)?;
+    workspace_create_impl(&state, path, name)
+}
+
+pub fn workspace_open_impl(state: &AppState, path: String) -> CmdResult<Value> {
+    let ws = Workspace::open(&path)?;
+    activate(state, &ws)?;
     Ok(ws_summary(&ws, true))
 }
 
 #[tauri::command]
 pub fn workspace_open(
-    app: AppHandle,
+    _app: AppHandle,
     state: State<'_, AppState>,
     path: String,
 ) -> CmdResult<Value> {
-    let ws = Workspace::open(&path)?;
-    activate(&app, &state, &ws)?;
-    Ok(ws_summary(&ws, true))
+    workspace_open_impl(&state, path)
 }
 
-#[tauri::command]
-pub fn workspace_current(state: State<'_, AppState>) -> CmdResult<Value> {
+pub fn workspace_current_impl(state: &AppState) -> CmdResult<Value> {
     let ws = state.workspace()?;
     let db = WorkspaceDb::open(&ws)?;
     let month = chrono::Utc::now().format("%Y-%m").to_string();
@@ -282,6 +296,11 @@ pub fn workspace_current(state: State<'_, AppState>) -> CmdResult<Value> {
     }))
 }
 
+#[tauri::command]
+pub fn workspace_current(state: State<'_, AppState>) -> CmdResult<Value> {
+    workspace_current_impl(&state)
+}
+
 // ───────────────────────── Projects & files ─────────────────────────
 
 fn project_summary(p: &Project) -> Value {
@@ -300,10 +319,14 @@ fn project_summary(p: &Project) -> Value {
     })
 }
 
-#[tauri::command]
-pub fn project_list(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+pub fn project_list_impl(state: &AppState) -> CmdResult<Vec<Value>> {
     let ws = state.workspace()?;
     Ok(ws.list_projects()?.iter().map(project_summary).collect())
+}
+
+#[tauri::command]
+pub fn project_list(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+    project_list_impl(&state)
 }
 
 fn kit_modules(state: &AppState, kit: &str) -> Vec<String> {
@@ -317,9 +340,8 @@ fn kit_modules(state: &AppState, kit: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-#[tauri::command]
-pub fn project_create(
-    state: State<'_, AppState>,
+pub fn project_create_impl(
+    state: &AppState,
     slug: String,
     title: String,
     kit: Option<String>,
@@ -330,7 +352,7 @@ pub fn project_create(
     let mut mods = modules.unwrap_or_default();
     if mods.is_empty() {
         if let Some(k) = &kit {
-            mods = kit_modules(&state, k);
+            mods = kit_modules(state, k);
         }
     }
     project.set_modules(kit, &mods)?;
@@ -338,12 +360,27 @@ pub fn project_create(
 }
 
 #[tauri::command]
-pub fn project_files(state: State<'_, AppState>, project: String) -> CmdResult<Vec<Value>> {
+pub fn project_create(
+    state: State<'_, AppState>,
+    slug: String,
+    title: String,
+    kit: Option<String>,
+    modules: Option<Vec<String>>,
+) -> CmdResult<Value> {
+    project_create_impl(&state, slug, title, kit, modules)
+}
+
+pub fn project_files_impl(state: &AppState, project: String) -> CmdResult<Vec<Value>> {
     let ws = state.workspace()?;
     let p = Project::open(&ws, &project)?;
     let mut out = Vec::new();
     walk(p.root(), p.root(), &mut out);
     Ok(out)
+}
+
+#[tauri::command]
+pub fn project_files(state: State<'_, AppState>, project: String) -> CmdResult<Vec<Value>> {
+    project_files_impl(&state, project)
 }
 
 fn walk(root: &Path, dir: &Path, out: &mut Vec<Value>) {
@@ -373,7 +410,7 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<Value>) {
 }
 
 /// Resolve a UI path: absolute inside the workspace, project-relative, or workspace-relative.
-fn resolve_path(ws: &Workspace, project: Option<&str>, path: &str) -> CmdResult<PathBuf> {
+pub fn resolve_path(ws: &Workspace, project: Option<&str>, path: &str) -> CmdResult<PathBuf> {
     let p = Path::new(path);
     if p.is_absolute() {
         let root = std::fs::canonicalize(ws.root())?;
@@ -393,12 +430,7 @@ fn resolve_path(ws: &Workspace, project: Option<&str>, path: &str) -> CmdResult<
     Ok(ws.scoped_path(p)?)
 }
 
-#[tauri::command]
-pub fn file_read(
-    state: State<'_, AppState>,
-    project: Option<String>,
-    path: String,
-) -> CmdResult<Value> {
+pub fn file_read_impl(state: &AppState, project: Option<String>, path: String) -> CmdResult<Value> {
     let ws = state.workspace()?;
     let full = resolve_path(&ws, project.as_deref(), &path)?;
     let size = std::fs::metadata(&full)?.len();
@@ -412,6 +444,15 @@ pub fn file_read(
     Ok(
         json!({ "kind": kind, "mime": mime, "text": text, "assetUrl": asset_url(&full), "size": size }),
     )
+}
+
+#[tauri::command]
+pub fn file_read(
+    state: State<'_, AppState>,
+    project: Option<String>,
+    path: String,
+) -> CmdResult<Value> {
+    file_read_impl(&state, project, path)
 }
 
 // ───────────────────────── Threads & turns ─────────────────────────
@@ -433,8 +474,7 @@ fn thread_json(db: &WorkspaceDb, id: &str) -> CmdResult<Value> {
     )?)
 }
 
-#[tauri::command]
-pub fn thread_list(state: State<'_, AppState>, project: String) -> CmdResult<Vec<Value>> {
+pub fn thread_list_impl(state: &AppState, project: String) -> CmdResult<Vec<Value>> {
     let ws = state.workspace()?;
     let db = WorkspaceDb::open(&ws)?;
     let ids: Vec<String> = {
@@ -448,11 +488,16 @@ pub fn thread_list(state: State<'_, AppState>, project: String) -> CmdResult<Vec
 }
 
 #[tauri::command]
-pub fn thread_create(
-    state: State<'_, AppState>,
+pub fn thread_list(state: State<'_, AppState>, project: String) -> CmdResult<Vec<Value>> {
+    thread_list_impl(&state, project)
+}
+
+pub fn thread_create_impl(
+    state: &AppState,
     project: String,
     engine: String,
     model: Option<String>,
+    title: Option<String>,
 ) -> CmdResult<Value> {
     if engine != "claude" && engine != "agy" {
         return Err(CmdError::msg("Engine không hợp lệ (claude hoặc agy)."));
@@ -461,16 +506,30 @@ pub fn thread_create(
     Project::open(&ws, &project)?;
     let db = WorkspaceDb::open(&ws)?;
     let id = uuid::Uuid::new_v4().to_string();
+    let t = title.unwrap_or_else(|| "Hội thoại mới".into());
     db.conn().execute(
         "INSERT INTO threads (id, project_slug, title, engine, model, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
-        params![id, project, "Hội thoại mới", engine, model, now()],
+        params![id, project, t, engine, model, now()],
     )?;
     thread_json(&db, &id)
 }
 
 #[tauri::command]
-pub fn thread_events(
+pub fn thread_create(
     state: State<'_, AppState>,
+    project: String,
+    engine: String,
+    model: Option<String>,
+) -> CmdResult<Value> {
+    thread_create_impl(&state, project, engine, model, None)
+}
+
+pub fn thread_events_impl(state: &AppState, thread_id: String) -> CmdResult<Value> {
+    thread_events_paged_impl(state, thread_id, None, None)
+}
+
+pub fn thread_events_paged_impl(
+    state: &AppState,
     thread_id: String,
     cursor: Option<String>,
     limit: Option<u32>,
@@ -503,18 +562,27 @@ pub fn thread_events(
 }
 
 #[tauri::command]
+pub fn thread_events(
+    state: State<'_, AppState>,
+    thread_id: String,
+    cursor: Option<String>,
+    limit: Option<u32>,
+) -> CmdResult<Value> {
+    thread_events_paged_impl(&state, thread_id, cursor, limit)
+}
+
+#[tauri::command]
 pub async fn turn_start(
-    app: AppHandle,
+    _app: AppHandle,
     state: State<'_, AppState>,
     thread_id: String,
     prompt: String,
 ) -> CmdResult<Value> {
-    let turn_id = turns::start_turn(app.clone(), &state, thread_id, prompt).await?;
+    let turn_id = turns::start_turn((*state).clone(), thread_id, prompt).await?;
     Ok(json!({ "turnId": turn_id }))
 }
 
-#[tauri::command]
-pub fn turn_cancel(state: State<'_, AppState>, turn_id: String) -> CmdResult<Value> {
+pub fn turn_cancel_impl(state: &AppState, turn_id: String) -> CmdResult<Value> {
     let found = state
         .turns
         .lock()
@@ -527,9 +595,26 @@ pub fn turn_cancel(state: State<'_, AppState>, turn_id: String) -> CmdResult<Val
 }
 
 #[tauri::command]
-pub fn turn_undo(state: State<'_, AppState>, turn_id: String) -> CmdResult<Value> {
-    turns::undo_turn(&state, &turn_id)?;
+pub fn turn_cancel(state: State<'_, AppState>, turn_id: String) -> CmdResult<Value> {
+    turn_cancel_impl(&state, turn_id)
+}
+
+pub fn turn_undo_impl(state: &AppState, turn_id: String) -> CmdResult<Value> {
+    turns::undo_turn(state, &turn_id)?;
     Ok(json!({ "success": true, "restoredTurnId": turn_id }))
+}
+
+#[tauri::command]
+pub fn turn_undo(state: State<'_, AppState>, turn_id: String) -> CmdResult<Value> {
+    turn_undo_impl(&state, turn_id)
+}
+
+pub fn permission_respond_impl(
+    state: &AppState,
+    request_id: String,
+    allow: bool,
+) -> CmdResult<Value> {
+    Ok(json!({ "acknowledged": state.broker.respond(&request_id, allow) }))
 }
 
 #[tauri::command]
@@ -538,13 +623,12 @@ pub fn permission_respond(
     request_id: String,
     allow: bool,
 ) -> CmdResult<Value> {
-    Ok(json!({ "acknowledged": state.broker.respond(&request_id, allow) }))
+    permission_respond_impl(&state, request_id, allow)
 }
 
 // ───────────────────────── Checkpoints ─────────────────────────
 
-#[tauri::command]
-pub fn checkpoint_list(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+pub fn checkpoint_list_impl(state: &AppState) -> CmdResult<Vec<Value>> {
     let ws = state.workspace()?;
     let db = WorkspaceDb::open(&ws)?;
     let list = CheckpointService::list(&ws)?;
@@ -568,16 +652,24 @@ pub fn checkpoint_list(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
 }
 
 #[tauri::command]
-pub fn checkpoint_restore(state: State<'_, AppState>, id: String) -> CmdResult<Value> {
+pub fn checkpoint_list(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+    checkpoint_list_impl(&state)
+}
+
+pub fn checkpoint_restore_impl(state: &AppState, id: String) -> CmdResult<Value> {
     let ws = state.workspace()?;
     CheckpointService::restore(&ws, &id)?;
     Ok(json!({ "success": true, "restoredCheckpointId": id }))
 }
 
+#[tauri::command]
+pub fn checkpoint_restore(state: State<'_, AppState>, id: String) -> CmdResult<Value> {
+    checkpoint_restore_impl(&state, id)
+}
+
 // ───────────────────────── Engines & catalog ─────────────────────────
 
-#[tauri::command]
-pub async fn engines_probe(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+pub async fn engines_probe_impl(state: &AppState) -> CmdResult<Vec<Value>> {
     let mut out = Vec::new();
     for (id, name, probe) in [
         ("claude", "Claude Code", state.claude.probe().await),
@@ -605,6 +697,11 @@ pub async fn engines_probe(state: State<'_, AppState>) -> CmdResult<Vec<Value>> 
         }));
     }
     Ok(out)
+}
+
+#[tauri::command]
+pub async fn engines_probe(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+    engines_probe_impl(&state).await
 }
 
 fn catalog(state: &AppState) -> CmdResult<studio_catalog::Catalog> {
@@ -654,15 +751,18 @@ fn module_json(cat: &studio_catalog::Catalog, id: &str) -> Option<Value> {
     }))
 }
 
-#[tauri::command]
-pub fn catalog_kits(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
-    let cat = catalog(&state)?;
+pub fn catalog_kits_impl(state: &AppState) -> CmdResult<Vec<Value>> {
+    let cat = catalog(state)?;
     Ok(cat.kits.keys().filter_map(|k| kit_json(&cat, k)).collect())
 }
 
 #[tauri::command]
-pub fn catalog_modules(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
-    let cat = catalog(&state)?;
+pub fn catalog_kits(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+    catalog_kits_impl(&state)
+}
+
+pub fn catalog_modules_impl(state: &AppState) -> CmdResult<Vec<Value>> {
+    let cat = catalog(state)?;
     Ok(cat
         .modules
         .keys()
@@ -671,8 +771,12 @@ pub fn catalog_modules(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
 }
 
 #[tauri::command]
-pub fn catalog_suggest(state: State<'_, AppState>, text: String) -> CmdResult<Value> {
-    let cat = catalog(&state)?;
+pub fn catalog_modules(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+    catalog_modules_impl(&state)
+}
+
+pub fn catalog_suggest_impl(state: &AppState, text: String) -> CmdResult<Value> {
+    let cat = catalog(state)?;
     let ranked = studio_catalog::suggest_kits(&cat, &text);
     let kits: Vec<Value> = ranked
         .iter()
@@ -695,8 +799,12 @@ pub fn catalog_suggest(state: State<'_, AppState>, text: String) -> CmdResult<Va
 }
 
 #[tauri::command]
-pub fn project_modules_set(
-    state: State<'_, AppState>,
+pub fn catalog_suggest(state: State<'_, AppState>, text: String) -> CmdResult<Value> {
+    catalog_suggest_impl(&state, text)
+}
+
+pub fn project_modules_set_impl(
+    state: &AppState,
     project: String,
     modules: Vec<String>,
 ) -> CmdResult<Value> {
@@ -704,7 +812,7 @@ pub fn project_modules_set(
     let p = Project::open(&ws, &project)?;
     let kit = p.meta()?.kit;
     let meta = p.set_modules(kit.clone(), &modules)?;
-    let cat = catalog(&state)?;
+    let cat = catalog(state)?;
     let extra: Vec<&str> = meta.modules.iter().map(String::as_str).collect();
     let budget = studio_catalog::resolve(&cat, kit.as_deref(), &extra)
         .map(|a| a.desc_tokens)
@@ -712,17 +820,25 @@ pub fn project_modules_set(
     Ok(json!({ "project": project, "modules": meta.modules, "totalTokenBudget": budget }))
 }
 
+#[tauri::command]
+pub fn project_modules_set(
+    state: State<'_, AppState>,
+    project: String,
+    modules: Vec<String>,
+) -> CmdResult<Value> {
+    project_modules_set_impl(&state, project, modules)
+}
+
 // ───────────────────────── Scope & assets ─────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct AssetFilter {
     kind: Option<String>,
     search: Option<String>,
     limit: Option<usize>,
 }
 
-#[tauri::command]
-pub fn scope_list(state: State<'_, AppState>, kind: String) -> CmdResult<Vec<Value>> {
+pub fn scope_list_impl(state: &AppState, kind: String) -> CmdResult<Vec<Value>> {
     let allowed = [
         "brands",
         "channels",
@@ -753,10 +869,11 @@ pub fn scope_list(state: State<'_, AppState>, kind: String) -> CmdResult<Vec<Val
 }
 
 #[tauri::command]
-pub fn asset_list(
-    state: State<'_, AppState>,
-    filter: Option<AssetFilter>,
-) -> CmdResult<Vec<Value>> {
+pub fn scope_list(state: State<'_, AppState>, kind: String) -> CmdResult<Vec<Value>> {
+    scope_list_impl(&state, kind)
+}
+
+pub fn asset_list_impl(state: &AppState, filter: Option<AssetFilter>) -> CmdResult<Vec<Value>> {
     let ws = state.workspace()?;
     let mut files = Vec::new();
     collect(&ws.root().join("library"), &mut files);
@@ -797,6 +914,14 @@ pub fn asset_list(
         .collect())
 }
 
+#[tauri::command]
+pub fn asset_list(
+    state: State<'_, AppState>,
+    filter: Option<AssetFilter>,
+) -> CmdResult<Vec<Value>> {
+    asset_list_impl(&state, filter)
+}
+
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return;
@@ -813,8 +938,7 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
 
 // ───────────────────────── Jobs & disk ─────────────────────────
 
-#[tauri::command]
-pub async fn jobs_snapshot(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+pub async fn jobs_snapshot_impl(state: &AppState) -> CmdResult<Vec<Value>> {
     let snap = state.scheduler.snapshot().await;
     Ok(snap
         .into_iter()
@@ -842,7 +966,11 @@ pub async fn jobs_snapshot(state: State<'_, AppState>) -> CmdResult<Vec<Value>> 
 }
 
 #[tauri::command]
-pub fn disk_usage(state: State<'_, AppState>) -> CmdResult<Value> {
+pub async fn jobs_snapshot(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+    jobs_snapshot_impl(&state).await
+}
+
+pub fn disk_usage_impl(state: &AppState) -> CmdResult<Value> {
     let ws = state.workspace()?;
     let u = studio_workspace::disk_usage(&ws)?;
     let projects = u.sources_bytes + u.renders_bytes;
@@ -854,6 +982,11 @@ pub fn disk_usage(state: State<'_, AppState>) -> CmdResult<Value> {
             "library": human(u.library_bytes), "total": human(u.total_bytes),
         }
     }))
+}
+
+#[tauri::command]
+pub fn disk_usage(state: State<'_, AppState>) -> CmdResult<Value> {
+    disk_usage_impl(&state)
 }
 
 // ───────────────────────── agy integration ─────────────────────────
@@ -886,9 +1019,8 @@ pub fn agy_disconnect() -> CmdResult<Value> {
 // ───────────────────────── Editing, artifacts ─────────────────────────
 
 /// Write a text file (direct edits on the Stage). Paths outside the workspace or in read-only layers are rejected.
-#[tauri::command]
-pub fn file_write(
-    state: State<'_, AppState>,
+pub fn file_write_impl(
+    state: &AppState,
     project: Option<String>,
     path: String,
     text: String,
@@ -913,16 +1045,29 @@ pub fn file_write(
     Ok(json!({ "path": rel(&ws, &full), "size": text.len() }))
 }
 
-/// Manual checkpoint (e.g. before a series of direct edits).
 #[tauri::command]
-pub fn checkpoint_create(state: State<'_, AppState>, label: Option<String>) -> CmdResult<Value> {
+pub fn file_write(
+    state: State<'_, AppState>,
+    project: Option<String>,
+    path: String,
+    text: String,
+) -> CmdResult<Value> {
+    file_write_impl(&state, project, path, text)
+}
+
+/// Manual checkpoint (e.g. before a series of direct edits).
+pub fn checkpoint_create_impl(state: &AppState, label: Option<String>) -> CmdResult<Value> {
     let ws = state.workspace()?;
     let id = CheckpointService::create(&ws, label.as_deref().unwrap_or("Lưu thủ công"), None)?;
     Ok(json!({ "id": id }))
 }
 
 #[tauri::command]
-pub fn artifact_list(state: State<'_, AppState>, project: String) -> CmdResult<Vec<Value>> {
+pub fn checkpoint_create(state: State<'_, AppState>, label: Option<String>) -> CmdResult<Value> {
+    checkpoint_create_impl(&state, label)
+}
+
+pub fn artifact_list_impl(state: &AppState, project: String) -> CmdResult<Vec<Value>> {
     let ws = state.workspace()?;
     let p = Project::open(&ws, &project)?;
     let list = studio_artifacts::Artifact::list(&p).map_err(|e| CmdError::msg(e.to_string()))?;
@@ -938,8 +1083,12 @@ pub fn artifact_list(state: State<'_, AppState>, project: String) -> CmdResult<V
 }
 
 #[tauri::command]
-pub async fn artifact_render(
-    state: State<'_, AppState>,
+pub fn artifact_list(state: State<'_, AppState>, project: String) -> CmdResult<Vec<Value>> {
+    artifact_list_impl(&state, project)
+}
+
+pub async fn artifact_render_impl(
+    state: &AppState,
     project: String,
     id: String,
 ) -> CmdResult<Value> {
@@ -951,8 +1100,16 @@ pub async fn artifact_render(
 }
 
 #[tauri::command]
-pub fn artifact_check(
+pub async fn artifact_render(
     state: State<'_, AppState>,
+    project: String,
+    id: String,
+) -> CmdResult<Value> {
+    artifact_render_impl(&state, project, id).await
+}
+
+pub fn artifact_check_impl(
+    state: &AppState,
     project: String,
     id: String,
     channels: Option<Vec<String>>,
@@ -969,16 +1126,25 @@ pub fn artifact_check(
     studio_mcp::tools::check_run(&ws, &args).map_err(CmdError::msg)
 }
 
+#[tauri::command]
+pub fn artifact_check(
+    state: State<'_, AppState>,
+    project: String,
+    id: String,
+    channels: Option<Vec<String>>,
+) -> CmdResult<Value> {
+    artifact_check_impl(&state, project, id, channels)
+}
+
 /// Secret status entry returned to the UI.
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 pub struct SecretStatusItem {
     pub name: String,
     pub present: bool,
 }
 
 /// Retrieve status of all secrets referenced by registered tool manifests.
-#[tauri::command]
-pub async fn secret_status(state: State<'_, AppState>) -> CmdResult<Vec<SecretStatusItem>> {
+pub async fn secret_status_impl(state: &AppState) -> CmdResult<Vec<SecretStatusItem>> {
     let ws = state.workspace().ok();
     let reg = match ws.as_ref() {
         Some(w) => studio_tools::Registry::load(w),
@@ -997,9 +1163,13 @@ pub async fn secret_status(state: State<'_, AppState>) -> CmdResult<Vec<SecretSt
     Ok(out)
 }
 
-/// Set a secret in Windows Credential Manager.
 #[tauri::command]
-pub async fn secret_set(state: State<'_, AppState>, name: String, value: String) -> CmdResult<()> {
+pub async fn secret_status(state: State<'_, AppState>) -> CmdResult<Vec<SecretStatusItem>> {
+    secret_status_impl(&state).await
+}
+
+/// Set a secret in Windows Credential Manager.
+pub async fn secret_set_impl(state: &AppState, name: String, value: String) -> CmdResult<()> {
     let ws = state.workspace().ok();
     let reg = match ws.as_ref() {
         Some(w) => studio_tools::Registry::load(w),
@@ -1023,9 +1193,13 @@ pub async fn secret_set(state: State<'_, AppState>, name: String, value: String)
     Ok(())
 }
 
-/// Delete a secret from Windows Credential Manager.
 #[tauri::command]
-pub async fn secret_delete(state: State<'_, AppState>, name: String) -> CmdResult<()> {
+pub async fn secret_set(state: State<'_, AppState>, name: String, value: String) -> CmdResult<()> {
+    secret_set_impl(&state, name, value).await
+}
+
+/// Delete a secret from Windows Credential Manager.
+pub async fn secret_delete_impl(state: &AppState, name: String) -> CmdResult<()> {
     let ws = state.workspace().ok();
     let reg = match ws.as_ref() {
         Some(w) => studio_tools::Registry::load(w),
@@ -1047,6 +1221,11 @@ pub async fn secret_delete(state: State<'_, AppState>, name: String) -> CmdResul
         .delete(org_name, ws_name, &name)
         .map_err(|e| CmdError::msg(format!("Lỗi xoá khoá từ Credential Manager: {e}")))?;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn secret_delete(state: State<'_, AppState>, name: String) -> CmdResult<()> {
+    secret_delete_impl(&state, name).await
 }
 
 /// Validate endpoint URL format according to requirements:
@@ -1086,18 +1265,23 @@ pub fn validate_endpoint_url(raw: &str) -> Result<String, String> {
 }
 
 /// Get custom provider endpoints from `app.db`.
-#[tauri::command]
-pub async fn provider_endpoint_get(
-    state: State<'_, AppState>,
+pub async fn provider_endpoint_get_impl(
+    state: &AppState,
 ) -> CmdResult<std::collections::HashMap<String, String>> {
     let endpoints = state.endpoints.read().await.clone();
     Ok(endpoints)
 }
 
-/// Set or remove a custom provider endpoint in `app.db`.
 #[tauri::command]
-pub async fn provider_endpoint_set(
+pub async fn provider_endpoint_get(
     state: State<'_, AppState>,
+) -> CmdResult<std::collections::HashMap<String, String>> {
+    provider_endpoint_get_impl(&state).await
+}
+
+/// Set or remove a custom provider endpoint in `app.db`.
+pub async fn provider_endpoint_set_impl(
+    state: &AppState,
     tool_id: String,
     base_url: Option<String>,
 ) -> CmdResult<()> {
@@ -1125,19 +1309,33 @@ pub async fn provider_endpoint_set(
     Ok(())
 }
 
-/// Get custom provider pricing from `app.db`.
 #[tauri::command]
-pub async fn provider_pricing_get(
+pub async fn provider_endpoint_set(
     state: State<'_, AppState>,
+    tool_id: String,
+    base_url: Option<String>,
+) -> CmdResult<()> {
+    provider_endpoint_set_impl(&state, tool_id, base_url).await
+}
+
+/// Get custom provider pricing from `app.db`.
+pub async fn provider_pricing_get_impl(
+    state: &AppState,
 ) -> CmdResult<std::collections::HashMap<String, studio_tools::ProviderPricing>> {
     let pricing = state.pricing.read().await.clone();
     Ok(pricing)
 }
 
-/// Set or remove custom provider pricing in `app.db`.
 #[tauri::command]
-pub async fn provider_pricing_set(
+pub async fn provider_pricing_get(
     state: State<'_, AppState>,
+) -> CmdResult<std::collections::HashMap<String, studio_tools::ProviderPricing>> {
+    provider_pricing_get_impl(&state).await
+}
+
+/// Set or remove custom provider pricing in `app.db`.
+pub async fn provider_pricing_set_impl(
+    state: &AppState,
     provider_id: String,
     pricing: Option<studio_tools::ProviderPricing>,
 ) -> CmdResult<()> {
@@ -1166,6 +1364,15 @@ pub async fn provider_pricing_set(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn provider_pricing_set(
+    state: State<'_, AppState>,
+    provider_id: String,
+    pricing: Option<studio_tools::ProviderPricing>,
+) -> CmdResult<()> {
+    provider_pricing_set_impl(&state, provider_id, pricing).await
+}
+
 /// Environment probe result for external dependencies.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnvProbeItem {
@@ -1178,8 +1385,7 @@ pub struct EnvProbeItem {
 }
 
 /// Probes external tools (Node, npx, FFmpeg, ffprobe, Chrome/Edge, claude, agy) via real binaries.
-#[tauri::command]
-pub async fn env_probe(state: State<'_, AppState>) -> CmdResult<Vec<EnvProbeItem>> {
+pub async fn env_probe_impl(state: &AppState) -> CmdResult<Vec<EnvProbeItem>> {
     // "Quét lại" forces a fresh PATH inspection from registry
     studio_workspace::env_path::get_fresh_paths(true);
 
@@ -1320,6 +1526,11 @@ pub async fn env_probe(state: State<'_, AppState>) -> CmdResult<Vec<EnvProbeItem
     Ok(items)
 }
 
+#[tauri::command]
+pub async fn env_probe(state: State<'_, AppState>) -> CmdResult<Vec<EnvProbeItem>> {
+    env_probe_impl(&state).await
+}
+
 /// Request payload for tool install preview.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1345,9 +1556,8 @@ pub struct ToolUninstallRequest {
 }
 
 /// Previews a tool installation from a local folder or an HTTPS zip URL.
-#[tauri::command]
-pub async fn tool_install_preview(
-    state: State<'_, AppState>,
+pub async fn tool_install_preview_impl(
+    state: &AppState,
     req: ToolInstallPreviewRequest,
 ) -> CmdResult<studio_tools::ToolInstallPreview> {
     let ws = state.workspace().ok();
@@ -1364,10 +1574,17 @@ pub async fn tool_install_preview(
     Ok(preview)
 }
 
-/// Confirms and finalizes an installation preview.
 #[tauri::command]
-pub async fn tool_install_confirm(
+pub async fn tool_install_preview(
     state: State<'_, AppState>,
+    req: ToolInstallPreviewRequest,
+) -> CmdResult<studio_tools::ToolInstallPreview> {
+    tool_install_preview_impl(&state, req).await
+}
+
+/// Confirms and finalizes an installation preview.
+pub async fn tool_install_confirm_impl(
+    state: &AppState,
     req: ToolInstallConfirmRequest,
 ) -> CmdResult<studio_tools::InstalledToolInfo> {
     let preview = {
@@ -1386,10 +1603,17 @@ pub async fn tool_install_confirm(
     Ok(installed)
 }
 
-/// Lists all tools (builtin and installed) with their probe results.
 #[tauri::command]
-pub async fn tool_list_installed(
+pub async fn tool_install_confirm(
     state: State<'_, AppState>,
+    req: ToolInstallConfirmRequest,
+) -> CmdResult<studio_tools::InstalledToolInfo> {
+    tool_install_confirm_impl(&state, req).await
+}
+
+/// Lists all tools (builtin and installed) with their probe results.
+pub async fn tool_list_installed_impl(
+    state: &AppState,
 ) -> CmdResult<Vec<studio_tools::InstalledToolInfo>> {
     let ws = state.workspace().ok();
     let reg = match ws.as_ref() {
@@ -1407,12 +1631,15 @@ pub async fn tool_list_installed(
     Ok(list)
 }
 
-/// Uninstalls an installed tool.
 #[tauri::command]
-pub async fn tool_uninstall(
+pub async fn tool_list_installed(
     state: State<'_, AppState>,
-    req: ToolUninstallRequest,
-) -> CmdResult<bool> {
+) -> CmdResult<Vec<studio_tools::InstalledToolInfo>> {
+    tool_list_installed_impl(&state).await
+}
+
+/// Uninstalls an installed tool.
+pub async fn tool_uninstall_impl(state: &AppState, req: ToolUninstallRequest) -> CmdResult<bool> {
     let ws = state.workspace().ok();
     studio_tools::uninstall_tool(
         &req.tool_id,
@@ -1422,6 +1649,125 @@ pub async fn tool_uninstall(
         &state.app_paths,
     )
     .map_err(|e| CmdError::msg(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn tool_uninstall(
+    state: State<'_, AppState>,
+    req: ToolUninstallRequest,
+) -> CmdResult<bool> {
+    tool_uninstall_impl(&state, req).await
+}
+
+// ───────────────────────── Personal Web Access ─────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebConfigureRequest {
+    pub enabled: Option<bool>,
+    pub lan_allowed: Option<bool>,
+    pub port: Option<u16>,
+    pub password: Option<String>,
+}
+
+pub fn web_status_impl(state: &AppState) -> CmdResult<Value> {
+    let db = state.app_paths.open_app_db()?;
+    let running = state
+        .web_server
+        .lock()
+        .map(|s| s.is_some())
+        .unwrap_or(false);
+    let lan_allowed = db
+        .get_setting("web:lan_allowed")?
+        .map(|v| v == "true")
+        .unwrap_or(false);
+    let port: u16 = db
+        .get_setting("web:port")?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3000);
+    let has_password = db.get_setting("web:password_hash")?.is_some();
+    let lan_ip = studio_web::lan::detect_lan_ip();
+    let lan_url = lan_ip.as_ref().map(|ip| format!("http://{ip}:{port}"));
+    let qr_code_svg = if lan_allowed && has_password {
+        lan_url
+            .as_ref()
+            .and_then(|url| studio_web::qr::generate_qr_svg(url).ok())
+    } else {
+        None
+    };
+
+    Ok(json!({
+        "enabled": running,
+        "lanAllowed": lan_allowed,
+        "port": port,
+        "hasPassword": has_password,
+        "lanIp": lan_ip,
+        "lanUrl": lan_url,
+        "qrCodeSvg": qr_code_svg,
+    }))
+}
+
+#[tauri::command]
+pub fn web_status(state: State<'_, AppState>) -> CmdResult<Value> {
+    web_status_impl(&state)
+}
+
+pub async fn web_configure_impl(state: &AppState, req: WebConfigureRequest) -> CmdResult<Value> {
+    let db = state.app_paths.open_app_db()?;
+
+    if let Some(pw) = req.password {
+        let trimmed = pw.trim();
+        if !trimmed.is_empty() {
+            let hash = studio_web::auth::hash_password(trimmed)
+                .map_err(|e| CmdError::msg(format!("Không thể tạo băm mật khẩu: {e}")))?;
+            db.set_setting("web:password_hash", &hash)?;
+        }
+    }
+
+    let mut needs_restart = false;
+
+    if let Some(lan) = req.lan_allowed {
+        db.set_setting("web:lan_allowed", if lan { "true" } else { "false" })?;
+        needs_restart = true;
+    }
+
+    if let Some(port) = req.port {
+        db.set_setting("web:port", &port.to_string())?;
+        needs_restart = true;
+    }
+
+    let is_currently_running = state
+        .web_server
+        .lock()
+        .map(|s| s.is_some())
+        .unwrap_or(false);
+
+    if let Some(enabled) = req.enabled {
+        db.set_setting("web:enabled", if enabled { "true" } else { "false" })?;
+        if enabled {
+            let has_pw = db.get_setting("web:password_hash")?.is_some();
+            if !has_pw {
+                return Err(CmdError::msg(
+                    "Phải thiết lập mật khẩu chủ sở hữu trước khi bật chế độ web.",
+                ));
+            }
+            crate::web_dispatch::start_web_server(state).await?;
+        } else {
+            crate::web_dispatch::stop_web_server(state);
+        }
+    } else if needs_restart && is_currently_running {
+        crate::web_dispatch::start_web_server(state).await?;
+    }
+
+    web_status_impl(state)
+}
+
+#[tauri::command]
+pub async fn web_configure(
+    state: State<'_, AppState>,
+    req: WebConfigureRequest,
+) -> CmdResult<Value> {
+    web_configure_impl(&state, req).await
 }
 
 /// Individual voice entry for TTS settings.

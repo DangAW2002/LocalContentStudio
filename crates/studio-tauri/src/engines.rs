@@ -15,8 +15,7 @@ const AGY_MODELS_TTL: Duration = Duration::from_secs(600);
 static AGY_MODELS: Mutex<Option<(Instant, Vec<ModelInfo>)>> = Mutex::new(None);
 
 /// Models the given engine accepts; the first entry is the suggested default.
-#[tauri::command]
-pub async fn engine_models(state: State<'_, AppState>, engine: String) -> CmdResult<Vec<Value>> {
+pub async fn engine_models_impl(state: &AppState, engine: String) -> CmdResult<Vec<Value>> {
     let models = match engine.as_str() {
         "claude" => state.claude.list_models(),
         "agy" => {
@@ -45,4 +44,9 @@ pub async fn engine_models(state: State<'_, AppState>, engine: String) -> CmdRes
         .into_iter()
         .map(|m| json!({ "value": m.id, "label": m.label }))
         .collect())
+}
+
+#[tauri::command]
+pub async fn engine_models(state: State<'_, AppState>, engine: String) -> CmdResult<Vec<Value>> {
+    engine_models_impl(&state, engine).await
 }

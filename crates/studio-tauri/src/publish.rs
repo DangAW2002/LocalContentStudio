@@ -10,18 +10,17 @@ use studio_tools::publish::{
     KEY_YOUTUBE_CLIENT_SECRET, KEY_YOUTUBE_REFRESH_TOKEN,
 };
 use studio_workspace::WorkspaceDb;
-use tauri::Emitter;
 
-/// Helper to emit `job-event` to the frontend matching the scheduler contract.
+/// Helper to emit `job-event` matching the scheduler contract.
 fn emit_publish_event(
-    handle: &tauri::AppHandle,
+    state: &AppState,
     job_id: &str,
-    state: &str,
+    state_str: &str,
     progress: Option<f32>,
     message: &str,
     error: Option<&str>,
 ) {
-    let snapshot_state = match state {
+    let snapshot_state = match state_str {
         "running" => "RUNNING",
         "succeeded" => "DONE",
         "failed" => "FAILED",
@@ -33,7 +32,7 @@ fn emit_publish_event(
         "jobId": job_id,
         "kind": "publish",
         "pool": "network",
-        "state": state,
+        "state": state_str,
         "progress": progress,
         "message": message,
         "peakMemoryBytes": None::<u64>,
@@ -49,13 +48,12 @@ fn emit_publish_event(
         }
     });
 
-    let _ = handle.emit("job-event", payload);
+    state.emit("job-event", payload);
 }
 
 /// Prepare a draft publish request and validate against channel limits.
-#[tauri::command]
-pub fn publish_prepare(
-    state: tauri::State<'_, AppState>,
+pub fn publish_prepare_impl(
+    state: &AppState,
     project: Option<String>,
     artifact: String,
     channel: String,
@@ -78,10 +76,21 @@ pub fn publish_prepare(
     Ok(outcome)
 }
 
-/// List publish requests in the current workspace, optionally filtered by project slug.
 #[tauri::command]
-pub fn publish_list(
+pub fn publish_prepare(
     state: tauri::State<'_, AppState>,
+    project: Option<String>,
+    artifact: String,
+    channel: String,
+    target: String,
+    metadata: PublishMetadata,
+) -> CmdResult<studio_tools::publish::PrepareOutcome> {
+    publish_prepare_impl(&state, project, artifact, channel, target, metadata)
+}
+
+/// List publish requests in the current workspace, optionally filtered by project slug.
+pub fn publish_list_impl(
+    state: &AppState,
     project: Option<String>,
 ) -> CmdResult<Vec<PublishRequest>> {
     let ws = state.workspace()?;
@@ -90,9 +99,16 @@ pub fn publish_list(
     Ok(list)
 }
 
-/// Get a specific publish request by its ID.
 #[tauri::command]
-pub fn publish_get(state: tauri::State<'_, AppState>, id: String) -> CmdResult<PublishRequest> {
+pub fn publish_list(
+    state: tauri::State<'_, AppState>,
+    project: Option<String>,
+) -> CmdResult<Vec<PublishRequest>> {
+    publish_list_impl(&state, project)
+}
+
+/// Get a specific publish request by its ID.
+pub fn publish_get_impl(state: &AppState, id: String) -> CmdResult<PublishRequest> {
     let ws = state.workspace()?;
     let db = WorkspaceDb::open(&ws)?;
     let req = PublishRequest::get(db.conn(), &id)?
@@ -100,10 +116,14 @@ pub fn publish_get(state: tauri::State<'_, AppState>, id: String) -> CmdResult<P
     Ok(req)
 }
 
-/// Update metadata for an existing draft or awaiting-confirmation publish request.
 #[tauri::command]
-pub fn publish_update_metadata(
-    state: tauri::State<'_, AppState>,
+pub fn publish_get(state: tauri::State<'_, AppState>, id: String) -> CmdResult<PublishRequest> {
+    publish_get_impl(&state, id)
+}
+
+/// Update metadata for an existing draft or awaiting-confirmation publish request.
+pub fn publish_update_metadata_impl(
+    state: &AppState,
     id: String,
     metadata: PublishMetadata,
 ) -> CmdResult<PublishRequest> {
@@ -130,14 +150,21 @@ pub fn publish_update_metadata(
     Ok(req)
 }
 
+#[tauri::command]
+pub fn publish_update_metadata(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    metadata: PublishMetadata,
+) -> CmdResult<PublishRequest> {
+    publish_update_metadata_impl(&state, id, metadata)
+}
+
 /// Confirm and execute a publish request.
 /// Runs upload as a job with progress events.
 /// Enforces idempotency: published requests can never be sent again.
 /// Failed requests require explicit user confirmation to retry.
-#[tauri::command]
-pub async fn publish_confirm(
-    handle: tauri::AppHandle,
-    state: tauri::State<'_, AppState>,
+pub async fn publish_confirm_impl(
+    state: &AppState,
     id: String,
     channel_id: Option<String>,
 ) -> CmdResult<PublishRequest> {
@@ -166,7 +193,7 @@ pub async fn publish_confirm(
 
     let job_id = format!("pub-job-{}", req.id);
     emit_publish_event(
-        &handle,
+        state,
         &job_id,
         "running",
         Some(0.05),
@@ -211,15 +238,15 @@ pub async fn publish_confirm(
                     req.error = Some(err.clone());
                     req.updated_at = chrono::Utc::now().to_rfc3339();
                     let _ = req.save(db.conn());
-                    emit_publish_event(&handle, &job_id, "failed", None, "Thất bại", Some(&err));
+                    emit_publish_event(state, &job_id, "failed", None, "Thất bại", Some(&err));
                     return Err(CmdError::msg(err));
                 }
             };
 
-            let h_clone = handle.clone();
+            let state_clone = state.clone();
             let j_id_clone = job_id.clone();
             let progress_cb = move |frac: f32, msg: &str| {
-                emit_publish_event(&h_clone, &j_id_clone, "running", Some(frac), msg, None);
+                emit_publish_event(&state_clone, &j_id_clone, "running", Some(frac), msg, None);
             };
 
             let org_name = ws.org().name();
@@ -255,7 +282,7 @@ pub async fn publish_confirm(
                     }
 
                     emit_publish_event(
-                        &handle,
+                        state,
                         &job_id,
                         "succeeded",
                         Some(1.0),
@@ -271,7 +298,7 @@ pub async fn publish_confirm(
                     req.updated_at = chrono::Utc::now().to_rfc3339();
                     let _ = req.save(db.conn());
                     emit_publish_event(
-                        &handle,
+                        state,
                         &job_id,
                         "failed",
                         None,
@@ -288,7 +315,7 @@ pub async fn publish_confirm(
         | PublishTarget::Export => {
             // Generate export bundle folder and open folder on desktop
             emit_publish_event(
-                &handle,
+                state,
                 &job_id,
                 "running",
                 Some(0.5),
@@ -311,7 +338,7 @@ pub async fn publish_confirm(
                     req.save(db.conn())?;
 
                     emit_publish_event(
-                        &handle,
+                        state,
                         &job_id,
                         "succeeded",
                         Some(1.0),
@@ -329,7 +356,7 @@ pub async fn publish_confirm(
                     let _ = req.save(db.conn());
 
                     emit_publish_event(
-                        &handle,
+                        state,
                         &job_id,
                         "failed",
                         None,
@@ -344,13 +371,17 @@ pub async fn publish_confirm(
     }
 }
 
-/// Cancel an in-progress or awaiting-confirmation publish request.
 #[tauri::command]
-pub fn publish_cancel(
-    handle: tauri::AppHandle,
+pub async fn publish_confirm(
     state: tauri::State<'_, AppState>,
     id: String,
+    channel_id: Option<String>,
 ) -> CmdResult<PublishRequest> {
+    publish_confirm_impl(&state, id, channel_id).await
+}
+
+/// Cancel an in-progress or awaiting-confirmation publish request.
+pub fn publish_cancel_impl(state: &AppState, id: String) -> CmdResult<PublishRequest> {
     let ws = state.workspace()?;
     let db = WorkspaceDb::open(&ws)?;
     let mut req = PublishRequest::get(db.conn(), &id)?
@@ -367,7 +398,7 @@ pub fn publish_cancel(
         req.status = PublishStatus::Failed;
         req.error = Some("Người dùng đã hủy quá trình xuất bản.".into());
         emit_publish_event(
-            &handle,
+            state,
             &job_id,
             "cancelled",
             None,
@@ -382,6 +413,11 @@ pub fn publish_cancel(
     req.save(db.conn())?;
 
     Ok(req)
+}
+
+#[tauri::command]
+pub fn publish_cancel(state: tauri::State<'_, AppState>, id: String) -> CmdResult<PublishRequest> {
+    publish_cancel_impl(&state, id)
 }
 
 /// Result of importing a YouTube OAuth client.
@@ -402,9 +438,8 @@ pub struct YoutubeClientStatus {
 
 /// Import a Google OAuth client JSON or raw Client ID + Secret into Windows Credential Manager.
 /// Never echoes secret values back, never logs them.
-#[tauri::command]
-pub async fn youtube_client_import(
-    state: tauri::State<'_, AppState>,
+pub async fn youtube_client_import_impl(
+    state: &AppState,
     json: Option<String>,
     client_id: Option<String>,
     client_secret: Option<String>,
@@ -443,11 +478,18 @@ pub async fn youtube_client_import(
     })
 }
 
-/// Retrieve status of the YouTube OAuth client (configured boolean and masked last 6 characters).
 #[tauri::command]
-pub async fn youtube_client_status(
+pub async fn youtube_client_import(
     state: tauri::State<'_, AppState>,
-) -> CmdResult<YoutubeClientStatus> {
+    json: Option<String>,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+) -> CmdResult<YoutubeClientImportResult> {
+    youtube_client_import_impl(&state, json, client_id, client_secret).await
+}
+
+/// Retrieve status of the YouTube OAuth client (configured boolean and masked last 6 characters).
+pub fn youtube_client_status_impl(state: &AppState) -> CmdResult<YoutubeClientStatus> {
     let ws = state.workspace().ok();
     let org_name = ws.as_ref().map(|w| w.org().name()).unwrap_or("");
     let ws_name = ws.as_ref().map(|w| w.name());
@@ -464,6 +506,13 @@ pub async fn youtube_client_status(
             client_id_last6: None,
         })
     }
+}
+
+#[tauri::command]
+pub async fn youtube_client_status(
+    state: tauri::State<'_, AppState>,
+) -> CmdResult<YoutubeClientStatus> {
+    youtube_client_status_impl(&state)
 }
 
 /// Connect YouTube via OAuth 2.0 PKCE, retrieve channel details, store non-secret metadata in app.db,
@@ -504,10 +553,7 @@ pub async fn youtube_connect(
 
 /// List all connected YouTube channels from app.db.
 /// Provides automatic migration if a legacy single `YOUTUBE_REFRESH_TOKEN` exists in Credential Manager.
-#[tauri::command]
-pub async fn youtube_channels_list(
-    state: tauri::State<'_, AppState>,
-) -> CmdResult<Vec<YouTubeChannelAccount>> {
+pub async fn youtube_channels_list_impl(state: &AppState) -> CmdResult<Vec<YouTubeChannelAccount>> {
     let db = state.app_paths.open_app_db().map_err(CmdError::from)?;
     let mut channels: Vec<YouTubeChannelAccount> = db
         .get_setting("publish:youtube_channels")
@@ -541,6 +587,13 @@ pub async fn youtube_channels_list(
     Ok(channels)
 }
 
+#[tauri::command]
+pub async fn youtube_channels_list(
+    state: tauri::State<'_, AppState>,
+) -> CmdResult<Vec<YouTubeChannelAccount>> {
+    youtube_channels_list_impl(&state).await
+}
+
 /// Result of disconnecting a YouTube channel.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -551,9 +604,8 @@ pub struct YoutubeDisconnectResult {
 
 /// Disconnect a YouTube channel: deletes its refresh token from Credential Manager,
 /// removes its record from app.db, and returns the Google revocation link.
-#[tauri::command]
-pub async fn youtube_channel_disconnect(
-    state: tauri::State<'_, AppState>,
+pub fn youtube_channel_disconnect_impl(
+    state: &AppState,
     channel_id: String,
 ) -> CmdResult<YoutubeDisconnectResult> {
     let ws = state.workspace().ok();
@@ -610,4 +662,12 @@ pub async fn youtube_channel_disconnect(
         success: true,
         revoke_url: "https://myaccount.google.com/permissions".into(),
     })
+}
+
+#[tauri::command]
+pub async fn youtube_channel_disconnect(
+    state: tauri::State<'_, AppState>,
+    channel_id: String,
+) -> CmdResult<YoutubeDisconnectResult> {
+    youtube_channel_disconnect_impl(&state, channel_id)
 }

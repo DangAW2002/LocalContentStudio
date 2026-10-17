@@ -781,3 +781,60 @@ interface JobEventPayload {
 
 ### `fs-event`
 - **Payload**: `{ paths: string[] }`
+
+---
+
+## 3. Chế độ Web Cá nhân (Personal Web Mode — `studio-web`)
+
+Khi được kích hoạt từ Settings, Studio khởi động một máy chủ Axum nội bộ cho phép chủ sở hữu truy cập giao diện từ trình duyệt web (cùng máy hoặc qua mạng Wi-Fi/LAN).
+
+### 3.1 IPC Commands Quản lý Chế độ Web
+
+#### `web_status`
+- **Mục đích**: Lấy thông tin trạng thái hoạt động, cấu hình mạng và mã QR của máy chủ web cá nhân.
+- **Input**: None
+- **Output**: `WebStatus`
+```ts
+interface WebStatus {
+  enabled: boolean;
+  lan_allowed: boolean;
+  port: number;
+  has_password: boolean;
+  local_url?: string;
+  lan_url?: string;
+  lan_ip?: string;
+  qr_code_svg?: string;
+  active_sessions: number;
+}
+```
+
+#### `web_configure`
+- **Mục đích**: Bật/tắt dịch vụ web, cho phép truy cập qua LAN, đổi cổng hoạt động hoặc cập nhật mật khẩu chủ sở hữu.
+- **Input**: `WebConfigureRequest`
+```ts
+interface WebConfigureRequest {
+  enabled?: boolean;
+  lan_allowed?: boolean;
+  port?: number;
+  password?: string;
+}
+```
+- **Output**: `WebStatus`
+
+---
+
+### 3.2 Giao thức REST API & Web Transport (`/api/*`)
+
+Tất cả các route POST yêu cầu header chống giả mạo `x-studio-csrf: 1` và kiểm tra Origin/Host header nghiêm ngặt.
+
+| Tuyến đường (Route) | Phương thức | Mô tả & Kiểm soát Truy cập |
+| --- | --- | --- |
+| `/api/invoke/<command>` | `POST` | Thực thi các lệnh theo Allowlist được cho phép trên web. Nhận payload JSON tương tự Tauri IPC. Yêu cầu phiên đăng nhập. Các lệnh nhạy cảm yêu cầu Sudo Mode còn hiệu lực. |
+| `/api/events` | `GET` | Kênh Server-Sent Events (SSE) phát sóng trực tiếp `turn-event`, `job-event`, `fs-event` đến trình duyệt web. |
+| `/api/file` | `GET` | Xem trước hoặc stream video/audio an toàn trong phạm vi workspace (`?path=...&project=...`). Hỗ trợ HTTP `Range` request để tua video và audio. |
+| `/api/upload` | `POST` | Tải tệp tin tạm thời lên máy chủ làm fallback cho trình duyệt (thay thế native file dialog). Trả về đường dẫn tuyệt đối an toàn. |
+| `/api/qr` | `GET` | Trả về hình ảnh SVG mã QR chứa LAN URL để quét bằng camera điện thoại. |
+| `/api/auth/status` | `GET` | Kiểm tra phiên đăng nhập hiện tại và thời gian hết hạn Sudo. |
+| `/api/auth/login` | `POST` | Đăng nhập bằng mật khẩu chủ sở hữu (`{ password: string }`). Lưu phiên qua cookie `studio_session` (HttpOnly, SameSite=Strict). Khóa 60 giây sau 5 lần thử sai liên tiếp. |
+| `/api/auth/sudo` | `POST` | Xác thực lại mật khẩu chủ sở hữu để nâng quyền Sudo trong vòng 10 phút. |
+| `/api/auth/logout` | `POST` | Hủy bỏ phiên làm việc và xóa cookie xác thực. |
