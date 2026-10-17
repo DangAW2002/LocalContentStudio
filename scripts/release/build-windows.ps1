@@ -20,6 +20,12 @@ Write-Host "=== 2. Building @studio/desktop-ui ===" -ForegroundColor Cyan
 pnpm --filter @studio/desktop-ui build
 if ($LASTEXITCODE -ne 0) { throw "Build desktop-ui failed with exit code $LASTEXITCODE" }
 
+# Always verify frontend UI build exists before starting cargo / tauri release build
+$UiIndex = Join-Path $RepoRoot "packages\desktop-ui\dist\index.html"
+if (-not (Test-Path $UiIndex)) {
+    throw "Frontend UI build did not produce $UiIndex. Cannot proceed with cargo/tauri build."
+}
+
 Write-Host "=== 3. Building Tauri Windows Release Bundle ===" -ForegroundColor Cyan
 $TauriCli = Join-Path $RepoRoot "packages\desktop-ui\node_modules\@tauri-apps\cli\tauri.js"
 if (Test-Path $TauriCli) {

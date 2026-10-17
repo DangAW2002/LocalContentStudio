@@ -21,6 +21,8 @@ pub const SUDO_COMMANDS: &[&str] = &[
     "youtube_channel_disconnect",
     // Owner password / LAN exposure.
     "web_configure",
+    // TTS model/binary download executes binary downloads
+    "tts_model_install",
 ];
 
 /// Commands allowed to be invoked via `POST /api/invoke/<command>`.
@@ -81,6 +83,13 @@ pub const ALLOWED_WEB_COMMANDS: &[&str] = &[
     "tool_install_confirm",
     "tool_list_installed",
     "tool_uninstall",
+    // Text-to-Speech (TTS)
+    "tts_status",
+    "tts_model_preview",
+    "tts_model_install",
+    "tts_synthesize_preview",
+    "tts_get_config",
+    "tts_set_config",
     // Publishing workflow
     "publish_prepare",
     "publish_list",
@@ -123,7 +132,12 @@ mod tests {
         assert!(is_command_allowed("turn_start"));
         assert!(is_command_allowed("publish_confirm"));
         assert!(is_command_allowed("secret_set"));
-        for c in ["web_configure", "workspace_open", "provider_endpoint_set", "publish_confirm"] {
+        for c in [
+            "web_configure",
+            "workspace_open",
+            "provider_endpoint_set",
+            "publish_confirm",
+        ] {
             assert!(requires_sudo(c), "{c} must require sudo");
         }
 
@@ -147,5 +161,37 @@ mod tests {
         assert!(!requires_sudo("file_read"));
         assert!(!requires_sudo("turn_start"));
         assert!(!requires_sudo("secret_status"));
+    }
+
+    #[test]
+    fn test_tts_commands_allowlist_and_sudo() {
+        for cmd in [
+            "tts_status",
+            "tts_model_preview",
+            "tts_model_install",
+            "tts_synthesize_preview",
+            "tts_get_config",
+            "tts_set_config",
+        ] {
+            assert!(
+                is_command_allowed(cmd),
+                "{cmd} must be in allowed web commands"
+            );
+        }
+
+        assert!(
+            requires_sudo("tts_model_install"),
+            "tts_model_install downloads executables and must require sudo"
+        );
+
+        for cmd in [
+            "tts_status",
+            "tts_model_preview",
+            "tts_synthesize_preview",
+            "tts_get_config",
+            "tts_set_config",
+        ] {
+            assert!(!requires_sudo(cmd), "{cmd} must not require sudo");
+        }
     }
 }

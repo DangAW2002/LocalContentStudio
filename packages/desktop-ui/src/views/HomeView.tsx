@@ -13,6 +13,7 @@ import type {
 export interface HomeViewProps {
   onOpenProject: (slug: string, threadId?: string) => void;
   onNavigateSettings: () => void;
+  onLoginSuccess?: () => void;
 }
 
 function slugify(text: string): string {
@@ -30,6 +31,7 @@ function slugify(text: string): string {
 export const HomeView: React.FC<HomeViewProps> = ({
   onOpenProject,
   onNavigateSettings,
+  onLoginSuccess,
 }) => {
   const [prompt, setPrompt] = React.useState("");
   const [engine, setEngine] = React.useState<EngineType>("claude");
@@ -39,30 +41,27 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const [modelsError, setModelsError] = React.useState<string | null>(null);
 
   // Model list comes from the engine itself, so new models show up without an app update.
-  React.useEffect(() => {
-    let alive = true;
+  const loadEngineModels = React.useCallback(async (targetEngine: EngineType) => {
     setModelsLoading(true);
     setModelsError(null);
-    studioApi
-      .getEngineModels(engine)
-      .then((options) => {
-        if (!alive) return;
-        setModelOptions(options);
-        const remembered = localStorage.getItem(`lcs.model.${engine}`);
-        const pick = options.find((o) => o.value === remembered) ?? options[0];
-        setModel(pick?.value ?? "");
-      })
-      .catch((err: any) => {
-        if (!alive) return;
-        setModelOptions([]);
-        setModel("");
-        setModelsError(typeof err === "string" ? err : err?.message || "Không lấy được danh sách model.");
-      })
-      .finally(() => alive && setModelsLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, [engine]);
+    try {
+      const options = await studioApi.getEngineModels(targetEngine);
+      setModelOptions(options);
+      const remembered = localStorage.getItem(`lcs.model.${targetEngine}`);
+      const pick = options.find((o) => o.value === remembered) ?? options[0];
+      setModel(pick?.value ?? "");
+    } catch (err: any) {
+      setModelOptions([]);
+      setModel("");
+      setModelsError(typeof err === "string" ? err : err?.message || "Không lấy được danh sách model.");
+    } finally {
+      setModelsLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    loadEngineModels(engine);
+  }, [engine, loadEngineModels]);
   const [selectedKit, setSelectedKit] = React.useState<string | null>(null);
   const [suggestedKits, setSuggestedKits] = React.useState<CatalogKit[]>([]);
 
@@ -93,6 +92,27 @@ export const HomeView: React.FC<HomeViewProps> = ({
   React.useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Unified login success handler: clear core error state, reload data and engine models
+  const handleLoginSuccess = React.useCallback(async () => {
+    setError(null);
+    setModelsError(null);
+    await Promise.all([
+      loadData(),
+      loadEngineModels(engine),
+    ]);
+    if (onLoginSuccess) {
+      onLoginSuccess();
+    }
+  }, [loadData, loadEngineModels, engine, onLoginSuccess]);
+
+  React.useEffect(() => {
+    const onAuthSuccess = () => {
+      handleLoginSuccess();
+    };
+    window.addEventListener("studio:login-success", onAuthSuccess);
+    return () => window.removeEventListener("studio:login-success", onAuthSuccess);
+  }, [handleLoginSuccess]);
 
   // Debounced suggest kit
   React.useEffect(() => {

@@ -336,3 +336,72 @@ async fn test_file_endpoint_scoping_and_range() {
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(&bytes[..], b"Hello");
 }
+
+#[tokio::test]
+async fn test_https_session_cookie_secure_flag() {
+    let (app, dispatcher, _) = setup_test_app();
+    let hashed = hash_password("secret123").unwrap();
+    dispatcher.set_password_hash(&hashed).unwrap();
+
+    // 1. Plain HTTP request: no Secure
+    let req_http = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/login")
+        .header("host", "127.0.0.1:3000")
+        .header("x-studio-csrf", "1")
+        .header("content-type", "application/json")
+        .body(Body::from(json!({ "password": "secret123" }).to_string()))
+        .unwrap();
+
+    let res_http = app.clone().oneshot(req_http).await.unwrap();
+    assert_eq!(res_http.status(), StatusCode::OK);
+    let cookie_http = res_http
+        .headers()
+        .get(header::SET_COOKIE)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(!cookie_http.contains("Secure"));
+
+    // 2. HTTPS request with x-forwarded-proto: https -> has Secure
+    let req_https = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/login")
+        .header("host", "127.0.0.1:3000")
+        .header("x-forwarded-proto", "https")
+        .header("x-studio-csrf", "1")
+        .header("content-type", "application/json")
+        .body(Body::from(json!({ "password": "secret123" }).to_string()))
+        .unwrap();
+
+    let res_https = app.clone().oneshot(req_https).await.unwrap();
+    assert_eq!(res_https.status(), StatusCode::OK);
+    let cookie_https = res_https
+        .headers()
+        .get(header::SET_COOKIE)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(cookie_https.contains("Secure"));
+
+    // 3. HTTPS request with Origin: https://... -> has Secure
+    let req_origin_https = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/login")
+        .header("host", "127.0.0.1:3000")
+        .header("origin", "https://127.0.0.1:3000")
+        .header("x-studio-csrf", "1")
+        .header("content-type", "application/json")
+        .body(Body::from(json!({ "password": "secret123" }).to_string()))
+        .unwrap();
+
+    let res_origin = app.oneshot(req_origin_https).await.unwrap();
+    assert_eq!(res_origin.status(), StatusCode::OK);
+    let cookie_origin = res_origin
+        .headers()
+        .get(header::SET_COOKIE)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(cookie_origin.contains("Secure"));
+}

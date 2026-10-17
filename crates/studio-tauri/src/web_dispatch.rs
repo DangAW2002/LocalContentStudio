@@ -419,6 +419,40 @@ pub async fn dispatch_invoke(
             let res = commands::web_configure_impl(state, req).await?;
             Ok(serde_json::to_value(res)?)
         }
+        "tts_status" => {
+            let res = commands::tts_status_impl(state).await?;
+            Ok(serde_json::to_value(res)?)
+        }
+        "tts_model_preview" => {
+            let provider: String = get_arg(&args, "provider")?;
+            let voice: String = get_arg(&args, "voice")?;
+            let res = commands::tts_model_preview_impl(state, provider, voice).await?;
+            Ok(serde_json::to_value(res)?)
+        }
+        "tts_model_install" => {
+            let provider: String = get_arg(&args, "provider")?;
+            let voice: String = get_arg(&args, "voice")?;
+            let res = commands::tts_model_install_impl(state, provider, voice).await?;
+            Ok(serde_json::to_value(res)?)
+        }
+        "tts_synthesize_preview" => {
+            let req: commands::TtsPreviewRequest = get_arg(&args, "req").or_else(|_| {
+                serde_json::from_value(args.clone()).map_err(|e| CmdError::msg(e.to_string()))
+            })?;
+            let res = commands::tts_synthesize_preview_impl(state, req).await?;
+            Ok(serde_json::to_value(res)?)
+        }
+        "tts_get_config" => {
+            let res = commands::tts_get_config_impl(state)?;
+            Ok(serde_json::to_value(res)?)
+        }
+        "tts_set_config" => {
+            let req: commands::TtsSetConfigRequest = get_arg(&args, "req").or_else(|_| {
+                serde_json::from_value(args.clone()).map_err(|e| CmdError::msg(e.to_string()))
+            })?;
+            commands::tts_set_config_impl(state, req)?;
+            Ok(json!({ "ok": true }))
+        }
         unhandled => Err(CmdError::msg(format!(
             "Lệnh '{unhandled}' chưa được định tuyến trong bộ điều phối web."
         ))),

@@ -123,7 +123,10 @@ pub fn build_router(state: Arc<WebServerState>) -> Router {
 /// Defence-in-depth headers on every response: no framing, no MIME sniffing, no referrer leaks.
 async fn security_headers(mut res: Response) -> Response {
     let h = res.headers_mut();
-    h.insert("x-frame-options", axum::http::HeaderValue::from_static("DENY"));
+    h.insert(
+        "x-frame-options",
+        axum::http::HeaderValue::from_static("DENY"),
+    );
     h.insert(
         "x-content-type-options",
         axum::http::HeaderValue::from_static("nosniff"),
@@ -152,8 +155,36 @@ fn extract_session_token(headers: &HeaderMap) -> Option<String> {
     None
 }
 
-fn make_cookie(token: &str, max_age: i64) -> String {
-    format!("studio_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}")
+fn is_https_request(headers: &HeaderMap) -> bool {
+    if let Some(proto) = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+    {
+        if proto.trim().eq_ignore_ascii_case("https") {
+            return true;
+        }
+    }
+    if let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
+        if origin.starts_with("https://") {
+            return true;
+        }
+    }
+    if let Some(referer) = headers.get(header::REFERER).and_then(|v| v.to_str().ok()) {
+        if referer.starts_with("https://") {
+            return true;
+        }
+    }
+    false
+}
+
+fn make_cookie(token: &str, max_age: i64, is_secure: bool) -> String {
+    if is_secure {
+        format!(
+            "studio_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}; Secure"
+        )
+    } else {
+        format!("studio_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}")
+    }
 }
 
 // ──────────────────────────────── Auth Routes ────────────────────────────────
@@ -254,7 +285,7 @@ async fn auth_login(
     if verify_password(&body.password, &stored_hash) {
         state.rate_limiter.record_success(ip);
         let session = state.sessions.create_session();
-        let cookie = make_cookie(&session.token, 86400);
+        let cookie = make_cookie(&session.token, 86400, is_https_request(&headers));
 
         Response::builder()
             .status(StatusCode::OK)
@@ -303,7 +334,7 @@ async fn auth_logout(State(state): State<Arc<WebServerState>>, headers: HeaderMa
     if let Some(token) = extract_session_token(&headers) {
         state.sessions.remove(&token);
     }
-    let expired_cookie = make_cookie("", 0);
+    let expired_cookie = make_cookie("", 0, is_https_request(&headers));
 
     Response::builder()
         .status(StatusCode::OK)
@@ -532,6 +563,20 @@ async fn static_or_spa_fallback(
 
     // SPA fallback: index.html
     if let Some(index) = UI_DIST.get_file("index.html") {
+        let content_str = String::from_utf8_lossy(index.contents());
+        let is_placeholder = !content_str.contains("<script")
+            || content_str.trim()
+                == "<!DOCTYPE html><html><head><title>Local Content Studio</title></head><body><div id=\"root\"></div></body></html>";
+        if is_placeholder {
+            return (
+                StatusCode::OK,
+                Html(
+                    "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Local Content Studio</title></head><body style=\"font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc;\"><div style=\"text-align: center; padding: 2rem; border: 1px solid #334155; border-radius: 8px; background: #1e293b;\"><h1 style=\"font-size: 1.5rem; margin-bottom: 0.5rem;\">Chưa build giao diện web — chạy pnpm build</h1><p style=\"color: #94a3b8;\">Vui lòng chạy lệnh <code>pnpm --filter @studio/desktop-ui build</code> để tạo bản build cho giao diện.</p></div></body></html>",
+                ),
+            )
+                .into_response();
+        }
+
         Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
@@ -540,7 +585,9 @@ async fn static_or_spa_fallback(
     } else {
         (
             StatusCode::NOT_FOUND,
-            Html("<h1>404 Not Found</h1><p>Giao diện UI chưa được build.</p>"),
+            Html(
+                "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Local Content Studio</title></head><body style=\"font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #0f172a; color: #f8fafc;\"><div style=\"text-align: center; padding: 2rem; border: 1px solid #334155; border-radius: 8px; background: #1e293b;\"><h1 style=\"font-size: 1.5rem; margin-bottom: 0.5rem;\">Chưa build giao diện web — chạy pnpm build</h1></div></body></html>",
+            ),
         )
             .into_response()
     }

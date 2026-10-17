@@ -292,6 +292,7 @@ export const App: React.FC = () => {
           <HomeView
             onOpenProject={handleOpenProjectFromHome}
             onNavigateSettings={() => handleNavigateSettings("engines")}
+            onLoginSuccess={loadWorkspaceAndCore}
           />
         );
       case "projects":

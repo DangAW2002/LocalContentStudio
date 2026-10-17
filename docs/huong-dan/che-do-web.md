@@ -39,11 +39,11 @@ Tất cả tác vụ, luồng hội thoại AI, job render và tệp tin lưu tr
 Vì Studio trao quyền cho các agent AI thực thi công cụ và quản lý tệp tin, lớp bảo mật của chế độ web được thiết kế theo chuẩn nghiêm ngặt:
 
 1. **Phiên đăng nhập an toàn (HttpOnly Cookie):**
-   - Phiên đăng nhập được quản lý bằng cookie `studio_session` với các cờ `HttpOnly`, `SameSite=Strict`, và `Path=/`. Trình duyệt web không thể đọc hoặc làm rò rỉ cookie này qua script phía client.
+   - Phiên đăng nhập được quản lý bằng cookie `studio_session` với các cờ `HttpOnly`, `SameSite=Strict`, và `Path=/`. Trình duyệt web không thể đọc hoặc làm rò rỉ cookie này qua script phía client. Khi yêu cầu đến qua kết nối HTTPS (reverse proxy hoặc TLS tương lai), cờ `Secure` sẽ tự động được thêm vào cookie.
 2. **Chống dò mật khẩu (Rate Limiting):**
    - Nhập sai mật khẩu liên tiếp 5 lần sẽ bị khóa đăng nhập tạm thời trong 60 giây.
 3. **Xác thực quyền quản trị (Sudo Mode):**
-   - Các hành động có tác động lớn hoặc làm thay đổi hệ thống ngoài (đăng video YouTube `publish_confirm`, cài đặt/gỡ công cụ `tool_install_confirm`, cấu hình khoá bí mật `secret_set`/`secret_delete`, phục hồi checkpoint hoặc hoàn tác lượt `turn_undo`) bắt buộc bạn phải nhập lại mật khẩu chủ sở hữu trong vòng 10 phút gần nhất.
+   - Các hành động có tác động lớn hoặc làm thay đổi hệ thống ngoài (đăng video YouTube `publish_confirm`, cài đặt/gỡ công cụ `tool_install_confirm`, tải mô hình/binary giọng đọc `tts_model_install`, cấu hình khoá bí mật `secret_set`/`secret_delete`, phục hồi checkpoint hoặc hoàn tác lượt `turn_undo`) bắt buộc bạn phải nhập lại mật khẩu chủ sở hữu trong vòng 10 phút gần nhất.
 4. **Chống tấn công CSRF & DNS Rebinding:**
    - Mọi yêu cầu `POST` bắt buộc phải có header `x-studio-csrf: 1`.
    - Máy chủ kiểm tra nghiêm ngặt header `Origin` và `Host`. Mọi yêu cầu từ domain bên ngoài hoặc không khớp với loopback/LAN IP đều bị từ chối ngay lập tức (HTTP 403 Forbidden).
@@ -57,7 +57,11 @@ Vì Studio trao quyền cho các agent AI thực thi công cụ và quản lý t
 
 ## 4. Trải nghiệm trên Trình duyệt Di động & Web
 
-- **Giao diện đáp ứng (Responsive):** Màn hình Dự án trên màn hình nhỏ (điện thoại) tự động chuyển sang chế độ chuyển tab mượt mà giữa **Hội thoại (Thread)**, **Stage (Khu vực xem trước)** và **Thành phẩm (Outputs)**.
+- **Giao diện đáp ứng (Responsive):**
+  - Màn hình Dự án trên màn hình nhỏ (điện thoại) tự động chuyển sang chế độ chuyển tab mượt mà giữa **Hội thoại (Thread)**, **Stage (Khu vực xem trước)** và **Thành phẩm (Outputs)**.
+  - Trên màn hình điện thoại (≤ 480px) và màn hình hẹp (< 600px), thanh tiêu cự (top bar) tự động thu gọn thanh tìm kiếm thành icon button, rút gọn breadcrumb và ẩn gợi ý phím tắt (`Ctrl+K`, `Ctrl+J`) để không tràn layout.
+  - Thanh trạng thái (status bar) tự động điều chỉnh và ưu tiên hiển thị thông tin workspace cùng số tác vụ đang chạy.
+- **Hỗ trợ Giọng đọc ngoại tuyến (TTS):** Giao diện web hỗ trợ đầy đủ các thao tác xem trạng thái nhà cung cấp TTS (VieNeu-TTS, Piper, Windows SAPI), chọn giọng đọc mặc định, nghe thử trực tiếp trên trình duyệt và tải mô hình giọng đọc (có xác thực Sudo).
 - **Phát đa phương tiện tối ưu:** API `/api/file` hỗ trợ đầy đủ chuẩn HTTP `Range Requests`, cho phép tua nhanh video 4K/FullHD và nghe trực tuyến audio trên cả Safari di động và Chrome.
 - **Cập nhật thời gian thực:** Kết nối Server-Sent Events (SSE) `/api/events` nhận và hiển thị phản hồi streaming từng chữ của AI và tiến độ công việc trong nền không có độ trễ.
 - **Tải tệp tin:** Khi cần nạp ảnh/video trên trình duyệt (thay vì cửa sổ chọn tệp hệ thống của máy tính), hệ thống cung cấp endpoint upload tạm thời an toàn.
