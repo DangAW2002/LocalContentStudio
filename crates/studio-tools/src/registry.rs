@@ -117,6 +117,14 @@ impl Registry {
                 "ffmpeg.probe@1",
                 include_str!("../builtin/capabilities/ffmpeg.probe@1.json"),
             ),
+            (
+                "image.generate@1",
+                include_str!("../builtin/capabilities/image.generate@1.json"),
+            ),
+            (
+                "video.generate@1",
+                include_str!("../builtin/capabilities/video.generate@1.json"),
+            ),
         ];
 
         for (id, content) in builtin_caps {
@@ -137,6 +145,9 @@ impl Registry {
             include_str!("../builtin/tools/ffmpeg.probe/tool.yaml"),
             include_str!("../builtin/tools/tts.windows-sapi/tool.yaml"),
             include_str!("../builtin/tools/tts.fake/tool.yaml"),
+            include_str!("../builtin/tools/google.imagen/tool.yaml"),
+            include_str!("../builtin/tools/openai.images/tool.yaml"),
+            include_str!("../builtin/tools/google.veo/tool.yaml"),
         ];
 
         for (i, content) in builtin_tools.iter().enumerate() {

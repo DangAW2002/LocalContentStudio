@@ -337,6 +337,7 @@ async fn capability_run(
         approved: false,
         scheduler: &state.scheduler,
         secret_store: state.secrets.as_ref(),
+        api_base_override: None,
     };
     let mut errors = Vec::new();
     for provider in &providers {

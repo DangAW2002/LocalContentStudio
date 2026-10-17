@@ -17,6 +17,8 @@ chrono = { workspace = true }
 tracing = { workspace = true }
 walkdir = "2.5"
 rusqlite = { workspace = true }
+reqwest = { workspace = true }
+base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_Security_Credentials", "Win32_Foundation"] }

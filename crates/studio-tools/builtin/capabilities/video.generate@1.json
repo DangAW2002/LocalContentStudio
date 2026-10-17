@@ -1,0 +1,50 @@
+{
+  "id": "video.generate",
+  "version": 1,
+  "title": "Tạo video (Video Generation)",
+  "description": "Tạo đoạn clip video từ văn bản mô tả (prompt) và ảnh tham chiếu tùy chọn",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "Văn bản mô tả nội dung video cần tạo"
+      },
+      "duration_s": {
+        "type": "number",
+        "description": "Thời lượng video tính theo giây",
+        "minimum": 1
+      },
+      "aspect": {
+        "type": "string",
+        "description": "Tỉ lệ khung hình (ví dụ: 16:9, 9:16, 1:1)"
+      },
+      "reference_image": {
+        "type": "string",
+        "description": "Đường dẫn tương đối trong workspace tới ảnh tham chiếu làm khung hình đầu"
+      }
+    },
+    "required": ["prompt", "duration_s", "aspect"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "files": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Danh sách đường dẫn tương đối trong workspace tới các tệp video đã tạo"
+      },
+      "video_path": {
+        "type": "string",
+        "description": "Đường dẫn tương đối trong workspace tới tệp video chính"
+      },
+      "provider_metadata": {
+        "type": "object",
+        "description": "Thông tin chi tiết từ nhà cung cấp tạo video"
+      }
+    },
+    "required": ["files"]
+  }
+}

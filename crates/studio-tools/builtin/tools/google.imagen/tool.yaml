@@ -1,0 +1,21 @@
+id: google.imagen
+kind: generator
+description: "Tạo hình ảnh chất lượng cao bằng Google Imagen qua Gemini API"
+provides:
+  - "image.generate@1"
+run:
+  type: builtin
+  command: "google.imagen"
+needs:
+  - "secret:GEMINI_API_KEY"
+cost:
+  unit: "image"
+  estimate: 0.04
+side_effect: paid
+resources:
+  ram_mb: 128
+  cpu: light
+  gpu_vram_mb: 0
+  exclusive: []
+  rate_key: "provider:google"
+lifecycle: per_call

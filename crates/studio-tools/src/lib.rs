@@ -4,6 +4,7 @@
 pub mod error;
 pub mod manifest;
 pub mod probe;
+pub mod providers;
 pub mod registry;
 pub mod router;
 pub mod runner;

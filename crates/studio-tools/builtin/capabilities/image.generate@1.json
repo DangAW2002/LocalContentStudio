@@ -1,0 +1,65 @@
+{
+  "id": "image.generate",
+  "version": 1,
+  "title": "Tạo hình ảnh (Image Generation)",
+  "description": "Tạo hình ảnh từ văn bản mô tả (prompt) và các ảnh tham chiếu tùy chọn",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "description": "Văn bản mô tả nội dung hình ảnh cần tạo"
+      },
+      "negative_prompt": {
+        "type": "string",
+        "description": "Mô tả những chi tiết không mong muốn xuất hiện trong ảnh"
+      },
+      "width": {
+        "type": "integer",
+        "description": "Chiều rộng hình ảnh theo pixel",
+        "minimum": 64
+      },
+      "height": {
+        "type": "integer",
+        "description": "Chiều cao hình ảnh theo pixel",
+        "minimum": 64
+      },
+      "n": {
+        "type": "integer",
+        "description": "Số lượng hình ảnh cần tạo",
+        "default": 1,
+        "minimum": 1,
+        "maximum": 8
+      },
+      "seed": {
+        "type": "integer",
+        "description": "Số seed ngẫu nhiên để tái lập kết quả tạo ảnh"
+      },
+      "reference_images": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Danh sách đường dẫn tương đối trong workspace tới các ảnh tham chiếu"
+      }
+    },
+    "required": ["prompt", "width", "height"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "files": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Danh sách đường dẫn tương đối trong workspace tới các tệp ảnh đã tạo"
+      },
+      "provider_metadata": {
+        "type": "object",
+        "description": "Thông tin chi tiết từ nhà cung cấp tạo ảnh"
+      }
+    },
+    "required": ["files"]
+  }
+}
