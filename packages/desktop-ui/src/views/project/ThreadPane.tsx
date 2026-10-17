@@ -30,6 +30,7 @@ export interface ThreadMessage {
     outputTokens: number;
     cacheReadTokens: number;
     costUsd?: number | null;
+    estimatedCostUsd?: number | null;
   };
   turnId?: string;
   isStreaming?: boolean;
@@ -108,6 +109,7 @@ export function applyTurnEvent(prev: ThreadMessage[], payload: EngineTurnEvent):
           outputTokens: event.outputTokens,
           cacheReadTokens: event.cacheReadTokens,
           costUsd: event.costUsd,
+          estimatedCostUsd: event.estimatedCostUsd,
         },
       };
       break;
@@ -663,6 +665,14 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
                       msg.usage.costUsd != null ? (
                         <span>
                           ${msg.usage.costUsd.toFixed(4)} · {(msg.usage.inputTokens + msg.usage.outputTokens).toLocaleString()} tokens
+                          {msg.usage.estimatedCostUsd ? ` · ~$${msg.usage.estimatedCostUsd.toFixed(2)} (ước tính)` : ""}
+                        </span>
+                      ) : msg.usage.estimatedCostUsd != null ? (
+                        <span>
+                          ~${msg.usage.estimatedCostUsd.toFixed(2)} USD (ước tính)
+                          {msg.usage.inputTokens + msg.usage.outputTokens > 0
+                            ? ` · ${(msg.usage.inputTokens + msg.usage.outputTokens).toLocaleString()} tokens`
+                            : ""}
                         </span>
                       ) : (
                         <span>

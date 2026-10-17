@@ -93,6 +93,20 @@ pub fn strip_verbatim(path: &Path) -> String {
     }
 }
 
+/// Normalize a workspace path for storage and deduplication:
+/// Strips verbatim prefixes (`\\?\`) and trims trailing slashes (case-insensitive on Windows).
+pub fn normalize_workspace_path(path: impl AsRef<Path>) -> String {
+    let stripped = strip_verbatim(path.as_ref());
+    let trimmed = stripped.trim_end_matches(['/', '\\']);
+    if trimmed.len() == 2 && trimmed.ends_with(':') {
+        format!("{trimmed}\\")
+    } else if trimmed.is_empty() {
+        stripped
+    } else {
+        trimmed.to_string()
+    }
+}
+
 fn rel(ws: &Workspace, p: &Path) -> String {
     let clean_root = PathBuf::from(strip_verbatim(ws.root()));
     let clean_p = PathBuf::from(strip_verbatim(p));
@@ -111,13 +125,27 @@ fn modified(p: &Path) -> Option<String> {
 // ───────────────────────── Workspace ─────────────────────────
 
 fn ws_summary(ws: &Workspace, current: bool) -> Value {
-    json!({ "path": strip_verbatim(ws.root()), "name": ws.name(), "lastOpenedAt": now(), "isCurrent": current })
+    json!({ "path": normalize_workspace_path(ws.root()), "name": ws.name(), "lastOpenedAt": now(), "isCurrent": current })
 }
 
 /// Make `path` the open workspace: record it, allow asset access, watch files.
 fn activate(app: &AppHandle, state: &AppState, ws: &Workspace) -> CmdResult<()> {
+    let norm = normalize_workspace_path(ws.root());
     if let Ok(db) = state.app_paths.open_app_db() {
-        let _ = db.record_workspace_open(&strip_verbatim(ws.root()));
+        if let Ok(conn) = rusqlite::Connection::open(state.app_paths.app_db_path()) {
+            if cfg!(windows) {
+                let _ = conn.execute(
+                    "DELETE FROM recent_workspaces WHERE lower(path) = lower(?1) OR lower(path) = lower(?2)",
+                    params![norm, format!(r"\\?\{norm}")],
+                );
+            } else {
+                let _ = conn.execute(
+                    "DELETE FROM recent_workspaces WHERE path = ?1",
+                    params![norm],
+                );
+            }
+        }
+        let _ = db.record_workspace_open(&norm);
     }
     let _ = app.asset_protocol_scope().allow_directory(ws.root(), true);
     // Turns left "running" by a crash or forced quit can never finish: close them.
@@ -178,21 +206,44 @@ fn activate(app: &AppHandle, state: &AppState, ws: &Workspace) -> CmdResult<()> 
 #[tauri::command]
 pub fn app_recent_workspaces(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
     let current = state.current.lock().ok().and_then(|c| c.clone());
-    let current_clean = current.as_deref().map(strip_verbatim);
+    let current_clean = current.as_deref().map(normalize_workspace_path);
     let db = state.app_paths.open_app_db()?;
-    Ok(db
-        .list_recent_workspaces()?
-        .into_iter()
-        .filter_map(|r| {
-            let path = PathBuf::from(&r.path);
-            let ws = Workspace::open(&path).ok()?;
-            let clean_path = strip_verbatim(&path);
-            Some(json!({
-                "path": clean_path, "name": ws.name(), "lastOpenedAt": r.last_opened,
-                "isCurrent": current_clean.as_deref() == Some(&clean_path),
-            }))
-        })
-        .collect())
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+
+    for r in db.list_recent_workspaces()? {
+        let clean_path = normalize_workspace_path(Path::new(&r.path));
+        let key = if cfg!(windows) {
+            clean_path.to_lowercase()
+        } else {
+            clean_path.clone()
+        };
+
+        if !seen.insert(key) {
+            continue;
+        }
+
+        let path = PathBuf::from(&clean_path);
+        let Ok(ws) = Workspace::open(&path) else {
+            continue;
+        };
+
+        let is_current = current_clean.as_deref().is_some_and(|c| {
+            if cfg!(windows) {
+                c.eq_ignore_ascii_case(&clean_path)
+            } else {
+                c == clean_path
+            }
+        });
+
+        out.push(json!({
+            "path": clean_path,
+            "name": ws.name(),
+            "lastOpenedAt": r.last_opened,
+            "isCurrent": is_current,
+        }));
+    }
+    Ok(out)
 }
 
 #[tauri::command]
@@ -906,18 +957,10 @@ pub async fn artifact_render(
     id: String,
 ) -> CmdResult<Value> {
     let ws = state.workspace()?;
-    let p = Project::open(&ws, &project)?;
-    let artifact =
-        studio_artifacts::Artifact::load(&p, &id).map_err(|e| CmdError::msg(e.to_string()))?;
-    let outcome = studio_artifacts::render(&ws, &p, &artifact, &state.scheduler)
+    let out = studio_mcp::tools::render_artifact_shared(&ws, &state.scheduler, &project, &id, None)
         .await
-        .map_err(|e| CmdError::msg(format!("Render lỗi: {e}")))?;
-    Ok(json!({
-        "cached": outcome.cached,
-        "outputs": outcome.outputs.iter().map(|o| rel(&ws, o)).collect::<Vec<_>>(),
-        "jobId": outcome.job_id,
-        "probes": outcome.probe_report.iter().map(|r| json!({ "name": r.name, "available": r.available, "note": r.note })).collect::<Vec<_>>(),
-    }))
+        .map_err(CmdError::msg)?;
+    Ok(out)
 }
 
 #[tauri::command]
@@ -1095,6 +1138,138 @@ pub async fn provider_endpoint_set(
     Ok(())
 }
 
+/// Get custom provider pricing from `app.db`.
+#[tauri::command]
+pub async fn provider_pricing_get(
+    state: State<'_, AppState>,
+) -> CmdResult<std::collections::HashMap<String, studio_tools::ProviderPricing>> {
+    let pricing = state.pricing.read().await.clone();
+    Ok(pricing)
+}
+
+/// Set or remove custom provider pricing in `app.db`.
+#[tauri::command]
+pub async fn provider_pricing_set(
+    state: State<'_, AppState>,
+    provider_id: String,
+    pricing: Option<studio_tools::ProviderPricing>,
+) -> CmdResult<()> {
+    let provider_id = provider_id.trim().to_string();
+    if provider_id.is_empty() {
+        return Err(CmdError::msg("Thiếu provider_id"));
+    }
+
+    let db = state.app_paths.open_app_db().map_err(CmdError::from)?;
+    let setting_key = format!("pricing:{provider_id}");
+
+    match pricing {
+        Some(p) => {
+            p.validate().map_err(CmdError::msg)?;
+            let json_str = serde_json::to_string(&p).map_err(CmdError::from)?;
+            db.set_setting(&setting_key, &json_str)
+                .map_err(CmdError::from)?;
+            state.pricing.write().await.insert(provider_id, p);
+        }
+        None => {
+            db.delete_setting(&setting_key).map_err(CmdError::from)?;
+            state.pricing.write().await.remove(&provider_id);
+        }
+    }
+
+    Ok(())
+}
+
+/// Environment probe result for external dependencies.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct EnvProbeItem {
+    pub id: String,
+    pub name: String,
+    pub found: bool,
+    pub version: Option<String>,
+    pub path: Option<String>,
+    pub hint: String,
+}
+
+/// Probes external tools (Node, npx, FFmpeg, ffprobe, Chrome/Edge, claude, agy) via real binaries.
+#[tauri::command]
+pub async fn env_probe(state: State<'_, AppState>) -> CmdResult<Vec<EnvProbeItem>> {
+    let mut items = Vec::new();
+
+    let (node, npx) = studio_artifacts::probe_node_npx();
+    items.push(EnvProbeItem {
+        id: "node".into(),
+        name: "Node.js".into(),
+        found: node.available,
+        version: node.version,
+        path: node.path.as_deref().map(strip_verbatim),
+        hint:
+            "Cài đặt Node.js từ https://nodejs.org hoặc qua winget: 'winget install OpenJS.NodeJS'"
+                .into(),
+    });
+
+    items.push(EnvProbeItem {
+        id: "npx".into(),
+        name: "npx".into(),
+        found: npx.available,
+        version: npx.version,
+        path: npx.path.as_deref().map(strip_verbatim),
+        hint: "npx đi kèm với Node.js. Hãy cài đặt Node.js từ https://nodejs.org".into(),
+    });
+
+    let ffmpeg = studio_artifacts::probe_ffmpeg();
+    items.push(EnvProbeItem {
+        id: "ffmpeg".into(),
+        name: "FFmpeg".into(),
+        found: ffmpeg.available,
+        version: ffmpeg.version,
+        path: ffmpeg.path.as_deref().map(strip_verbatim),
+        hint: "Tải FFmpeg từ https://ffmpeg.org hoặc qua winget: 'winget install Gyan.FFmpeg'"
+            .into(),
+    });
+
+    let ffprobe = studio_artifacts::probe_ffprobe();
+    items.push(EnvProbeItem {
+        id: "ffprobe".into(),
+        name: "ffprobe".into(),
+        found: ffprobe.available,
+        version: ffprobe.version,
+        path: ffprobe.path.as_deref().map(strip_verbatim),
+        hint: "ffprobe đi kèm với FFmpeg. Hãy tải từ https://ffmpeg.org hoặc 'winget install Gyan.FFmpeg'".into(),
+    });
+
+    let chromium = studio_artifacts::probe_chromium();
+    items.push(EnvProbeItem {
+        id: "chromium".into(),
+        name: "Chrome / Microsoft Edge".into(),
+        found: chromium.available,
+        version: chromium.version,
+        path: chromium.path.as_deref().map(strip_verbatim),
+        hint: "Cài đặt Google Chrome (https://google.com/chrome) hoặc Microsoft Edge để render HTML sang PNG/PDF".into(),
+    });
+
+    let claude = state.claude.probe().await;
+    items.push(EnvProbeItem {
+        id: "claude".into(),
+        name: "Claude Code CLI".into(),
+        found: claude.installed,
+        version: claude.version,
+        path: None,
+        hint: "Cài đặt Claude Code qua npm: 'npm install -g @anthropic-ai/claude-code'".into(),
+    });
+
+    let agy = state.agy.probe().await;
+    items.push(EnvProbeItem {
+        id: "agy".into(),
+        name: "Antigravity CLI (agy)".into(),
+        found: agy.installed,
+        version: agy.version,
+        path: None,
+        hint: "Cài đặt Antigravity CLI theo tài liệu Google Antigravity".into(),
+    });
+
+    Ok(items)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1149,5 +1324,46 @@ mod tests {
         assert!(validate_endpoint_url("not a url").is_err());
         // empty
         assert!(validate_endpoint_url("").is_err());
+    }
+
+    #[test]
+    fn test_normalize_workspace_path() {
+        assert_eq!(
+            normalize_workspace_path(Path::new(r"\\?\D:\Studio\workspace\")),
+            r"D:\Studio\workspace"
+        );
+        assert_eq!(
+            normalize_workspace_path(Path::new(r"\\?\D:\Studio\workspace")),
+            r"D:\Studio\workspace"
+        );
+        assert_eq!(normalize_workspace_path(Path::new(r"\\?\D:\")), r"D:\");
+        assert_eq!(
+            normalize_workspace_path(Path::new(r"D:\Normal\Path/")),
+            r"D:\Normal\Path"
+        );
+    }
+
+    #[test]
+    fn test_provider_pricing_validation() {
+        let valid = studio_tools::ProviderPricing {
+            image_usd: Some(0.05),
+            video_usd_per_s: Some(0.15),
+            models: std::collections::HashMap::new(),
+        };
+        assert!(valid.validate().is_ok());
+
+        let invalid_negative = studio_tools::ProviderPricing {
+            image_usd: Some(-0.01),
+            video_usd_per_s: None,
+            models: std::collections::HashMap::new(),
+        };
+        assert!(invalid_negative.validate().is_err());
+
+        let invalid_nan = studio_tools::ProviderPricing {
+            image_usd: Some(f64::NAN),
+            video_usd_per_s: None,
+            models: std::collections::HashMap::new(),
+        };
+        assert!(invalid_nan.validate().is_err());
     }
 }

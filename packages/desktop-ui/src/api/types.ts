@@ -250,7 +250,7 @@ export type EngineEvent =
   | { type: "FileChange"; path: string; op: "create" | "modify" | "delete" }
   | { type: "PermissionRequest"; requestId: string; tool: string; input: unknown }
   | { type: "PermissionDenied"; tool: string; input: unknown }
-  | { type: "Usage"; inputTokens: number; outputTokens: number; cacheReadTokens: number; costUsd?: number | null }
+  | { type: "Usage"; inputTokens: number; outputTokens: number; cacheReadTokens: number; costUsd?: number | null; estimatedCostUsd?: number | null }
   | { type: "Done"; status: string; text?: string }
   | { type: "Error"; message: string };
 
@@ -561,5 +561,29 @@ export interface SecretDeleteRequest {
 export interface ProviderEndpointSetRequest {
   toolId: string;
   baseUrl?: string | null;
+}
+
+// ==========================================
+// Provider Pricing & Env Probe Types
+// ==========================================
+
+export interface ProviderPricing {
+  image_usd?: number | null;
+  video_usd_per_s?: number | null;
+  models?: Record<string, ProviderPricing>;
+}
+
+export interface ProviderPricingSetRequest {
+  providerId: string;
+  pricing?: ProviderPricing | null;
+}
+
+export interface EnvProbeItem {
+  id: string;
+  name: string;
+  found: boolean;
+  version?: string | null;
+  path?: string | null;
+  hint: string;
 }
 

@@ -18,6 +18,7 @@ pub async fn run_openai_images(
     input: &Value,
     api_key: &str,
     base_override: Option<&str>,
+    pricing: Option<&crate::pricing::ProviderPricing>,
 ) -> Result<Value> {
     let prompt = input
         .get("prompt")
@@ -164,7 +165,10 @@ pub async fn run_openai_images(
         }
     }
 
-    let estimated_cost = 0.04 * (saved_files.len().max(1) as f64);
+    let (unit_cost, is_default) = pricing
+        .map(|p| p.resolve_image_cost(Some(model)))
+        .unwrap_or((crate::pricing::DEFAULT_IMAGE_USD, true));
+    let estimated_cost = unit_cost * (saved_files.len().max(1) as f64);
 
     Ok(json!({
         "files": saved_files,
@@ -173,7 +177,8 @@ pub async fn run_openai_images(
             "model": model,
             "count": saved_files.len(),
             "size": size,
-            "estimated_cost_usd": estimated_cost
+            "estimated_cost_usd": estimated_cost,
+            "cost_is_default": is_default
         }
     }))
 }

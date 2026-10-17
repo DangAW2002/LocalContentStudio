@@ -38,6 +38,8 @@ pub struct AppState {
     pub mcp_port: OnceLock<u16>,
     /// Host-set API endpoint overrides by tool id.
     pub endpoints: Arc<tokio::sync::RwLock<HashMap<String, String>>>,
+    /// Host-set pricing configuration per provider.
+    pub pricing: Arc<tokio::sync::RwLock<HashMap<String, studio_tools::ProviderPricing>>>,
     /// Currently open workspace root.
     pub current: Mutex<Option<PathBuf>>,
     /// Running turns by id.
@@ -85,6 +87,23 @@ impl AppState {
                         for (key, val) in list {
                             if let Some(tool_id) = key.strip_prefix("endpoint:") {
                                 map.insert(tool_id.to_string(), val);
+                            }
+                        }
+                    }
+                }
+                Arc::new(tokio::sync::RwLock::new(map))
+            },
+            pricing: {
+                let mut map = HashMap::new();
+                if let Ok(db) = app_paths.open_app_db() {
+                    if let Ok(list) = db.list_settings_by_prefix("pricing:") {
+                        for (key, val) in list {
+                            if let Some(tool_id) = key.strip_prefix("pricing:") {
+                                if let Ok(parsed) =
+                                    serde_json::from_str::<studio_tools::ProviderPricing>(&val)
+                                {
+                                    map.insert(tool_id.to_string(), parsed);
+                                }
                             }
                         }
                     }

@@ -219,6 +219,7 @@ async fn test_google_imagen_success_fixture() {
             "google.imagen".into(),
             server.base_url.clone(),
         )]),
+        pricing: std::collections::HashMap::new(),
     };
 
     let input = serde_json::json!({
@@ -313,6 +314,7 @@ async fn test_google_imagen_429_then_success_retry() {
             "google.imagen".into(),
             server.base_url.clone(),
         )]),
+        pricing: std::collections::HashMap::new(),
     };
 
     let input = serde_json::json!({
@@ -368,6 +370,7 @@ async fn test_google_imagen_error_body_fails_without_retry() {
             "google.imagen".into(),
             server.base_url.clone(),
         )]),
+        pricing: std::collections::HashMap::new(),
     };
 
     let input = serde_json::json!({
@@ -439,6 +442,7 @@ async fn test_openai_images_success_fixture() {
             "openai.images".into(),
             server.base_url.clone(),
         )]),
+        pricing: std::collections::HashMap::new(),
     };
 
     let input = serde_json::json!({
@@ -551,6 +555,7 @@ async fn test_google_veo_success_fixture() {
             "google.veo".into(),
             server.base_url.clone(),
         )]),
+        pricing: std::collections::HashMap::new(),
     };
 
     let input = serde_json::json!({
@@ -564,8 +569,8 @@ async fn test_google_veo_success_fixture() {
 
     match run_res {
         ToolRun::Success { output, cost_usd } => {
-            assert_eq!(cost_usd, 0.20);
-            assert!(output["video_path"].is_string());
+            assert_eq!(cost_usd, 1.00); // 0.20 USD/s * 5s
+            assert_eq!(output["provider_metadata"]["estimated_cost_usd"], 1.00);
             let vpath = output["video_path"].as_str().unwrap();
 
             let full_file_path = ws.root().join(vpath);
@@ -578,7 +583,7 @@ async fn test_google_veo_success_fixture() {
                 output["provider_metadata"]["operation_name"],
                 "operations/veo-op-987"
             );
-            assert_eq!(output["provider_metadata"]["estimated_cost_usd"], 0.20);
+            assert_eq!(output["provider_metadata"]["estimated_cost_usd"], 1.00);
         }
         other => panic!("Expected ToolRun::Success, got {:?}", other),
     }
@@ -632,6 +637,7 @@ async fn test_magic_bytes_invalid_fails() {
             "google.imagen".into(),
             server.base_url.clone(),
         )]),
+        pricing: std::collections::HashMap::new(),
     };
 
     let input = serde_json::json!({
@@ -676,6 +682,7 @@ async fn test_budget_refusal_for_builtin_generator() {
         scheduler: &scheduler,
         secret_store: &secret_store,
         endpoints: std::collections::HashMap::new(),
+        pricing: std::collections::HashMap::new(),
     };
 
     let input = serde_json::json!({
@@ -780,6 +787,7 @@ async fn test_openai_videos_create_poll_content_success() {
             "openai.videos".into(),
             server.base_url.clone(),
         )]),
+        pricing: std::collections::HashMap::new(),
     };
 
     let input = serde_json::json!({
@@ -793,7 +801,7 @@ async fn test_openai_videos_create_poll_content_success() {
 
     match run_res {
         ToolRun::Success { output, cost_usd } => {
-            assert_eq!(cost_usd, 0.20); // Manifest estimate per call
+            assert_eq!(cost_usd, 1.00); // 0.20 * 5s
             assert_eq!(output["provider_metadata"]["estimated_cost_usd"], 1.00); // 0.20 * 5s
             assert!(output["video_path"].is_string());
             let vpath = output["video_path"].as_str().unwrap();
@@ -874,6 +882,7 @@ async fn test_openai_videos_url_result_variant() {
             "openai.videos".into(),
             api_server.base_url.clone(),
         )]),
+        pricing: std::collections::HashMap::new(),
     };
 
     let input = serde_json::json!({
@@ -887,8 +896,9 @@ async fn test_openai_videos_url_result_variant() {
 
     match run_res {
         ToolRun::Success { output, cost_usd } => {
-            assert_eq!(cost_usd, 0.20); // Manifest estimate per call
+            assert_eq!(cost_usd, 0.80);
             assert_eq!(output["provider_metadata"]["estimated_cost_usd"], 0.80); // 0.20 * 4s
+            assert_eq!(output["provider_metadata"]["cost_is_default"], true);
             let vpath = output["video_path"].as_str().unwrap();
             let full_file_path = ws.root().join(vpath);
             assert!(full_file_path.is_file());
@@ -947,6 +957,7 @@ async fn test_tool_input_base_url_is_ignored() {
             "openai.videos".into(),
             mock_server.base_url.clone(),
         )]),
+        pricing: std::collections::HashMap::new(),
     };
 
     // Tool input attempts to hijack base_url / api_base_url
@@ -961,4 +972,75 @@ async fn test_tool_input_base_url_is_ignored() {
     let _ = run_tool(&reg, "openai.videos", input, &ctx).await;
     // The fact that it sent the request to mock_server (and failed on invalid download or succeeded)
     // proves tool input base_url is ignored.
+}
+
+#[tokio::test]
+async fn test_pricing_config_overrides_cost_estimate() {
+    let b64_png = BASE64_STANDARD.encode(SAMPLE_PNG_BYTES);
+    let server = MockServer::new(move |_method, path, _body| {
+        if path.ends_with("/images/generations") {
+            let resp = serde_json::json!({
+                "data": [{ "b64_json": b64_png }]
+            });
+            (
+                200,
+                vec![("Content-Type", "application/json".into())],
+                serde_json::to_vec(&resp).unwrap(),
+            )
+        } else {
+            (404, vec![], b"Not Found".to_vec())
+        }
+    })
+    .await;
+
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("ws"), "ws").unwrap();
+    let secret_store = MemoryStore::new();
+    secret_store
+        .set(
+            ws.org().name(),
+            Some(ws.name()),
+            "OPENAI_API_KEY",
+            "dummy-key",
+        )
+        .unwrap();
+
+    let reg = Registry::load(&ws);
+    let scheduler = test_scheduler();
+
+    let custom_pricing = studio_tools::pricing::ProviderPricing {
+        image_usd: Some(0.012),
+        video_usd_per_s: None,
+        models: std::collections::HashMap::new(),
+    };
+
+    let ctx = ToolRunContext {
+        workspace: &ws,
+        turn_id: Some("turn-custom-pricing".into()),
+        budget: Some(1.0),
+        approved: false,
+        scheduler: &scheduler,
+        secret_store: &secret_store,
+        endpoints: std::collections::HashMap::from([(
+            "openai.images".into(),
+            server.base_url.clone(),
+        )]),
+        pricing: std::collections::HashMap::from([("openai.images".into(), custom_pricing)]),
+    };
+
+    let input = serde_json::json!({
+        "prompt": "Test pricing override",
+        "width": 1024,
+        "height": 1024
+    });
+
+    let res = run_tool(&reg, "openai.images", input, &ctx).await.unwrap();
+    match res {
+        ToolRun::Success { output, cost_usd } => {
+            assert_eq!(cost_usd, 0.012);
+            assert_eq!(output["provider_metadata"]["estimated_cost_usd"], 0.012);
+            assert_eq!(output["provider_metadata"]["cost_is_default"], false);
+        }
+        other => panic!("Expected Success, got {:?}", other),
+    }
 }

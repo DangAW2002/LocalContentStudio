@@ -19,6 +19,7 @@ pub async fn run_openai_videos(
     input: &Value,
     api_key: &str,
     base_override: Option<&str>,
+    pricing: Option<&crate::pricing::ProviderPricing>,
 ) -> Result<Value> {
     let prompt = input
         .get("prompt")
@@ -123,6 +124,7 @@ pub async fn run_openai_videos(
             auth_headers: &headers,
             model,
             seconds,
+            pricing,
         })
         .await;
     }
@@ -230,6 +232,7 @@ pub async fn run_openai_videos(
             auth_headers: &headers,
             model,
             seconds,
+            pricing,
         })
         .await
     } else {
@@ -248,6 +251,7 @@ pub async fn run_openai_videos(
             auth_headers: &headers,
             model,
             seconds,
+            pricing,
         })
         .await
     }
@@ -287,6 +291,7 @@ struct VideoDownloadContext<'a> {
     auth_headers: &'a HeaderMap,
     model: &'a str,
     seconds: u64,
+    pricing: Option<&'a crate::pricing::ProviderPricing>,
 }
 
 async fn download_and_finish(ctx: VideoDownloadContext<'_>) -> Result<Value> {
@@ -323,7 +328,11 @@ async fn download_and_finish(ctx: VideoDownloadContext<'_>) -> Result<Value> {
     };
 
     let rel_path = to_workspace_relative(ctx.ws, &final_path);
-    let estimated_cost = 0.20 * (ctx.seconds.max(1) as f64);
+    let (unit_cost_per_s, is_default) = ctx
+        .pricing
+        .map(|p| p.resolve_video_cost_per_s(Some(ctx.model)))
+        .unwrap_or((crate::pricing::DEFAULT_VIDEO_USD_PER_S, true));
+    let estimated_cost = unit_cost_per_s * (ctx.seconds.max(1) as f64);
 
     Ok(json!({
         "files": [rel_path.clone()],
@@ -332,7 +341,8 @@ async fn download_and_finish(ctx: VideoDownloadContext<'_>) -> Result<Value> {
             "provider": "openai.videos",
             "model": ctx.model,
             "seconds": ctx.seconds,
-            "estimated_cost_usd": estimated_cost
+            "estimated_cost_usd": estimated_cost,
+            "cost_is_default": is_default
         }
     }))
 }

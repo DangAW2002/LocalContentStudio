@@ -18,6 +18,7 @@ pub async fn run_google_imagen(
     input: &Value,
     api_key: &str,
     base_override: Option<&str>,
+    pricing: Option<&crate::pricing::ProviderPricing>,
 ) -> Result<Value> {
     let prompt = input
         .get("prompt")
@@ -173,7 +174,10 @@ pub async fn run_google_imagen(
         saved_files.push(rel_path);
     }
 
-    let estimated_cost = 0.04 * (saved_files.len().max(1) as f64);
+    let (unit_cost, is_default) = pricing
+        .map(|p| p.resolve_image_cost(Some("imagen-3.0-generate-002")))
+        .unwrap_or((crate::pricing::DEFAULT_IMAGE_USD, true));
+    let estimated_cost = unit_cost * (saved_files.len().max(1) as f64);
 
     Ok(json!({
         "files": saved_files,
@@ -182,7 +186,8 @@ pub async fn run_google_imagen(
             "model": "imagen-3.0-generate-002",
             "count": saved_files.len(),
             "aspect_ratio": aspect_ratio,
-            "estimated_cost_usd": estimated_cost
+            "estimated_cost_usd": estimated_cost,
+            "cost_is_default": is_default
         }
     }))
 }

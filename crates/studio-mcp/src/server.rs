@@ -35,6 +35,9 @@ pub struct ServerState {
     pub shim_secret: String,
     /// Host-set API endpoint overrides by tool id.
     pub endpoints: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
+    /// Host-set pricing configuration per provider.
+    pub pricing:
+        Arc<tokio::sync::RwLock<std::collections::HashMap<String, studio_tools::ProviderPricing>>>,
 }
 
 /// Handle of a running server.

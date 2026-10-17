@@ -35,6 +35,8 @@ pub struct ToolRunContext<'a> {
     pub secret_store: &'a dyn SecretStore,
     /// Host-set API endpoint overrides by tool id (tests, local gateways). Never taken from tool input.
     pub endpoints: std::collections::HashMap<String, String>,
+    /// Host-set pricing configuration per provider (+ optional per model). Never taken from tool input.
+    pub pricing: std::collections::HashMap<String, crate::pricing::ProviderPricing>,
 }
 
 /// Outcome of invoking a tool.
@@ -173,6 +175,7 @@ pub async fn run_tool(
         })?;
 
         let endpoint_override = ctx.endpoints.get(&tool.id).map(String::as_str);
+        let pricing_override = ctx.pricing.get(&tool.id);
         let output_json = crate::providers::run_builtin(
             &tool.id,
             ctx.workspace,
@@ -180,11 +183,16 @@ pub async fn run_tool(
             &input,
             &api_key,
             endpoint_override,
+            pricing_override,
         )
         .await?;
 
         let job_id: JobId = format!("tool-{}", job_uuid);
-        let final_cost = estimated_cost;
+        let final_cost = output_json
+            .get("provider_metadata")
+            .and_then(|m| m.get("estimated_cost_usd"))
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(estimated_cost);
         record_cost_ledger(
             ctx.workspace,
             ctx.turn_id.as_deref(),

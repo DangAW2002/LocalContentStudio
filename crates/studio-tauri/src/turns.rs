@@ -489,6 +489,53 @@ async fn run_turn(t: TurnTask, mut turn: Turn, cancel: Arc<Notify>) {
                 params![uuid::Uuid::new_v4().to_string(), t.turn_id, t.engine, t.model, c, now()],
             );
         }
+
+        let cap_cost: f64 = db
+            .conn()
+            .query_row(
+                "SELECT COALESCE(SUM(cost_usd), 0.0) FROM cost_ledger WHERE turn_id = ?1 AND job_id IS NOT NULL",
+                [&t.turn_id],
+                |r| r.get(0),
+            )
+            .unwrap_or(0.0);
+
+        if cap_cost > 0.0 {
+            let existing_usage: Option<(String, Value)> = db
+                .conn()
+                .query_row(
+                    "SELECT id, payload_json FROM events WHERE turn_id = ?1 AND event_type = 'Usage' ORDER BY rowid DESC LIMIT 1",
+                    [&t.turn_id],
+                    |r| {
+                        Ok((
+                            r.get(0)?,
+                            serde_json::from_str(&r.get::<_, String>(1)?).unwrap_or(Value::Null),
+                        ))
+                    },
+                )
+                .ok();
+
+            if let Some((id, mut payload)) = existing_usage {
+                if let Some(obj) = payload.as_object_mut() {
+                    obj.insert("estimatedCostUsd".into(), json!(cap_cost));
+                    let _ = db.conn().execute(
+                        "UPDATE events SET payload_json = ?2 WHERE id = ?1",
+                        params![id, payload.to_string()],
+                    );
+                    emit(&t.app, &t.thread_id, &t.turn_id, &payload);
+                }
+            } else {
+                let usage_ev = json!({
+                    "type": "Usage",
+                    "inputTokens": 0,
+                    "outputTokens": 0,
+                    "cacheReadTokens": 0,
+                    "costUsd": null,
+                    "estimatedCostUsd": cap_cost,
+                });
+                let _ = persist(db, &t.turn_id, &usage_ev);
+                emit(&t.app, &t.thread_id, &t.turn_id, &usage_ev);
+            }
+        }
     });
     let state = t.app.state::<AppState>();
     state.tokens.revoke(&t.token);

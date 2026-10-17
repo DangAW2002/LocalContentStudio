@@ -41,6 +41,7 @@ fn main() {
                 catalog_paths: vec![state.catalog_path.clone()],
                 shim_secret: shim_secret.clone(),
                 endpoints: state.endpoints.clone(),
+                pricing: state.pricing.clone(),
             });
             let running = tauri::async_runtime::block_on(studio_mcp::start(server_state, 0))?;
             let port = running.addr.port();
@@ -167,6 +168,9 @@ fn main() {
             commands::secret_delete,
             commands::provider_endpoint_get,
             commands::provider_endpoint_set,
+            commands::provider_pricing_get,
+            commands::provider_pricing_set,
+            commands::env_probe,
         ])
         .run(tauri::generate_context!())
         .expect("không khởi động được Local Content Studio");
