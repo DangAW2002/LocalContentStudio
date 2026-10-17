@@ -41,9 +41,17 @@
           "type": "string"
         },
         "description": "Danh sách đường dẫn tương đối trong workspace tới các ảnh tham chiếu"
+      },
+      "model": {
+        "type": "string",
+        "description": "Model của provider (tuỳ chọn; mặc định theo provider, ví dụ gpt-image-1 hoặc model của gateway)"
       }
     },
-    "required": ["prompt", "width", "height"]
+    "required": [
+      "prompt",
+      "width",
+      "height"
+    ]
   },
   "output_schema": {
     "type": "object",
@@ -60,6 +68,8 @@
         "description": "Thông tin chi tiết từ nhà cung cấp tạo ảnh"
       }
     },
-    "required": ["files"]
+    "required": [
+      "files"
+    ]
   }
 }

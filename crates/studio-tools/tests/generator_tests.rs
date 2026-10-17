@@ -708,7 +708,8 @@ async fn test_openai_videos_create_poll_content_success() {
             assert_eq!(req["prompt"], "A cat walking on Mars");
             let resp = serde_json::json!({
                 "id": "video-job-12345",
-                "status": "processing"
+                "status": "processing",
+                "error": null
             });
             (
                 200,
@@ -720,7 +721,9 @@ async fn test_openai_videos_create_poll_content_success() {
             if count == 0 {
                 let resp = serde_json::json!({
                     "id": "video-job-12345",
-                    "status": "in_progress"
+                    "status": "in_progress",
+                    // Real OpenAI Videos responses carry `"error": null` while running.
+                    "error": null
                 });
                 (
                     200,
@@ -730,7 +733,8 @@ async fn test_openai_videos_create_poll_content_success() {
             } else {
                 let resp = serde_json::json!({
                     "id": "video-job-12345",
-                    "status": "completed"
+                    "status": "completed",
+                    "error": null
                 });
                 (
                     200,

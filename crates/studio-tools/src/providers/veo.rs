@@ -183,7 +183,7 @@ pub async fn run_google_veo(
                 reason: format!("Phản hồi thăm dò Veo không phải JSON hợp lệ: {e}"),
             })?;
 
-        if let Some(err) = poll_json.get("error") {
+        if let Some(err) = poll_json.get("error").filter(|e| !e.is_null()) {
             return Err(ToolError::ExecutionFailed {
                 tool_id: "google.veo".into(),
                 reason: format!("Tác vụ tạo video Veo báo lỗi: {}", err),

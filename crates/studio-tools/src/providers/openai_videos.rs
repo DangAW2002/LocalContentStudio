@@ -104,7 +104,8 @@ pub async fn run_openai_videos(
             reason: format!("Phản hồi từ OpenAI Videos API không phải JSON hợp lệ: {e}"),
         })?;
 
-    if let Some(err) = resp_json.get("error") {
+    // `"error": null` is normal in OpenAI Videos responses; only a non-null value is a failure.
+    if let Some(err) = resp_json.get("error").filter(|e| !e.is_null()) {
         return Err(ToolError::ExecutionFailed {
             tool_id: "openai.videos".into(),
             reason: format!("OpenAI Videos API báo lỗi: {}", err),
@@ -186,7 +187,7 @@ pub async fn run_openai_videos(
                 reason: format!("Phản hồi thăm dò video không phải JSON hợp lệ: {e}"),
             })?;
 
-        if let Some(err) = poll_json.get("error") {
+        if let Some(err) = poll_json.get("error").filter(|e| !e.is_null()) {
             return Err(ToolError::ExecutionFailed {
                 tool_id: "openai.videos".into(),
                 reason: format!("Tác vụ tạo video OpenAI báo lỗi: {}", err),

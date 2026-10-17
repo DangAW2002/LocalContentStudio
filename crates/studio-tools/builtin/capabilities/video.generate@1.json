@@ -22,9 +22,17 @@
       "reference_image": {
         "type": "string",
         "description": "Đường dẫn tương đối trong workspace tới ảnh tham chiếu làm khung hình đầu"
+      },
+      "model": {
+        "type": "string",
+        "description": "Model của provider (tuỳ chọn; mặc định theo provider, ví dụ sora-2 hoặc model của gateway)"
       }
     },
-    "required": ["prompt", "duration_s", "aspect"]
+    "required": [
+      "prompt",
+      "duration_s",
+      "aspect"
+    ]
   },
   "output_schema": {
     "type": "object",
@@ -45,6 +53,8 @@
         "description": "Thông tin chi tiết từ nhà cung cấp tạo video"
       }
     },
-    "required": ["files"]
+    "required": [
+      "files"
+    ]
   }
 }
