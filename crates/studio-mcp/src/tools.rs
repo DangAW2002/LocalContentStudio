@@ -586,7 +586,7 @@ pub fn check_run(ws: &Workspace, args: &Value) -> Result<Value, String> {
         .and_then(|r| ffprobe_json(r));
     let set = BrandSet::load(ws).map_err(|e| format!("Không nạp được Brand: {e}"))?;
     let channel_refs: Vec<&str> = channels.iter().map(String::as_str).collect();
-    let report = run_checks(
+    let mut report = run_checks(
         CheckSubject {
             artifact_dir: &dir,
             source_content: source.as_deref(),
@@ -599,6 +599,17 @@ pub fn check_run(ws: &Workspace, args: &Value) -> Result<Value, String> {
         &channel_refs,
     )
     .ok_or_else(|| format!("Không có brand \"{brand}\"."))?;
+    // Show workspace-relative locations to the user, never absolute verbatim paths.
+    for ch in report.channels.values_mut() {
+        for f in &mut ch.findings {
+            if let Some(loc) = f.location.as_mut() {
+                let p = Path::new(loc.as_str());
+                if p.is_absolute() {
+                    *loc = rel(ws, p);
+                }
+            }
+        }
+    }
     serde_json::to_value(report).map_err(|e| e.to_string())
 }
 
