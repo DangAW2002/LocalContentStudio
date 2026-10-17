@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
 use studio_jobs::{
-    event::{FailedReason, JobEvent},
+    event::{FailedReason, TaskEvent},
     job::JobId,
     scheduler::Scheduler,
 };
@@ -189,7 +189,7 @@ pub async fn render(
 
     while let Some(event) = handle.next_event().await {
         match event {
-            JobEvent::Finished { exit_code, .. } => {
+            TaskEvent::Finished { exit_code, .. } => {
                 if exit_code == 0 {
                     job_success = true;
                 } else {
@@ -197,7 +197,7 @@ pub async fn render(
                 }
                 break;
             }
-            JobEvent::Failed { reason } => {
+            TaskEvent::Failed { reason } => {
                 let reason_str = match reason {
                     FailedReason::OutOfMemory => "Vượt bộ nhớ (Out of Memory)".to_string(),
                     FailedReason::Timeout => "Hết thời gian thực thi (Timeout)".to_string(),

@@ -131,6 +131,83 @@ impl JobObject {
             0
         }
     }
+
+    /// Check if a process is assigned to this Job Object.
+    pub fn is_process_in_job(&self, process_handle: RawHandle) -> Result<bool, JobError> {
+        let mut result: i32 = 0;
+        let ret = unsafe {
+            windows_sys::Win32::System::JobObjects::IsProcessInJob(
+                process_handle as HANDLE,
+                self.handle,
+                &mut result,
+            )
+        };
+        if ret == 0 {
+            return Err(JobError::SpawnError(format!(
+                "Failed to check IsProcessInJob: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+        Ok(result != 0)
+    }
+
+    /// Safe process thread resumption for suspended processes.
+    ///
+    /// Enumerates threads belonging to the specified PID using Toolhelp32 snapshot,
+    /// opening and resuming each thread via `ResumeThread`.
+    pub fn resume_process(&self, pid: u32) -> Result<(), JobError> {
+        use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+        };
+        use windows_sys::Win32::System::Threading::{
+            OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
+        };
+
+        let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+        if snapshot == INVALID_HANDLE_VALUE {
+            return Err(JobError::SpawnError(format!(
+                "Failed to create thread snapshot: {}",
+                std::io::Error::last_os_error()
+            )));
+        }
+
+        let mut entry: THREADENTRY32 = unsafe { std::mem::zeroed() };
+        entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+
+        let mut success = unsafe { Thread32First(snapshot, &mut entry) };
+        let mut resumed_any = false;
+
+        while success != 0 {
+            if entry.th32OwnerProcessID == pid {
+                let thread_handle =
+                    unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+                if !thread_handle.is_null() && thread_handle != INVALID_HANDLE_VALUE {
+                    let prev_count = unsafe { ResumeThread(thread_handle) };
+                    unsafe {
+                        CloseHandle(thread_handle);
+                    }
+                    if prev_count != u32::MAX {
+                        resumed_any = true;
+                    }
+                }
+            }
+            success = unsafe { Thread32Next(snapshot, &mut entry) };
+        }
+
+        unsafe {
+            CloseHandle(snapshot);
+        }
+
+        if !resumed_any {
+            return Err(JobError::SpawnError(format!(
+                "No threads found or resumed for process PID {}",
+                pid
+            )));
+        }
+
+        Ok(())
+    }
 }
 
 impl Drop for JobObject {

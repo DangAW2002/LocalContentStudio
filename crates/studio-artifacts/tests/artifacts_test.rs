@@ -491,7 +491,7 @@ async fn test_windows_integration_proxy_generation() {
 
     let mut handle = scheduler.submit(job_spec).await;
     while let Some(event) = handle.next_event().await {
-        if let studio_jobs::event::JobEvent::Finished { exit_code, .. } = event {
+        if let studio_jobs::event::TaskEvent::Finished { exit_code, .. } = event {
             assert_eq!(exit_code, 0);
             break;
         }
@@ -532,4 +532,71 @@ async fn test_hyperframes_render_integration() {
     assert!(!outcome.cached);
     assert_eq!(outcome.outputs.len(), 1);
     assert!(outcome.outputs[0].exists());
+}
+
+#[tokio::test]
+async fn test_brand_content_edit_invalidates_cache() {
+    let (_tmp, ws, proj) = create_test_env();
+
+    // Create a brand directory under workspace root: brands/my-brand
+    let brand_dir = ws.root().join("brands").join("my-brand");
+    fs::create_dir_all(&brand_dir).unwrap();
+
+    let brand_yaml_path = brand_dir.join("brand.yaml");
+    fs::write(
+        &brand_yaml_path,
+        r##"
+version: 1
+name: "My Brand"
+colors:
+  primary: "#112233"
+logos:
+  mark: "logo.png"
+"##,
+    )
+    .unwrap();
+
+    let logo_path = brand_dir.join("logo.png");
+    fs::write(&logo_path, b"ORIGINAL_LOGO_BYTES").unwrap();
+
+    let art = Artifact::create(
+        &proj,
+        "design-art",
+        "design",
+        "Design Card",
+        Some("my-brand@1".into()),
+        vec![],
+        None,
+    )
+    .unwrap();
+
+    // Compute original input hash
+    let hash1 = compute_input_hash(&ws, &proj, &art, "my-brand@1", "render.html_png@1").unwrap();
+
+    // 1. Modifying referenced logo file must invalidate hash
+    fs::write(&logo_path, b"MODIFIED_LOGO_BYTES").unwrap();
+    let hash2 = compute_input_hash(&ws, &proj, &art, "my-brand@1", "render.html_png@1").unwrap();
+    assert_ne!(
+        hash1, hash2,
+        "Editing referenced logo file must change input hash and invalidate cache"
+    );
+
+    // 2. Modifying brand.yaml must invalidate hash
+    fs::write(
+        &brand_yaml_path,
+        r##"
+version: 1
+name: "My Brand Renamed"
+colors:
+  primary: "#998877"
+logos:
+  mark: "logo.png"
+"##,
+    )
+    .unwrap();
+    let hash3 = compute_input_hash(&ws, &proj, &art, "my-brand@1", "render.html_png@1").unwrap();
+    assert_ne!(
+        hash2, hash3,
+        "Editing brand.yaml must change input hash and invalidate cache"
+    );
 }

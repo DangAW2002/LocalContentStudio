@@ -20,7 +20,7 @@ pub mod windows_job;
 pub use command::CommandSpec;
 pub use error::JobError;
 pub use estimate::{EstimateStore, MemoryEstimateStore};
-pub use event::{FailedReason, JobEvent};
+pub use event::{FailedReason, JobBroadcastEvent, JobEvent, JobState, TaskEvent};
 pub use handle::JobHandle;
 pub use job::{JobId, JobSpec, JobStatus, JobWaitReason, Lifecycle, Priority};
 pub use probe::{FakeProbe, SysinfoProbe, SystemProbe};

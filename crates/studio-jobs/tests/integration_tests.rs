@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 use studio_jobs::command::CommandSpec;
 use studio_jobs::error::JobError;
 use studio_jobs::estimate::{EstimateStore, MemoryEstimateStore};
-use studio_jobs::event::{FailedReason, JobEvent};
+use studio_jobs::event::{FailedReason, JobState, TaskEvent};
 use studio_jobs::job::{JobSpec, Lifecycle, Priority};
 use studio_jobs::probe::FakeProbe;
 use studio_jobs::resource::{ResourceSpec, SchedulerConfig};
@@ -74,7 +74,7 @@ impl Worker for MockWorker {
     fn run(
         &self,
         spec: JobSpec,
-        event_tx: mpsc::Sender<JobEvent>,
+        event_tx: mpsc::Sender<TaskEvent>,
         mut cancel_rx: mpsc::Receiver<()>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), JobError>> + Send + '_>>
     {
@@ -86,12 +86,12 @@ impl Worker for MockWorker {
             let cur = active.fetch_add(1, Ordering::SeqCst) + 1;
             max_c.fetch_max(cur, Ordering::SeqCst);
 
-            let _ = event_tx.send(JobEvent::Started { pid: 1234 }).await;
+            let _ = event_tx.send(TaskEvent::Started { pid: 1234 }).await;
 
             tokio::select! {
                 _ = tokio::time::sleep(delay) => {
                     active.fetch_sub(1, Ordering::SeqCst);
-                    let _ = event_tx.send(JobEvent::Finished {
+                    let _ = event_tx.send(TaskEvent::Finished {
                         exit_code: 0,
                         peak_memory_mb: spec.resources.ram_mb,
                         duration_ms: delay.as_millis() as u64,
@@ -100,7 +100,7 @@ impl Worker for MockWorker {
                 }
                 _ = cancel_rx.recv() => {
                     active.fetch_sub(1, Ordering::SeqCst);
-                    let _ = event_tx.send(JobEvent::Failed {
+                    let _ = event_tx.send(TaskEvent::Failed {
                         reason: FailedReason::Cancelled,
                     }).await;
                     Err(JobError::Cancelled)
@@ -143,7 +143,7 @@ async fn test_queue_ordering_by_priority() {
 
     // Drain j0 completion
     while let Some(evt) = h0.next_event().await {
-        if matches!(evt, JobEvent::Finished { .. }) {
+        if matches!(evt, TaskEvent::Finished { .. }) {
             break;
         }
     }
@@ -158,26 +158,26 @@ async fn test_queue_ordering_by_priority() {
     while !int_done || !tb_done || !bg_done {
         tokio::select! {
             Some(evt) = h_int.next_event(), if !int_done => {
-                if matches!(evt, JobEvent::Started { .. }) {
+                if matches!(evt, TaskEvent::Started { .. }) {
                     started_order.push("Interactive");
                 }
-                if matches!(evt, JobEvent::Finished { .. }) {
+                if matches!(evt, TaskEvent::Finished { .. }) {
                     int_done = true;
                 }
             }
             Some(evt) = h_tb.next_event(), if !tb_done => {
-                if matches!(evt, JobEvent::Started { .. }) {
+                if matches!(evt, TaskEvent::Started { .. }) {
                     started_order.push("TurnBlocking");
                 }
-                if matches!(evt, JobEvent::Finished { .. }) {
+                if matches!(evt, TaskEvent::Finished { .. }) {
                     tb_done = true;
                 }
             }
             Some(evt) = h_bg.next_event(), if !bg_done => {
-                if matches!(evt, JobEvent::Started { .. }) {
+                if matches!(evt, TaskEvent::Started { .. }) {
                     started_order.push("Background");
                 }
-                if matches!(evt, JobEvent::Finished { .. }) {
+                if matches!(evt, TaskEvent::Finished { .. }) {
                     bg_done = true;
                 }
             }
@@ -217,7 +217,7 @@ async fn test_two_gpu_jobs_never_overlap() {
 
     let t1 = tokio::spawn(async move {
         while let Some(evt) = h1.next_event().await {
-            if matches!(evt, JobEvent::Finished { .. }) {
+            if matches!(evt, TaskEvent::Finished { .. }) {
                 break;
             }
         }
@@ -225,7 +225,7 @@ async fn test_two_gpu_jobs_never_overlap() {
 
     let t2 = tokio::spawn(async move {
         while let Some(evt) = h2.next_event().await {
-            if matches!(evt, JobEvent::Finished { .. }) {
+            if matches!(evt, TaskEvent::Finished { .. }) {
                 break;
             }
         }
@@ -259,7 +259,7 @@ async fn test_fake_probe_low_ram_queues_then_starts_when_freed() {
     // Check first event is Queued with Insufficient RAM reason
     let first_evt = handle.next_event().await.unwrap();
     match first_evt {
-        JobEvent::Queued { reason, .. } => {
+        TaskEvent::Queued { reason, .. } => {
             assert!(reason.contains("Chờ bộ nhớ RAM"));
         }
         _ => panic!("Expected Queued event, got {:?}", first_evt),
@@ -277,8 +277,8 @@ async fn test_fake_probe_low_ram_queues_then_starts_when_freed() {
 
     while let Some(evt) = handle.next_event().await {
         match evt {
-            JobEvent::Started { .. } => started = true,
-            JobEvent::Finished { .. } => {
+            TaskEvent::Started { .. } => started = true,
+            TaskEvent::Finished { .. } => {
                 finished = true;
                 break;
             }
@@ -318,7 +318,7 @@ async fn test_timeout_fails_with_timeout() {
 
     let mut failed = false;
     while let Some(evt) = event_rx.recv().await {
-        if let JobEvent::Failed { reason } = evt {
+        if let TaskEvent::Failed { reason } = evt {
             assert_eq!(reason, FailedReason::Timeout);
             failed = true;
         }
@@ -386,7 +386,7 @@ async fn test_cancel_kills_child_and_grandchild() {
     // Wait until child started and get PID
     let mut child_pid = 0u32;
     while let Some(evt) = event_rx.recv().await {
-        if let JobEvent::Started { pid } = evt {
+        if let TaskEvent::Started { pid } = evt {
             child_pid = pid;
             break;
         }
@@ -465,11 +465,205 @@ async fn test_memory_limit_exceeded_fails_with_oom() {
 
     let mut oom_reported = false;
     while let Some(evt) = event_rx.recv().await {
-        if let JobEvent::Failed { reason } = evt {
+        if let TaskEvent::Failed { reason } = evt {
             if matches!(reason, FailedReason::OutOfMemory) {
                 oom_reported = true;
             }
         }
     }
     assert!(oom_reported, "FailedReason::OutOfMemory was not reported");
+}
+
+#[tokio::test]
+async fn test_broadcast_event_sequence_successful_job() {
+    let probe = Arc::new(FakeProbe::new(8192, 4096, 8));
+    let estimates = Arc::new(MemoryEstimateStore::new());
+    let config = SchedulerConfig::default();
+    let mock_worker = Arc::new(MockWorker::new(Duration::from_millis(50)));
+    let scheduler = Scheduler::with_worker(config, probe, estimates, mock_worker);
+
+    let mut rx = scheduler.subscribe();
+    let spec = dummy_spec("success-broadcast", Priority::Interactive);
+
+    let mut handle = scheduler.submit(spec).await;
+
+    // Collect broadcast events
+    let mut states = Vec::new();
+    while let Ok(evt) = rx.recv().await {
+        if evt.job_id == "success-broadcast" {
+            states.push(evt.state);
+            if evt.state == JobState::Succeeded {
+                assert_eq!(evt.progress, Some(1.0));
+                break;
+            }
+        }
+    }
+
+    // Drain handle
+    while handle.next_event().await.is_some() {}
+
+    assert_eq!(
+        states,
+        vec![
+            JobState::Queued,
+            JobState::Admitted,
+            JobState::Running,
+            JobState::Succeeded
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_broadcast_event_sequence_failed_job() {
+    struct FailingWorker;
+    impl Worker for FailingWorker {
+        fn run(
+            &self,
+            _spec: JobSpec,
+            event_tx: mpsc::Sender<TaskEvent>,
+            _cancel_rx: mpsc::Receiver<()>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), JobError>> + Send + '_>>
+        {
+            Box::pin(async move {
+                let _ = event_tx.send(TaskEvent::Started { pid: 9999 }).await;
+                let _ = event_tx
+                    .send(TaskEvent::Failed {
+                        reason: FailedReason::Exit(1),
+                    })
+                    .await;
+                Err(JobError::Exit(1))
+            })
+        }
+    }
+
+    let probe = Arc::new(FakeProbe::new(8192, 4096, 8));
+    let estimates = Arc::new(MemoryEstimateStore::new());
+    let config = SchedulerConfig::default();
+    let scheduler = Scheduler::with_worker(config, probe, estimates, Arc::new(FailingWorker));
+
+    let mut rx = scheduler.subscribe();
+    let spec = dummy_spec("fail-broadcast", Priority::Interactive);
+
+    let mut handle = scheduler.submit(spec).await;
+
+    let mut states = Vec::new();
+    while let Ok(evt) = rx.recv().await {
+        if evt.job_id == "fail-broadcast" {
+            states.push(evt.state);
+            if evt.state == JobState::Failed {
+                assert!(evt.message.is_some());
+                break;
+            }
+        }
+    }
+
+    while handle.next_event().await.is_some() {}
+
+    assert_eq!(
+        states,
+        vec![
+            JobState::Queued,
+            JobState::Admitted,
+            JobState::Running,
+            JobState::Failed
+        ]
+    );
+}
+
+#[tokio::test]
+async fn test_report_progress_emits_event() {
+    let probe = Arc::new(FakeProbe::new(8192, 4096, 8));
+    let estimates = Arc::new(MemoryEstimateStore::new());
+    let config = SchedulerConfig::default();
+    let mock_worker = Arc::new(MockWorker::new(Duration::from_millis(150)));
+    let scheduler = Scheduler::with_worker(config, probe, estimates, mock_worker);
+
+    let mut rx = scheduler.subscribe();
+    let spec = dummy_spec("progress-test", Priority::Interactive);
+
+    let _handle = scheduler.submit(spec).await;
+
+    // Wait until running
+    while let Ok(evt) = rx.recv().await {
+        if evt.job_id == "progress-test" && evt.state == JobState::Running {
+            break;
+        }
+    }
+
+    // Call report_progress
+    let reported = scheduler
+        .report_progress(
+            "progress-test",
+            Some(0.42),
+            Some("Processing chunk 2/5".into()),
+        )
+        .await;
+    assert!(
+        reported,
+        "Job should be running and report_progress succeeded"
+    );
+
+    // Next event on rx should have progress 0.42
+    let mut progress_seen = false;
+    while let Ok(evt) = rx.recv().await {
+        if evt.job_id == "progress-test" {
+            if let Some(p) = evt.progress {
+                if (p - 0.42).abs() < f32::EPSILON {
+                    assert_eq!(evt.message.as_deref(), Some("Processing chunk 2/5"));
+                    progress_seen = true;
+                    break;
+                }
+            }
+        }
+    }
+    assert!(
+        progress_seen,
+        "Progress event was not received via broadcast"
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn test_windows_spawn_in_job_object() {
+    use std::os::windows::io::AsRawHandle;
+    use studio_jobs::windows_job::JobObject;
+
+    let job = JobObject::create(None, Priority::Interactive).expect("Failed to create job object");
+
+    // Spawn a suspended process
+    let mut cmd = std::process::Command::new("cmd.exe");
+    cmd.args(["/c", "exit 0"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_SUSPENDED: u32 = 0x00000004;
+        cmd.creation_flags(CREATE_SUSPENDED);
+    }
+
+    let child = cmd.spawn().expect("Failed to spawn suspended process");
+    let raw_handle = child.as_raw_handle();
+    let pid = child.id();
+
+    // Assign to job object before resuming
+    job.assign_process(raw_handle, Priority::Interactive)
+        .expect("Failed to assign process to job");
+
+    // Verify it is in job object
+    let is_in_job = job
+        .is_process_in_job(raw_handle)
+        .expect("Failed to query is_process_in_job");
+    assert!(
+        is_in_job,
+        "Suspended process should be inside the Job Object"
+    );
+
+    // Resume process
+    job.resume_process(pid)
+        .expect("Failed to resume suspended process");
+
+    // Verify process runs to completion successfully
+    let status = child
+        .wait_with_output()
+        .expect("Failed to wait on child process");
+    assert!(status.status.success(), "cmd.exe /c exit 0 should exit 0");
 }

@@ -500,9 +500,24 @@ export interface TurnEventPayload {
   event: EngineEvent;
 }
 
+export type JobLifecycleState =
+  | "queued"
+  | "admitted"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
 export interface JobEventPayload {
   jobId: string;
-  event: JobSnapshot;
+  kind: string;
+  pool: string;
+  state: JobLifecycleState;
+  progress?: number;
+  message?: string;
+  peakMemoryBytes?: number;
+  /** Legacy optional snapshot for backwards compatibility */
+  event?: JobSnapshot;
 }
 
 export interface FsEventPayload {

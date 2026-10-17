@@ -9,7 +9,7 @@ use tokio::sync::mpsc;
 
 use crate::error::JobError;
 use crate::estimate::EstimateStore;
-use crate::event::{FailedReason, JobEvent};
+use crate::event::{FailedReason, TaskEvent};
 use crate::job::JobSpec;
 
 #[cfg(windows)]
@@ -24,7 +24,7 @@ pub trait Worker: Send + Sync {
     fn run(
         &self,
         spec: JobSpec,
-        event_tx: mpsc::Sender<JobEvent>,
+        event_tx: mpsc::Sender<TaskEvent>,
         cancel_rx: mpsc::Receiver<()>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), JobError>> + Send + '_>>;
 }
@@ -48,7 +48,7 @@ impl Worker for LocalWorker {
     fn run(
         &self,
         spec: JobSpec,
-        event_tx: mpsc::Sender<JobEvent>,
+        event_tx: mpsc::Sender<TaskEvent>,
         mut cancel_rx: mpsc::Receiver<()>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), JobError>> + Send + '_>>
     {
@@ -72,7 +72,7 @@ impl Worker for LocalWorker {
                 Ok(jo) => jo,
                 Err(err) => {
                     let _ = event_tx
-                        .send(JobEvent::Failed {
+                        .send(TaskEvent::Failed {
                             reason: FailedReason::SpawnError(err.to_string()),
                         })
                         .await;
@@ -96,13 +96,19 @@ impl Worker for LocalWorker {
                     Stdio::null()
                 });
 
+            #[cfg(windows)]
+            {
+                use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+                cmd.creation_flags(CREATE_SUSPENDED);
+            }
+
             let mut child = match cmd.spawn() {
                 Ok(child) => child,
                 Err(err) => {
                     let err_msg =
                         format!("Failed to spawn child '{}': {}", spec.command.program, err);
                     let _ = event_tx
-                        .send(JobEvent::Failed {
+                        .send(TaskEvent::Failed {
                             reason: FailedReason::SpawnError(err_msg.clone()),
                         })
                         .await;
@@ -118,7 +124,19 @@ impl Worker for LocalWorker {
                     let _ = child.kill().await;
                     let err_msg = format!("Failed to assign process to Job Object: {}", err);
                     let _ = event_tx
-                        .send(JobEvent::Failed {
+                        .send(TaskEvent::Failed {
+                            reason: FailedReason::SpawnError(err_msg.clone()),
+                        })
+                        .await;
+                    return Err(JobError::SpawnError(err_msg));
+                }
+
+                // Resume the suspended process threads after assignment to close the race condition
+                if let Err(err) = job_obj.resume_process(pid) {
+                    let _ = child.kill().await;
+                    let err_msg = format!("Failed to resume suspended process: {}", err);
+                    let _ = event_tx
+                        .send(TaskEvent::Failed {
                             reason: FailedReason::SpawnError(err_msg.clone()),
                         })
                         .await;
@@ -126,7 +144,7 @@ impl Worker for LocalWorker {
                 }
             }
 
-            let _ = event_tx.send(JobEvent::Started { pid }).await;
+            let _ = event_tx.send(TaskEvent::Started { pid }).await;
 
             // Handle stdin if provided
             if let Some(stdin_bytes) = spec.command.stdin {
@@ -144,7 +162,7 @@ impl Worker for LocalWorker {
                 tokio::spawn(async move {
                     let mut reader = BufReader::new(stdout).lines();
                     while let Ok(Some(line)) = reader.next_line().await {
-                        if stdout_tx.send(JobEvent::Stdout(line)).await.is_err() {
+                        if stdout_tx.send(TaskEvent::Stdout(line)).await.is_err() {
                             break;
                         }
                     }
@@ -157,7 +175,7 @@ impl Worker for LocalWorker {
                 tokio::spawn(async move {
                     let mut reader = BufReader::new(stderr).lines();
                     while let Ok(Some(line)) = reader.next_line().await {
-                        if stderr_tx.send(JobEvent::Stderr(line)).await.is_err() {
+                        if stderr_tx.send(TaskEvent::Stderr(line)).await.is_err() {
                             break;
                         }
                     }
@@ -208,7 +226,7 @@ impl Worker for LocalWorker {
 
             if let Some(reason) = failed_reason {
                 let _ = event_tx
-                    .send(JobEvent::Failed {
+                    .send(TaskEvent::Failed {
                         reason: reason.clone(),
                     })
                     .await;
@@ -248,7 +266,7 @@ impl Worker for LocalWorker {
 
                 if is_oom {
                     let _ = event_tx
-                        .send(JobEvent::Failed {
+                        .send(TaskEvent::Failed {
                             reason: FailedReason::OutOfMemory,
                         })
                         .await;
@@ -257,7 +275,7 @@ impl Worker for LocalWorker {
 
                 if st.success() {
                     let _ = event_tx
-                        .send(JobEvent::Finished {
+                        .send(TaskEvent::Finished {
                             exit_code: code,
                             peak_memory_mb: peak_mb,
                             duration_ms,
@@ -266,7 +284,7 @@ impl Worker for LocalWorker {
                     Ok(())
                 } else {
                     let _ = event_tx
-                        .send(JobEvent::Failed {
+                        .send(TaskEvent::Failed {
                             reason: FailedReason::Exit(code),
                         })
                         .await;
@@ -274,7 +292,7 @@ impl Worker for LocalWorker {
                 }
             } else {
                 let _ = event_tx
-                    .send(JobEvent::Failed {
+                    .send(TaskEvent::Failed {
                         reason: FailedReason::SpawnError("Process exited without status".into()),
                     })
                     .await;

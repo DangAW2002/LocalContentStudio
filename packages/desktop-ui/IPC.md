@@ -410,7 +410,19 @@ interface ArtifactCheckResult {
   - `Error`: `{ type: "Error", message: string }`
 
 ### `job-event`
-- **Payload**: `{ jobId: string, event: JobSnapshot }`
+- **Mục đích**: Phát sóng các bước chuyển trạng thái và cập nhật tiến độ của tác vụ từ job scheduler.
+- **Payload**: `JobEventPayload`
+```ts
+interface JobEventPayload {
+  jobId: string;
+  kind: string;
+  pool: string;
+  state: "queued" | "admitted" | "running" | "succeeded" | "failed" | "cancelled";
+  progress?: number;
+  message?: string;
+  peakMemoryBytes?: number;
+}
+```
 
 ### `fs-event`
 - **Payload**: `{ paths: string[] }`
