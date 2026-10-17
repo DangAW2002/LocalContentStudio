@@ -27,6 +27,13 @@ pub fn probe(
     secret_store: &dyn SecretStore,
     ws: Option<&Workspace>,
 ) -> ProbeResult {
+    if tool.id == "tts.vieneu" {
+        return crate::providers::vieneu::probe_vieneu();
+    }
+    if tool.id == "tts.piper" {
+        return crate::providers::piper::probe_piper();
+    }
+
     let mut missing = Vec::new();
 
     let (org_name, ws_name) = match ws {

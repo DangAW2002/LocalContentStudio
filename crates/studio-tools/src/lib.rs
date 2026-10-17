@@ -25,8 +25,18 @@ pub use manifest::{
 pub use pricing::{ProviderPricing, DEFAULT_IMAGE_USD, DEFAULT_VIDEO_USD_PER_S};
 pub use probe::{find_in_path, probe, probe_application, probe_binary, ProbeResult};
 pub use providers::import::probe_ytdlp;
+pub use providers::piper::{
+    build_piper_args, find_piper_binary, get_installed_piper_voices, install_piper_binary,
+    install_piper_voice, piper_models_dir, probe_piper, PiperVoiceMeta, PIPER_HF_BASE_URL,
+    PIPER_RELEASE_VERSION, PIPER_VIETNAMESE_VOICES, PIPER_ZIP_SHA256, PIPER_ZIP_SIZE_BYTES,
+    PIPER_ZIP_URL, VIETNAMESE_VOICE_LICENSE_NOTE,
+};
+pub use providers::vieneu::{
+    build_vieneu_args, ensure_helper_script, probe_vieneu, VieneuVoiceConfig,
+    VIENEU_DEFAULT_VOICES, VIENEU_HELPER_SCRIPT,
+};
 pub use registry::{ManifestProblem, Registry};
-pub use router::route;
+pub use router::{route, route_available};
 pub use runner::{run_tool, ToolRun, ToolRunContext, MAX_INLINE_RESULT_BYTES};
 pub use secret::{format_target_name, CredentialManagerStore, MemoryStore, SecretStore};
 pub use setup::{default_agy_settings_path, remove_agy, remove_agy_at, setup_agy, setup_agy_at};

@@ -24,6 +24,8 @@ zip = { workspace = true }
 url = { workspace = true }
 tempfile = { workspace = true }
 sha2 = { workspace = true }
+hex = { workspace = true }
+
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_Security_Credentials", "Win32_Foundation"] }

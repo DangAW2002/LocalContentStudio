@@ -1268,6 +1268,55 @@ pub async fn env_probe(state: State<'_, AppState>) -> CmdResult<Vec<EnvProbeItem
         hint: "Cài đặt Antigravity CLI theo tài liệu Google Antigravity".into(),
     });
 
+    let vieneu_probe = studio_tools::probe_vieneu();
+    let python_path =
+        studio_tools::find_in_path("python").or_else(|| studio_tools::find_in_path("python3"));
+    let vieneu_ver = if vieneu_probe.available {
+        let trimmed = vieneu_probe
+            .note_vi
+            .trim_start_matches("Sẵn sàng (VieNeu-TTS ")
+            .trim_end_matches(')')
+            .trim();
+        Some(trimmed.to_string())
+    } else {
+        None
+    };
+    items.push(EnvProbeItem {
+        id: "tts-vieneu".into(),
+        name: "VieNeu-TTS (Python v3 Turbo)".into(),
+        found: vieneu_probe.available,
+        version: vieneu_ver,
+        path: python_path.as_deref().map(strip_verbatim),
+        hint: "Cài đặt thư viện: 'pip install vieneu' (Yêu cầu Python 3.10+ và eSpeak NG)".into(),
+    });
+
+    let piper_bin = studio_tools::find_piper_binary();
+    let piper_ver = if let Some(ref bin) = piper_bin {
+        let mut cmd = std::process::Command::new(bin);
+        cmd.arg("--version");
+        match cmd.output() {
+            Ok(out) if out.status.success() => {
+                let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if v.is_empty() {
+                    Some(studio_tools::PIPER_RELEASE_VERSION.to_string())
+                } else {
+                    Some(v)
+                }
+            }
+            _ => Some(studio_tools::PIPER_RELEASE_VERSION.to_string()),
+        }
+    } else {
+        None
+    };
+    items.push(EnvProbeItem {
+        id: "tts-piper".into(),
+        name: "Piper TTS".into(),
+        found: piper_bin.is_some(),
+        version: piper_ver,
+        path: piper_bin.as_deref().map(strip_verbatim),
+        hint: "Tải Piper từ https://github.com/rhasspy/piper/releases hoặc tải trực tiếp trong Cài đặt → Giọng đọc (TTS)".into(),
+    });
+
     Ok(items)
 }
 
@@ -1375,6 +1424,658 @@ pub async fn tool_uninstall(
     .map_err(|e| CmdError::msg(e.to_string()))
 }
 
+/// Individual voice entry for TTS settings.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsVoiceItem {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    pub quality: Option<String>,
+    pub downloaded: bool,
+    pub size_bytes: Option<u64>,
+    pub size_human: Option<String>,
+    pub license_note: Option<String>,
+}
+
+/// Provider details for TTS settings.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsProviderInfo {
+    pub id: String,
+    pub name: String,
+    pub available: bool,
+    pub note_vi: String,
+    pub voices: Vec<TtsVoiceItem>,
+    pub binary_installed: bool,
+    pub binary_path: Option<String>,
+    pub binary_version: Option<String>,
+}
+
+/// Overall TTS status response.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsStatusResponse {
+    pub providers: Vec<TtsProviderInfo>,
+    pub default_provider: Option<String>,
+    pub default_voice: Option<String>,
+}
+
+/// Model or binary download preview.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsModelPreview {
+    pub provider: String,
+    pub voice: String,
+    pub name: String,
+    pub size_bytes: u64,
+    pub size_human: String,
+    pub license: String,
+    pub license_note: String,
+    pub download_urls: Vec<String>,
+}
+
+/// Result of installing a model or binary.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsModelInstallResult {
+    pub success: bool,
+    pub message: String,
+    pub provider: String,
+    pub voice: String,
+}
+
+/// Request for synthesizing speech preview.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsPreviewRequest {
+    pub text: String,
+    pub provider: Option<String>,
+    pub voice: Option<String>,
+    pub speed: Option<f32>,
+}
+
+/// Response from synthesizing speech preview.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsPreviewResponse {
+    pub audio_url: String,
+    pub audio_path: String,
+    pub provider: String,
+    pub voice: String,
+    pub duration_estimate_secs: Option<f64>,
+    pub size_bytes: u64,
+    pub note: Option<String>,
+}
+
+/// TTS configuration response.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsConfigResponse {
+    pub default_provider: Option<String>,
+    pub default_voice: Option<String>,
+}
+
+/// TTS configuration update request.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TtsSetConfigRequest {
+    pub default_provider: Option<String>,
+    pub default_voice: Option<String>,
+}
+
+fn get_windows_sapi_voices() -> Vec<String> {
+    #[cfg(windows)]
+    {
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; ($s.GetInstalledVoices() | Where-Object { $_.Enabled } | ForEach-Object { $_.VoiceInfo.Name }) -join ';;'",
+        ]);
+        if let Ok(out) = cmd.output() {
+            if out.status.success() {
+                let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                let list: Vec<String> = s
+                    .split(";;")
+                    .map(str::trim)
+                    .filter(|n| !n.is_empty())
+                    .map(String::from)
+                    .collect();
+                if !list.is_empty() {
+                    return list;
+                }
+            }
+        }
+    }
+    vec![
+        "Microsoft An".into(),
+        "Microsoft Mai".into(),
+        "SAPI Default".into(),
+    ]
+}
+
+/// Retrieves TTS status, installed providers, voices, and active configuration.
+#[tauri::command]
+pub async fn tts_status(state: State<'_, AppState>) -> CmdResult<TtsStatusResponse> {
+    let mut providers = Vec::new();
+
+    // 1. VieNeu-TTS
+    let vieneu_probe = studio_tools::probe_vieneu();
+    let python_path =
+        studio_tools::find_in_path("python").or_else(|| studio_tools::find_in_path("python3"));
+    let vieneu_voices = studio_tools::VIENEU_DEFAULT_VOICES
+        .iter()
+        .map(|v| TtsVoiceItem {
+            id: v.to_string(),
+            name: format!("VieNeu {}", v),
+            provider: "tts.vieneu".into(),
+            quality: Some("48kHz".into()),
+            downloaded: vieneu_probe.available,
+            size_bytes: None,
+            size_human: None,
+            license_note: Some("Mô hình VieNeu-TTS mã nguồn mở Apache-2.0.".into()),
+        })
+        .collect();
+
+    providers.push(TtsProviderInfo {
+        id: "tts.vieneu".into(),
+        name: "VieNeu-TTS (v3 Turbo ONNX)".into(),
+        available: vieneu_probe.available,
+        note_vi: vieneu_probe.note_vi,
+        voices: vieneu_voices,
+        binary_installed: python_path.is_some(),
+        binary_path: python_path.as_deref().map(strip_verbatim),
+        binary_version: if vieneu_probe.available {
+            Some("v3-turbo".into())
+        } else {
+            None
+        },
+    });
+
+    // 2. Piper TTS
+    let piper_probe = studio_tools::probe_piper();
+    let piper_bin = studio_tools::find_piper_binary();
+    let installed_piper = studio_tools::get_installed_piper_voices();
+    let piper_voices = studio_tools::PIPER_VIETNAMESE_VOICES
+        .iter()
+        .map(|v| {
+            let downloaded = installed_piper.contains(&v.id.to_string());
+            let total_size = v.onnx_size_bytes + v.json_size_bytes;
+            TtsVoiceItem {
+                id: v.id.to_string(),
+                name: v.name.to_string(),
+                provider: "tts.piper".into(),
+                quality: Some(v.quality.to_string()),
+                downloaded,
+                size_bytes: Some(total_size),
+                size_human: Some(human(total_size)),
+                license_note: Some(studio_tools::VIETNAMESE_VOICE_LICENSE_NOTE.into()),
+            }
+        })
+        .collect();
+
+    providers.push(TtsProviderInfo {
+        id: "tts.piper".into(),
+        name: "Piper TTS (Offline Fast ONNX)".into(),
+        available: piper_probe.available,
+        note_vi: piper_probe.note_vi,
+        voices: piper_voices,
+        binary_installed: piper_bin.is_some(),
+        binary_path: piper_bin.as_deref().map(strip_verbatim),
+        binary_version: if piper_bin.is_some() {
+            Some(studio_tools::PIPER_RELEASE_VERSION.into())
+        } else {
+            None
+        },
+    });
+
+    // 3. Windows SAPI
+    let sapi_voices_raw = get_windows_sapi_voices();
+    let sapi_voices = sapi_voices_raw
+        .iter()
+        .map(|v| TtsVoiceItem {
+            id: v.clone(),
+            name: v.clone(),
+            provider: "tts.windows-sapi".into(),
+            quality: Some("SAPI".into()),
+            downloaded: true,
+            size_bytes: None,
+            size_human: None,
+            license_note: Some("Giọng đọc tích hợp sẵn trong hệ điều hành Windows.".into()),
+        })
+        .collect();
+
+    providers.push(TtsProviderInfo {
+        id: "tts.windows-sapi".into(),
+        name: "Windows SAPI (Hệ thống)".into(),
+        available: cfg!(windows),
+        note_vi: if cfg!(windows) {
+            "Sẵn sàng (Tích hợp trong Windows)".into()
+        } else {
+            "Chỉ hỗ trợ trên Windows".into()
+        },
+        voices: sapi_voices,
+        binary_installed: cfg!(windows),
+        binary_path: None,
+        binary_version: None,
+    });
+
+    let (mut default_provider, mut default_voice) = (None, None);
+    if let Ok(db) = state.app_paths.open_app_db() {
+        default_provider = db.get_setting("tts:default_provider").ok().flatten();
+        default_voice = db.get_setting("tts:default_voice").ok().flatten();
+    }
+
+    if default_provider.is_none() {
+        if vieneu_probe.available {
+            default_provider = Some("tts.vieneu".into());
+        } else if piper_probe.available {
+            default_provider = Some("tts.piper".into());
+        } else {
+            default_provider = Some("tts.windows-sapi".into());
+        }
+    }
+
+    if default_voice.is_none() {
+        if default_provider.as_deref() == Some("tts.vieneu") {
+            default_voice = Some("Bình".into());
+        } else if default_provider.as_deref() == Some("tts.piper") {
+            default_voice = Some("vi_VN-vais1000-medium".into());
+        } else {
+            default_voice = sapi_voices_raw.first().cloned();
+        }
+    }
+
+    Ok(TtsStatusResponse {
+        providers,
+        default_provider,
+        default_voice,
+    })
+}
+
+/// Generates download preview info (size, license terms) before downloading a model or binary.
+#[tauri::command]
+pub async fn tts_model_preview(provider: String, voice: String) -> CmdResult<TtsModelPreview> {
+    let p_lower = provider.to_lowercase();
+    if p_lower == "tts.piper" || p_lower == "piper" {
+        if voice == "binary" || voice == "piper-bin" {
+            let size = studio_tools::PIPER_ZIP_SIZE_BYTES;
+            return Ok(TtsModelPreview {
+                provider: "tts.piper".into(),
+                voice: "binary".into(),
+                name: format!("Piper TTS Binary ({})", studio_tools::PIPER_RELEASE_VERSION),
+                size_bytes: size,
+                size_human: human(size),
+                license: "MIT".into(),
+                license_note:
+                    "Trình biên dịch mã nguồn mở Piper TTS từ Rhasspy (GitHub: rhasspy/piper)."
+                        .into(),
+                download_urls: vec![studio_tools::PIPER_ZIP_URL.into()],
+            });
+        }
+
+        if let Some(meta) = studio_tools::PIPER_VIETNAMESE_VOICES
+            .iter()
+            .find(|v| v.id == voice)
+        {
+            let total_size = meta.onnx_size_bytes + meta.json_size_bytes;
+            return Ok(TtsModelPreview {
+                provider: "tts.piper".into(),
+                voice: meta.id.into(),
+                name: meta.name.into(),
+                size_bytes: total_size,
+                size_human: human(total_size),
+                license: "CC-BY 4.0 (Nghiên cứu / Phi thương mại)".into(),
+                license_note: studio_tools::VIETNAMESE_VOICE_LICENSE_NOTE.into(),
+                download_urls: vec![
+                    format!(
+                        "{}/{}",
+                        studio_tools::PIPER_HF_BASE_URL,
+                        meta.onnx_relative_path
+                    ),
+                    format!(
+                        "{}/{}",
+                        studio_tools::PIPER_HF_BASE_URL,
+                        meta.json_relative_path
+                    ),
+                ],
+            });
+        }
+    }
+
+    Err(CmdError::msg(format!(
+        "Không tìm thấy thông tin gói tải về cho {provider} / {voice}"
+    )))
+}
+
+/// Downloads and installs a TTS model or binary with SHA-256 verification after confirmation.
+#[tauri::command]
+pub async fn tts_model_install(
+    provider: String,
+    voice: String,
+) -> CmdResult<TtsModelInstallResult> {
+    let p_lower = provider.to_lowercase();
+    if p_lower == "tts.piper" || p_lower == "piper" {
+        if voice == "binary" || voice == "piper-bin" {
+            let bin_path = studio_tools::install_piper_binary()
+                .await
+                .map_err(|e| CmdError::msg(e.to_string()))?;
+            return Ok(TtsModelInstallResult {
+                success: true,
+                message: format!(
+                    "Đã cài đặt Piper binary thành công tại {}",
+                    strip_verbatim(&bin_path)
+                ),
+                provider: "tts.piper".into(),
+                voice: "binary".into(),
+            });
+        }
+
+        if studio_tools::PIPER_VIETNAMESE_VOICES
+            .iter()
+            .any(|v| v.id == voice)
+        {
+            studio_tools::install_piper_voice(&voice)
+                .await
+                .map_err(|e| CmdError::msg(e.to_string()))?;
+            return Ok(TtsModelInstallResult {
+                success: true,
+                message: format!("Đã tải và cài đặt thành công mô hình giọng đọc '{voice}'"),
+                provider: "tts.piper".into(),
+                voice,
+            });
+        }
+    }
+
+    Err(CmdError::msg(format!(
+        "Không hỗ trợ cài đặt tự động cho {provider} / {voice}"
+    )))
+}
+
+/// Synthesize speech for testing/preview in settings ("Nghe thử").
+#[tauri::command]
+pub async fn tts_synthesize_preview(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    req: TtsPreviewRequest,
+) -> CmdResult<TtsPreviewResponse> {
+    let text = req.text.trim();
+    if text.is_empty() {
+        return Err(CmdError::msg("Văn bản nghe thử không được để trống."));
+    }
+
+    let preview_dir = state
+        .app_paths
+        .data_dir()
+        .join("cache")
+        .join("tts-previews");
+    let _ = std::fs::create_dir_all(&preview_dir);
+    let _ = app
+        .asset_protocol_scope()
+        .allow_directory(&preview_dir, true);
+
+    let target_wav = preview_dir.join(format!("preview-{}.wav", uuid::Uuid::new_v4()));
+
+    // Determine provider
+    let chosen_provider = if let Some(p) = req.provider {
+        p
+    } else {
+        let mut def = None;
+        if let Ok(db) = state.app_paths.open_app_db() {
+            def = db.get_setting("tts:default_provider").ok().flatten();
+        }
+        def.unwrap_or_else(|| {
+            if studio_tools::probe_vieneu().available {
+                "tts.vieneu".into()
+            } else if studio_tools::probe_piper().available {
+                "tts.piper".into()
+            } else {
+                "tts.windows-sapi".into()
+            }
+        })
+    };
+
+    let actual_voice: String;
+    let note: String;
+
+    if chosen_provider == "tts.vieneu" {
+        let probe = studio_tools::probe_vieneu();
+        if !probe.available {
+            return Err(CmdError::msg(probe.note_vi));
+        }
+
+        let py_exe = studio_tools::find_in_path("python")
+            .or_else(|| studio_tools::find_in_path("python3"))
+            .ok_or_else(|| CmdError::msg("Chưa cài đặt Python."))?;
+
+        let script = studio_tools::ensure_helper_script(&state.app_paths.data_dir().join("cache"))
+            .map_err(|e| CmdError::msg(e.to_string()))?;
+
+        let mut temp_txt = tempfile::Builder::new()
+            .prefix("vieneu-preview-")
+            .suffix(".txt")
+            .tempfile()
+            .map_err(|e| CmdError::msg(format!("Không thể tạo tệp tạm: {e}")))?;
+
+        std::io::Write::write_all(&mut temp_txt, text.as_bytes())
+            .map_err(|e| CmdError::msg(format!("Không thể ghi tệp tạm: {e}")))?;
+        std::io::Write::flush(&mut temp_txt)
+            .map_err(|e| CmdError::msg(format!("Không thể flush tệp tạm: {e}")))?;
+
+        let voice_name = req.voice.as_deref().unwrap_or("Bình");
+        actual_voice = voice_name.to_string();
+
+        let cmd_args = studio_tools::build_vieneu_args(
+            &script,
+            temp_txt.path(),
+            &target_wav,
+            Some(voice_name),
+            req.speed,
+            None,
+            None,
+        );
+
+        let output = std::process::Command::new(&py_exe)
+            .args(&cmd_args)
+            .output()
+            .map_err(|e| CmdError::msg(format!("Lỗi chạy Python VieNeu: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(CmdError::msg(format!("VieNeu-TTS lỗi: {}", stderr.trim())));
+        }
+
+        note = "Tổng hợp thành công bằng VieNeu-TTS v3 Turbo".into();
+    } else if chosen_provider == "tts.piper" {
+        let piper_exe = studio_tools::find_piper_binary().ok_or_else(|| {
+            CmdError::msg("Chưa cài đặt Piper TTS. Vui lòng bấm 'Cài đặt binary' trước.")
+        })?;
+
+        let installed = studio_tools::get_installed_piper_voices();
+        if installed.is_empty() {
+            return Err(CmdError::msg(
+                "Chưa có mô hình giọng đọc Piper nào. Vui lòng tải một giọng đọc tiếng Việt trước.",
+            ));
+        }
+
+        let voice_name = if let Some(ref v) = req.voice {
+            if installed.contains(v) {
+                v.clone()
+            } else {
+                installed[0].clone()
+            }
+        } else {
+            installed[0].clone()
+        };
+        actual_voice = voice_name.clone();
+
+        let models_root = studio_tools::piper_models_dir();
+        let voice_dir = models_root.join(&voice_name);
+        let onnx_path = voice_dir.join(format!("{voice_name}.onnx"));
+        let json_path = voice_dir.join(format!("{voice_name}.onnx.json"));
+
+        if !onnx_path.is_file() || !json_path.is_file() {
+            return Err(CmdError::msg(format!(
+                "Mô hình '{voice_name}' chưa hoàn thiện trên đĩa."
+            )));
+        }
+
+        let cmd_args =
+            studio_tools::build_piper_args(&onnx_path, &json_path, &target_wav, req.speed, None);
+
+        let mut child = std::process::Command::new(&piper_exe)
+            .args(&cmd_args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| CmdError::msg(format!("Lỗi khởi chạy Piper: {e}")))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = std::io::Write::write_all(&mut stdin, text.as_bytes());
+            let _ = std::io::Write::flush(&mut stdin);
+        }
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| CmdError::msg(format!("Lỗi chờ Piper hoàn tất: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(CmdError::msg(format!("Piper lỗi: {}", stderr.trim())));
+        }
+
+        let lic_note = studio_tools::VIETNAMESE_VOICE_LICENSE_NOTE;
+        note = format!("Tổng hợp thành công bằng Piper ({voice_name}). {lic_note}");
+    } else {
+        // Windows SAPI
+        let voice_name = req.voice.unwrap_or_else(|| "Microsoft An".into());
+        actual_voice = voice_name.clone();
+
+        #[cfg(windows)]
+        {
+            let ps_script = r#"[Console]::InputEncoding = [System.Text.Encoding]::UTF8;
+$json = [Console]::In.ReadToEnd() | ConvertFrom-Json;
+Add-Type -AssemblyName System.Speech;
+$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;
+if ($json.voice) {
+    try { $s.SelectVoice($json.voice) } catch {}
+}
+if ($json.rate) {
+    $s.Rate = [int]$json.rate
+}
+$s.SetOutputToWaveFile($json.output_path);
+$s.Speak($json.text);
+$s.Dispose();"#
+                .to_string();
+
+            let rate: i32 = req
+                .speed
+                .map(|s| ((s - 1.0) * 10.0).clamp(-10.0, 10.0) as i32)
+                .unwrap_or(0);
+            let input_obj = serde_json::json!({
+                "text": text,
+                "voice": voice_name,
+                "rate": rate,
+                "output_path": target_wav.to_string_lossy().to_string(),
+            });
+
+            let mut child = std::process::Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    &ps_script,
+                ])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .map_err(|e| CmdError::msg(format!("Lỗi khởi chạy PowerShell SAPI: {e}")))?;
+
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = std::io::Write::write_all(&mut stdin, input_obj.to_string().as_bytes());
+                let _ = std::io::Write::flush(&mut stdin);
+            }
+
+            let output = child
+                .wait_with_output()
+                .map_err(|e| CmdError::msg(format!("Lỗi chạy Windows SAPI: {e}")))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                return Err(CmdError::msg(format!(
+                    "Windows SAPI lỗi: {}",
+                    stderr.trim()
+                )));
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            return Err(CmdError::msg(
+                "Windows SAPI chỉ hỗ trợ trên hệ điều hành Windows.",
+            ));
+        }
+
+        note = format!("Tổng hợp thành công bằng Windows SAPI ({actual_voice})");
+    }
+
+    if !target_wav.is_file() {
+        return Err(CmdError::msg(
+            "Tiến trình hoàn tất nhưng không tạo được tệp âm thanh đầu ra.",
+        ));
+    }
+
+    let meta = std::fs::metadata(&target_wav).map_err(|e| CmdError::msg(e.to_string()))?;
+    let size_bytes = meta.len();
+    // Rough estimate for 16-bit 22kHz mono PCM WAV: ~44,100 bytes/sec
+    let duration_estimate_secs = Some((size_bytes as f64 / 44_100.0).max(0.1));
+
+    Ok(TtsPreviewResponse {
+        audio_url: asset_url(&target_wav),
+        audio_path: target_wav.to_string_lossy().to_string(),
+        provider: chosen_provider,
+        voice: actual_voice,
+        duration_estimate_secs,
+        size_bytes,
+        note: Some(note),
+    })
+}
+
+/// Get stored default TTS provider and voice.
+#[tauri::command]
+pub fn tts_get_config(state: State<'_, AppState>) -> CmdResult<TtsConfigResponse> {
+    let mut default_provider = None;
+    let mut default_voice = None;
+
+    if let Ok(db) = state.app_paths.open_app_db() {
+        default_provider = db.get_setting("tts:default_provider").ok().flatten();
+        default_voice = db.get_setting("tts:default_voice").ok().flatten();
+    }
+
+    Ok(TtsConfigResponse {
+        default_provider,
+        default_voice,
+    })
+}
+
+/// Save user's preferred default TTS provider and voice.
+#[tauri::command]
+pub fn tts_set_config(state: State<'_, AppState>, req: TtsSetConfigRequest) -> CmdResult<()> {
+    let db = state.app_paths.open_app_db()?;
+    if let Some(p) = req.default_provider {
+        db.set_setting("tts:default_provider", &p)?;
+    }
+    if let Some(v) = req.default_voice {
+        db.set_setting("tts:default_voice", &v)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1470,5 +2171,28 @@ mod tests {
             models: std::collections::HashMap::new(),
         };
         assert!(invalid_nan.validate().is_err());
+    }
+
+    #[tokio::test]
+    async fn test_tts_model_preview_binary_and_voices() {
+        let bin_preview = tts_model_preview("piper".into(), "binary".into())
+            .await
+            .expect("piper binary preview failed");
+        assert_eq!(bin_preview.provider, "tts.piper");
+        assert_eq!(bin_preview.voice, "binary");
+        assert!(bin_preview.size_bytes > 20_000_000);
+        assert_eq!(bin_preview.license, "MIT");
+
+        let voice_preview = tts_model_preview("tts.piper".into(), "vi_VN-vais1000-medium".into())
+            .await
+            .expect("voice preview failed");
+        assert_eq!(voice_preview.voice, "vi_VN-vais1000-medium");
+        assert!(voice_preview.size_bytes > 60_000_000);
+        assert!(voice_preview
+            .license_note
+            .contains("cá nhân/phi thương mại"));
+
+        let invalid = tts_model_preview("piper".into(), "non_existent_voice".into()).await;
+        assert!(invalid.is_err());
     }
 }

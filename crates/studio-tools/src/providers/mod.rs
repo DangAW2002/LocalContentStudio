@@ -5,7 +5,9 @@ pub mod imagen;
 pub mod import;
 pub mod openai;
 pub mod openai_videos;
+pub mod piper;
 pub mod veo;
+pub mod vieneu;
 
 use crate::error::{Result, ToolError};
 use serde_json::Value;
@@ -24,6 +26,8 @@ pub async fn run_builtin(
 ) -> Result<Value> {
     match tool_id {
         "media.import.yt-dlp" => import::run_media_import(ws, out_dir, input).await,
+        "tts.vieneu" => vieneu::run_vieneu(ws, out_dir, input).await,
+        "tts.piper" => piper::run_piper(ws, out_dir, input).await,
         "google.imagen" => {
             imagen::run_google_imagen(ws, out_dir, input, api_key, base_override, pricing).await
         }
