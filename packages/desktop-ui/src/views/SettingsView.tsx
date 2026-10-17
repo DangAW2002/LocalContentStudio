@@ -21,13 +21,14 @@ import type {
 import { parseYouTubeError } from "../api/client";
 import { YouTubeGuideModal } from "../components/YouTubeGuideModal";
 import { WebAccessSection } from "./settings/WebAccessSection";
+import { VoicesSection } from "./settings/VoicesSection";
 
 export interface SettingsViewProps {
-  initialTab?: "engines" | "tools" | "env" | "catalog" | "jobs" | "disk" | "api-keys" | "accounts" | "web";
+  initialTab?: "engines" | "tools" | "voices" | "env" | "catalog" | "jobs" | "disk" | "api-keys" | "accounts" | "web";
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engines" }) => {
-  const [activeTab, setActiveTab] = React.useState<"engines" | "tools" | "env" | "catalog" | "jobs" | "disk" | "api-keys" | "accounts" | "web">(initialTab);
+  const [activeTab, setActiveTab] = React.useState<"engines" | "tools" | "voices" | "env" | "catalog" | "jobs" | "disk" | "api-keys" | "accounts" | "web">(initialTab);
 
   React.useEffect(() => {
     if (initialTab) {
@@ -492,6 +493,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engine
   const tabs = [
     { id: "engines", label: "Engines" },
     { id: "tools", label: "Công cụ" },
+    { id: "voices", label: "Giọng đọc (TTS)" },
     { id: "accounts", label: "Tài khoản đăng bài" },
     { id: "env", label: "Kiểm tra môi trường" },
     { id: "api-keys", label: "Khoá API & Endpoint" },
@@ -1071,6 +1073,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engine
               )}
             </div>
           )}
+
+          {/* TAB: GIỌNG ĐỌC (TTS) */}
+          {activeTab === "voices" && <VoicesSection />}
 
           {/* TAB: TÀI KHOẢN ĐĂNG BÀI */}
           {activeTab === "accounts" && (

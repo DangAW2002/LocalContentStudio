@@ -446,7 +446,7 @@ interface ProviderPricing {
 - **Output**: `void`
 
 #### `env_probe`
-- **Mục đích**: Kiểm tra sự hiện diện và phiên bản của các công cụ phụ thuộc ngoài (Node, npx, FFmpeg, ffprobe, Chrome/Edge, yt-dlp, claude, agy) bằng cách thực thi trực tiếp binary thật (`--version`).
+- **Mục đích**: Kiểm tra sự hiện diện và phiên bản của các công cụ phụ thuộc ngoài (Node, npx, FFmpeg, ffprobe, Chrome/Edge, yt-dlp, claude, agy, tts-vieneu, tts-piper) bằng cách thực thi trực tiếp binary thật (`--version` hoặc probe command).
 - **Input**: None
 - **Output**: `EnvProbeItem[]`
 ```ts
@@ -457,6 +457,8 @@ interface EnvProbeItem {
   version?: string | null;
   path?: string | null;
   hint: string;
+}
+```
 ---
 
 ### 1.10 Xuất bản & Đăng tải (Publishing)
@@ -641,6 +643,105 @@ interface InstalledToolInfo {
 - **Mục đích**: Gỡ bỏ cài đặt công cụ khỏi ứng dụng hoặc workspace.
 - **Input**: `{ toolId: string, version?: string | null, scope?: "app" | "workspace" | null }`
 - **Output**: `boolean`
+
+---
+
+### 1.9 Giọng đọc & Mô hình TTS (Text-to-Speech)
+
+#### `tts_status`
+- **Mục đích**: Lấy trạng thái hiện tại của hệ thống TTS (giọng đọc mặc định, danh sách provider `tts.vieneu`, `tts.piper`, `tts.windows-sapi` kèm kết quả probe, danh sách giọng có sẵn/được hỗ trợ, và đường dẫn model).
+- **Input**: None
+- **Output**: `TtsStatusResponse`
+```ts
+interface TtsStatusResponse {
+  defaultVoice: string;
+  providers: TtsProviderStatus[];
+}
+
+interface TtsProviderStatus {
+  id: string;
+  nameVi: string;
+  available: boolean;
+  notesVi?: string;
+  installedVoices: string[];
+  supportedVoices: string[];
+  modelsDir?: string;
+}
+```
+
+#### `tts_model_preview`
+- **Mục đích**: Lấy thông tin xem trước kích thước, giấy phép, cảnh báo sử dụng và danh sách file của mô hình giọng đọc (hoặc binary công cụ) trước khi người dùng xác nhận tải về.
+- **Input**: `{ provider: string, voice?: string }`
+- **Output**: `TtsModelPreviewResponse`
+```ts
+interface TtsModelPreviewResponse {
+  provider: string;
+  voice?: string;
+  displayName: string;
+  downloadSizeBytes: number;
+  downloadSizeHuman: string;
+  license: string;
+  licenseNoteVi: string;
+  files: TtsModelFilePreview[];
+}
+
+interface TtsModelFilePreview {
+  filename: string;
+  url: string;
+  sizeBytes: number;
+  sha256: string;
+}
+```
+
+#### `tts_model_install`
+- **Mục đích**: Tải về và xác minh checksum SHA-256 của các tệp mô hình (ONNX, JSON config) hoặc binary thực thi của provider vào thư mục `%LOCALAPPDATA%/LocalContentStudio/models/...`.
+- **Input**: `{ provider: string, voice?: string }`
+- **Output**: `TtsModelInstallResult`
+```ts
+interface TtsModelInstallResult {
+  success: boolean;
+  messageVi: string;
+  provider: string;
+  voice?: string;
+  installedDir?: string;
+}
+```
+
+#### `tts_synthesize_preview`
+- **Mục đích**: Chạy thử nghiệm tổng hợp giọng nói từ văn bản ngắn tiếng Việt và trả về chuỗi âm thanh base64 (WAV) để nghe thử trực tiếp trên giao diện Cài đặt.
+- **Input**: `{ text: string, provider?: string, voice?: string, speed?: number }`
+- **Output**: `TtsSynthesizePreviewResponse`
+```ts
+interface TtsSynthesizePreviewResponse {
+  success: boolean;
+  provider: string;
+  voice: string;
+  audioBase64: string;
+  durationMs?: number;
+  sampleRate?: number;
+  errorVi?: string;
+}
+```
+
+#### `tts_get_config`
+- **Mục đích**: Lấy cấu hình TTS hiện tại (giọng đọc mặc định).
+- **Input**: None
+- **Output**: `TtsConfigResponse`
+```ts
+interface TtsConfigResponse {
+  defaultVoice: string;
+}
+```
+
+#### `tts_set_config`
+- **Mục đích**: Lưu cấu hình giọng đọc mặc định vào cài đặt hệ thống.
+- **Input**: `{ defaultVoice: string }`
+- **Output**: `TtsConfigResponse`
+```ts
+interface TtsConfigResponse {
+  defaultVoice: string;
+}
+```
 
 ---
 

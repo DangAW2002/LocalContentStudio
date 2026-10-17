@@ -112,6 +112,13 @@ import type {
   YoutubeClientImportResult,
   YoutubeClientStatus,
   YoutubeDisconnectResult,
+  TtsStatusResponse,
+  TtsModelPreview,
+  TtsModelInstallResult,
+  TtsPreviewRequest,
+  TtsPreviewResponse,
+  TtsConfigResponse,
+  TtsSetConfigRequest,
 } from "./types";
 
 export class StudioApiClient {
@@ -633,6 +640,58 @@ export class StudioApiClient {
    */
   async webConfigure(req: WebConfigureRequest): Promise<WebStatus> {
     return invoke<WebStatus>("web_configure", { ...req });
+  }
+
+  // ==========================================
+  // Text-to-Speech (TTS) Commands
+  // ==========================================
+
+  /**
+   * Get TTS providers and voices status.
+   * Command: `tts_status`
+   */
+  async ttsStatus(): Promise<TtsStatusResponse> {
+    return invoke<TtsStatusResponse>("tts_status");
+  }
+
+  /**
+   * Get download preview of a TTS model or binary (size, license terms).
+   * Command: `tts_model_preview`
+   */
+  async ttsModelPreview(provider: string, voice: string): Promise<TtsModelPreview> {
+    return invoke<TtsModelPreview>("tts_model_preview", { provider, voice });
+  }
+
+  /**
+   * Download and install a TTS model or binary with SHA-256 verification.
+   * Command: `tts_model_install`
+   */
+  async ttsModelInstall(provider: string, voice: string): Promise<TtsModelInstallResult> {
+    return invoke<TtsModelInstallResult>("tts_model_install", { provider, voice });
+  }
+
+  /**
+   * Synthesize audio preview for testing speech voices.
+   * Command: `tts_synthesize_preview`
+   */
+  async ttsSynthesizePreview(req: TtsPreviewRequest): Promise<TtsPreviewResponse> {
+    return invoke<TtsPreviewResponse>("tts_synthesize_preview", { req });
+  }
+
+  /**
+   * Get default TTS provider and voice configuration.
+   * Command: `tts_get_config`
+   */
+  async ttsGetConfig(): Promise<TtsConfigResponse> {
+    return invoke<TtsConfigResponse>("tts_get_config");
+  }
+
+  /**
+   * Set default TTS provider and voice configuration.
+   * Command: `tts_set_config`
+   */
+  async ttsSetConfig(req: TtsSetConfigRequest): Promise<void> {
+    return invoke<void>("tts_set_config", { req });
   }
 }
 

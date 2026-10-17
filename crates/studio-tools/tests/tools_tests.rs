@@ -645,3 +645,56 @@ fn test_list_tools_with_probe_builtins() {
     assert!(json_val["probe"]["noteVi"].is_string());
     assert!(!json_val["probe"]["noteVi"].as_str().unwrap().is_empty());
 }
+
+#[test]
+fn test_tts_routing_vietnamese_priority() {
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("ws"), "ws").unwrap();
+    let reg = Registry::load(&ws);
+    let tools: Vec<ToolManifest> = reg.list_tools().into_iter().cloned().collect();
+
+    // Default fallback routing for tts.synthesize@1 must prioritize:
+    // tts.vieneu > tts.piper > tts.windows-sapi
+    let providers = route("tts.synthesize@1", None, &ws, &tools);
+
+    let vieneu_idx = providers.iter().position(|p| p == "tts.vieneu");
+    let piper_idx = providers.iter().position(|p| p == "tts.piper");
+    let sapi_idx = providers.iter().position(|p| p == "tts.windows-sapi");
+
+    assert!(vieneu_idx.is_some(), "tts.vieneu must be in routing list");
+    assert!(piper_idx.is_some(), "tts.piper must be in routing list");
+    assert!(
+        sapi_idx.is_some(),
+        "tts.windows-sapi must be in routing list"
+    );
+
+    assert!(
+        vieneu_idx.unwrap() < piper_idx.unwrap(),
+        "tts.vieneu must be preferred over tts.piper"
+    );
+    assert!(
+        piper_idx.unwrap() < sapi_idx.unwrap(),
+        "tts.piper must be preferred over tts.windows-sapi"
+    );
+}
+
+#[test]
+fn test_tts_route_available_skips_unprobed() {
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("ws"), "ws").unwrap();
+    let reg = Registry::load(&ws);
+    let tools: Vec<ToolManifest> = reg.list_tools().into_iter().cloned().collect();
+    let secrets = MemoryStore::new();
+
+    let available = studio_tools::route_available("tts.synthesize@1", None, &ws, &tools, &secrets);
+
+    // Any tool in available must pass probe
+    for p in &available {
+        let tool = tools.iter().find(|t| &t.id == p).unwrap();
+        assert!(
+            studio_tools::probe(tool, &secrets, Some(&ws)).available,
+            "Tool {} in route_available must be available",
+            p
+        );
+    }
+}

@@ -93,6 +93,19 @@ pub fn route(
     // 5. Fallback list: any tool that provides this capability
     let dev_mode = std::env::var("STUDIO_DEV").as_deref() == Ok("1");
     let base_cap = cap.split('@').next().unwrap_or(cap);
+
+    // Prioritize Vietnamese TTS providers for tts.synthesize: vieneu > piper > windows-sapi
+    if base_cap == "tts.synthesize" {
+        let tts_priority = ["tts.vieneu", "tts.piper", "tts.windows-sapi"];
+        for pref in &tts_priority {
+            if let Some(tool) = registered_tools.iter().find(|t| &t.id == pref) {
+                if !tool.internal || dev_mode {
+                    add(&tool.id);
+                }
+            }
+        }
+    }
+
     for tool in registered_tools {
         if tool.internal && !dev_mode {
             continue;
@@ -108,4 +121,26 @@ pub fn route(
     }
 
     ordered
+}
+
+/// Route a capability request to an ordered list of candidate tool providers,
+/// skipping any providers whose probe fails.
+pub fn route_available(
+    cap: &str,
+    explicit_provider: Option<&str>,
+    ws: &Workspace,
+    registered_tools: &[ToolManifest],
+    secret_store: &dyn crate::secret::SecretStore,
+) -> Vec<String> {
+    let candidates = route(cap, explicit_provider, ws, registered_tools);
+    candidates
+        .into_iter()
+        .filter(|tool_id| {
+            if let Some(tool) = registered_tools.iter().find(|t| &t.id == tool_id) {
+                crate::probe::probe(tool, secret_store, Some(ws)).available
+            } else {
+                false
+            }
+        })
+        .collect()
 }

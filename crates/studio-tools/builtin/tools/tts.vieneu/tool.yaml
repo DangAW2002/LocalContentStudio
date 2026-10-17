@@ -1,0 +1,20 @@
+id: tts.vieneu
+kind: generator
+description: "Tổng hợp giọng nói tiếng Việt tự nhiên chất lượng cao sử dụng VieNeu-TTS v3 Turbo (ONNX CPU)"
+provides:
+  - "tts.synthesize@1"
+run:
+  type: builtin
+  command: "tts.vieneu"
+needs:
+  - "bin:python"
+cost:
+  unit: "call"
+  estimate: 0.0
+side_effect: none
+resources:
+  ram_mb: 1024
+  cpu: heavy
+  gpu_vram_mb: 0
+  exclusive: []
+lifecycle: per_call

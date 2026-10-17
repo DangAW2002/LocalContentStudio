@@ -751,6 +751,83 @@ export interface YoutubeDisconnectResult {
 }
 
 // ==========================================
+// Text-to-Speech (TTS) Types
+// ==========================================
+
+export interface TtsVoiceItem {
+  id: string;
+  name: string;
+  provider: string;
+  quality?: string;
+  downloaded: boolean;
+  sizeBytes?: number;
+  sizeHuman?: string;
+  licenseNote?: string;
+}
+
+export interface TtsProviderInfo {
+  id: string;
+  name: string;
+  available: boolean;
+  noteVi: string;
+  voices: TtsVoiceItem[];
+  binaryInstalled: boolean;
+  binaryPath?: string;
+  binaryVersion?: string;
+}
+
+export interface TtsStatusResponse {
+  providers: TtsProviderInfo[];
+  defaultProvider?: string;
+  defaultVoice?: string;
+}
+
+export interface TtsModelPreview {
+  provider: string;
+  voice: string;
+  name: string;
+  sizeBytes: number;
+  sizeHuman: string;
+  license: string;
+  licenseNote: string;
+  downloadUrls: string[];
+}
+
+export interface TtsModelInstallResult {
+  success: boolean;
+  message: string;
+  provider: string;
+  voice: string;
+}
+
+export interface TtsPreviewRequest {
+  text: string;
+  provider?: string;
+  voice?: string;
+  speed?: number;
+}
+
+export interface TtsPreviewResponse {
+  audioUrl: string;
+  audioPath: string;
+  provider: string;
+  voice: string;
+  durationEstimateSecs?: number;
+  sizeBytes: number;
+  note?: string;
+}
+
+export interface TtsConfigResponse {
+  defaultProvider?: string;
+  defaultVoice?: string;
+}
+
+export interface TtsSetConfigRequest {
+  defaultProvider?: string;
+  defaultVoice?: string;
+}
+
+
 // Web Mode (Chế độ web cá nhân) Types
 // ==========================================
 

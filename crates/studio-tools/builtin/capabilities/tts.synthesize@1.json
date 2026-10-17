@@ -14,6 +14,14 @@
         "type": "string",
         "description": "Optional voice identifier"
       },
+      "speed": {
+        "type": "number",
+        "description": "Optional speech speed multiplier (e.g. 1.0)"
+      },
+      "reference_audio": {
+        "type": "string",
+        "description": "Optional relative path to reference audio in workspace for voice cloning"
+      },
       "output_path": {
         "type": "string",
         "description": "Relative output path in workspace for wav/mp3 file"
@@ -25,6 +33,9 @@
     "type": "object",
     "properties": {
       "audio_path": {
+        "type": "string"
+      },
+      "provider": {
         "type": "string"
       },
       "voice": {
