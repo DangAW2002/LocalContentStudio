@@ -17,15 +17,20 @@ export interface OutputsPaneProps {
   projectSlug: string;
   projectFiles: ProjectFileEntry[];
   onSelectFile: (path: string) => void;
+  artifacts?: ArtifactSummary[];
+  onRefreshArtifacts?: () => Promise<any> | any;
 }
 
 export const OutputsPane: React.FC<OutputsPaneProps> = ({
   projectSlug,
   projectFiles,
   onSelectFile,
+  artifacts: propsArtifacts,
+  onRefreshArtifacts,
 }) => {
   const [activeTab, setActiveTab] = React.useState<string>("artifacts");
-  const [artifacts, setArtifacts] = React.useState<ArtifactSummary[]>([]);
+  const [internalArtifacts, setInternalArtifacts] = React.useState<ArtifactSummary[]>([]);
+  const artifacts = propsArtifacts ?? internalArtifacts;
   const [checkpoints, setCheckpoints] = React.useState<CheckpointSummary[]>([]);
   const [kits, setKits] = React.useState<CatalogKit[]>([]);
   const [modules, setModules] = React.useState<CatalogModule[]>([]);
@@ -40,14 +45,17 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
 
   // Load artifacts, checkpoints and catalog info
   const loadArtifactsData = React.useCallback(async () => {
+    if (onRefreshArtifacts) {
+      await onRefreshArtifacts();
+    }
     if (!projectSlug) return;
     try {
       const artList = await studioApi.listArtifacts(projectSlug).catch(() => []);
-      setArtifacts(artList);
+      setInternalArtifacts(artList);
     } catch {
       // ignore
     }
-  }, [projectSlug]);
+  }, [projectSlug, onRefreshArtifacts]);
 
   React.useEffect(() => {
     let isMounted = true;
@@ -62,7 +70,7 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
           studioApi.getCatalogModules().catch(() => []),
         ]);
         if (isMounted) {
-          setArtifacts(artList);
+          setInternalArtifacts(artList);
           setCheckpoints(cpList);
           setKits(kitList);
           setModules(modList);
@@ -127,7 +135,10 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
         studioApi.listArtifacts(projectSlug).catch(() => []),
       ]);
       setCheckpoints(updatedCp);
-      setArtifacts(updatedArt);
+      setInternalArtifacts(updatedArt);
+      if (onRefreshArtifacts) {
+        onRefreshArtifacts();
+      }
     } catch (err: any) {
       alert(err?.message || "Không thể khôi phục checkpoint.");
     } finally {
@@ -574,8 +585,11 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
         onClose={() => setShowCreateArtifactDialog(false)}
         projectSlug={projectSlug}
         existingIds={artifacts.map((a) => a.id)}
-        onCreated={(sourcePath) => {
-          loadArtifactsData();
+        onCreated={async (sourcePath) => {
+          if (onRefreshArtifacts) {
+            await onRefreshArtifacts();
+          }
+          await loadArtifactsData();
           onSelectFile(sourcePath);
         }}
       />

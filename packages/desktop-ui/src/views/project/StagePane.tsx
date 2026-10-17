@@ -28,6 +28,8 @@ export interface StagePaneProps {
   onAskAi?: (text: string) => void;
   onSelectFile?: (path: string) => void;
   reloadNonce?: number;
+  artifacts?: ArtifactSummary[];
+  onRefreshArtifacts?: () => Promise<any> | any;
 }
 
 /** Check whether a file is an image, video or audio based on path extension */
@@ -153,6 +155,8 @@ export const StagePane: React.FC<StagePaneProps> = ({
   onAskAi,
   onSelectFile,
   reloadNonce,
+  artifacts: propsArtifacts,
+  onRefreshArtifacts,
 }) => {
   const [fileData, setFileData] = React.useState<FileReadResult | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -160,7 +164,8 @@ export const StagePane: React.FC<StagePaneProps> = ({
   const [zoom, setZoom] = React.useState(100);
 
   // Artifact & Toolbar states
-  const [artifacts, setArtifacts] = React.useState<ArtifactSummary[]>([]);
+  const [internalArtifacts, setInternalArtifacts] = React.useState<ArtifactSummary[]>([]);
+  const artifacts = propsArtifacts ?? internalArtifacts;
   const [matchingArtifact, setMatchingArtifact] = React.useState<ArtifactSummary | null>(null);
   const [rendering, setRendering] = React.useState(false);
   const [renderResult, setRenderResult] = React.useState<ArtifactRenderResult | null>(null);
@@ -181,14 +186,17 @@ export const StagePane: React.FC<StagePaneProps> = ({
 
   // Load artifact list for this project
   const loadArtifacts = React.useCallback(async () => {
+    if (onRefreshArtifacts) {
+      await onRefreshArtifacts();
+    }
     if (!projectSlug) return;
     try {
       const list = await studioApi.listArtifacts(projectSlug).catch(() => []);
-      setArtifacts(list);
+      setInternalArtifacts(list);
     } catch {
       // ignore
     }
-  }, [projectSlug]);
+  }, [projectSlug, onRefreshArtifacts]);
 
   React.useEffect(() => {
     loadArtifacts();
@@ -205,8 +213,11 @@ export const StagePane: React.FC<StagePaneProps> = ({
       const aSrc = a.source.replace(/\\/g, "/").replace(/^\.\//, "");
       return aSrc === norm || norm.endsWith(aSrc) || aSrc.endsWith(norm);
     });
+    if (!match && norm.includes("artifacts/")) {
+      loadArtifacts();
+    }
     setMatchingArtifact(match || null);
-  }, [selectedFilePath, artifacts]);
+  }, [selectedFilePath, artifacts, loadArtifacts]);
 
   // Timeline preview: asset URL of the newest rendered video (render outputs are workspace-relative).
   const [timelinePreviewUrl, setTimelinePreviewUrl] = React.useState<string | undefined>(undefined);
@@ -297,6 +308,10 @@ export const StagePane: React.FC<StagePaneProps> = ({
     const setup = async () => {
       try {
         unlistenFs = await studioApi.onFsEvent((payload) => {
+          const touchedYaml = payload.paths.some((p) => /artifact\.yaml$/i.test(p));
+          if (touchedYaml) {
+            loadArtifacts();
+          }
           const touched = payload.paths.some((p) => {
             const normP = p.replace(/\\/g, "/").replace(/^\.\//, "");
             return normP === normTarget || normP.endsWith("/" + normTarget);
@@ -312,6 +327,7 @@ export const StagePane: React.FC<StagePaneProps> = ({
       try {
         unlistenTurn = await studioApi.onTurnEvent((payload) => {
           if (payload.event.type === "Done") {
+            loadArtifacts();
             handleExternalModification();
           }
         });
@@ -325,7 +341,7 @@ export const StagePane: React.FC<StagePaneProps> = ({
       if (unlistenFs) unlistenFs();
       if (unlistenTurn) unlistenTurn();
     };
-  }, [selectedFilePath, isDirty, loadFile]);
+  }, [selectedFilePath, isDirty, loadFile, loadArtifacts]);
 
   // Determine if HTML has data-layer elements
   const isLayerHtml = React.useMemo(() => {
@@ -362,6 +378,10 @@ export const StagePane: React.FC<StagePaneProps> = ({
         text: contentToSave,
       });
 
+      if (/artifact\.yaml$/i.test(selectedFilePath)) {
+        await loadArtifacts();
+      }
+
       setIsDirty(false);
       setExternalChange(false);
       setSaveStatus("saved");
@@ -377,7 +397,7 @@ export const StagePane: React.FC<StagePaneProps> = ({
       setSaveStatus("error");
       setSaveError(err?.message || "Lỗi khi lưu tệp.");
     }
-  }, [selectedFilePath, textValue, isLayerHtml, projectSlug, matchingArtifact, loadFile]);
+  }, [selectedFilePath, textValue, isLayerHtml, projectSlug, matchingArtifact, loadFile, loadArtifacts]);
 
   // Keyboard shortcut Ctrl+S
   React.useEffect(() => {

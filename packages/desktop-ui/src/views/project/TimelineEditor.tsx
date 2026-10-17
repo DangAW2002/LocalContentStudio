@@ -76,6 +76,8 @@ const TRACK_KIND_LABELS: Record<string, string> = {
   caption: "Phụ đề",
 };
 
+const GUTTER_WIDTH = 140;
+
 /**
  * Validate that doc conforms to TimelineDoc schema:
  * - version >= 1
@@ -169,7 +171,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
   const handleZoomIn = () => setPxPerSec((prev) => Math.min(200, prev + 15));
   const handleZoomOut = () => setPxPerSec((prev) => Math.max(15, prev - 15));
   const handleZoomFit = () => {
-    const availableWidth = rulerRef.current?.clientWidth || 800;
+    const availableWidth = Math.max(200, (rulerRef.current?.clientWidth || 800) - GUTTER_WIDTH);
     const target = Math.max(15, Math.floor((availableWidth - 80) / Math.max(1, totalDuration)));
     setPxPerSec(target);
   };
@@ -220,7 +222,8 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
 
   // Click on ruler or lane to seek
   const handleSeek = (clientX: number, containerRect: DOMRect, scrollLeft: number) => {
-    const x = clientX - containerRect.left + scrollLeft;
+    const x = clientX - containerRect.left + scrollLeft - GUTTER_WIDTH;
+    if (x < 0) return;
     const time = Math.max(0, Math.min(totalDuration, x / pxPerSec));
     setPlayhead(time);
     if (videoRef.current) {
@@ -639,8 +642,8 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
             }
           }}
         >
-          {/* Timeline Inner Canvas with Width Based on Duration */}
-          <div style={{ width: timelineWidth, position: "relative", minHeight: "100%" }}>
+          {/* Timeline Inner Canvas with Width Based on Duration + Gutter */}
+          <div style={{ width: GUTTER_WIDTH + timelineWidth, position: "relative", minHeight: "100%" }}>
             {/* 1. Time Ruler Header */}
             <div
               style={{
@@ -652,12 +655,34 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                 userSelect: "none",
               }}
             >
+              {/* Sticky gutter top header */}
+              <div
+                style={{
+                  position: "sticky",
+                  left: 0,
+                  width: GUTTER_WIDTH,
+                  minWidth: GUTTER_WIDTH,
+                  height: "100%",
+                  backgroundColor: "var(--cs-bg-panel)",
+                  borderRight: "1px solid var(--cs-border-subtle)",
+                  zIndex: 7,
+                  display: "flex",
+                  alignItems: "center",
+                  padding: "0 8px",
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "var(--cs-fg-muted)",
+                  boxSizing: "border-box",
+                }}
+              >
+                Track
+              </div>
               {Array.from({ length: totalDuration + 1 }).map((_, sec) => (
                 <div
                   key={sec}
                   style={{
                     position: "absolute",
-                    left: sec * pxPerSec,
+                    left: GUTTER_WIDTH + sec * pxPerSec,
                     top: 0,
                     bottom: 0,
                     borderLeft: "1px solid var(--cs-border-subtle)",
@@ -687,26 +712,49 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                       borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
                     }}
                   >
-                    {/* Track Header Label */}
+                    {/* Track Header Label in fixed left gutter */}
                     <div
                       style={{
                         position: "sticky",
                         left: 0,
-                        zIndex: 4,
-                        display: "inline-flex",
+                        zIndex: 6,
+                        width: GUTTER_WIDTH,
+                        minWidth: GUTTER_WIDTH,
+                        height: "100%",
+                        display: "flex",
                         alignItems: "center",
-                        gap: 4,
-                        padding: "2px 8px",
+                        padding: "0 8px",
                         backgroundColor: "var(--cs-bg-panel)",
                         borderRight: "1px solid var(--cs-border-subtle)",
-                        borderRadius: "0 var(--cs-radius-control) var(--cs-radius-control) 0",
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: colors.border,
+                        boxSizing: "border-box",
+                        overflow: "hidden",
                       }}
                     >
-                      <span>{TRACK_KIND_LABELS[track.kind] || track.kind}</span>
-                      <span style={{ color: "var(--cs-fg-muted)", fontSize: 10 }}>({track.id})</span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, overflow: "hidden" }}>
+                        <span
+                          style={{
+                            fontWeight: 600,
+                            color: colors.border,
+                            fontSize: 11,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {TRACK_KIND_LABELS[track.kind] || track.kind}
+                        </span>
+                        <span
+                          style={{
+                            color: "var(--cs-fg-muted)",
+                            fontSize: 10,
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          ({track.id})
+                        </span>
+                      </div>
                     </div>
 
                     {/* Clips inside this Track */}
@@ -714,7 +762,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                       const isSelected =
                         selectedClipKey?.trackIdx === trackIdx &&
                         selectedClipKey?.clipIdx === clipIdx;
-                      const left = clip.start * pxPerSec;
+                      const left = GUTTER_WIDTH + clip.start * pxPerSec;
                       const width = Math.max(20, clip.duration * pxPerSec);
 
                       return (
@@ -782,12 +830,12 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
             <div
               style={{
                 position: "absolute",
-                left: playhead * pxPerSec,
+                left: GUTTER_WIDTH + playhead * pxPerSec,
                 top: 0,
                 bottom: 0,
                 width: 2,
                 backgroundColor: "#ff3b30",
-                zIndex: 10,
+                zIndex: 5,
                 pointerEvents: "none",
               }}
             >
