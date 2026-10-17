@@ -304,3 +304,177 @@ async fn shim_obtains_agy_token_and_forwards() {
     .await
     .is_none());
 }
+
+#[tokio::test]
+async fn test_check_run_render_handling() {
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("a"), "A").unwrap();
+    let proj = ws.create_project("test-proj", "Test Project").unwrap();
+
+    // Setup brand and channel
+    let brand_dir = ws.root().join("brands").join("example");
+    std::fs::create_dir_all(&brand_dir).unwrap();
+    std::fs::write(
+        brand_dir.join("brand.yaml"),
+        "version: brand@1\nname: Example\ncolors:\n  primary: \"#000000\"\n  accent: \"#FFFFFF\"\n  bg: \"#FFFFFF\"\n  text: \"#000000\"\nfonts:\n  heading: Inter\n  body: Inter\nlogos:\n  full: logo.svg\n  mark: mark.svg\nvoice: voice.md\n",
+    ).unwrap();
+    std::fs::write(brand_dir.join("logo.svg"), "<svg></svg>").unwrap();
+    std::fs::write(brand_dir.join("mark.svg"), "<svg></svg>").unwrap();
+    std::fs::write(brand_dir.join("voice.md"), "Voice guidelines").unwrap();
+
+    let channels_dir = ws.root().join("channels");
+    std::fs::create_dir_all(&channels_dir).unwrap();
+    std::fs::write(
+        channels_dir.join("youtube-thumb.yaml"),
+        "version: channel@1\nid: youtube-thumb\nplatform: youtube\ntitle: YouTube Thumbnail\nformats:\n  - name: thumb\n    width: 1280\n    height: 720\n    aspect: \"16:9\"\n",
+    ).unwrap();
+
+    // Create artifact
+    let art_dir = proj.artifacts_dir().join("thumb-01");
+    std::fs::create_dir_all(&art_dir).unwrap();
+    std::fs::write(
+        art_dir.join("artifact.yaml"),
+        "id: thumb-01\nkind: design\ntitle: Thumbnail 1\nbrand: example\nchannels: [youtube-thumb]\nsource: index.html\n",
+    ).unwrap();
+    std::fs::write(
+        art_dir.join("index.html"),
+        "<html><body>Hello</body></html>",
+    )
+    .unwrap();
+
+    // 1. Check with NO renders -> must return warning finding "Chưa có bản render"
+    let args_no_renders = json!({
+        "artifact_dir": format!("projects/{}/artifacts/thumb-01", proj.slug()),
+        "brand": "example",
+        "channels": ["youtube-thumb"],
+        "renders": []
+    });
+    let res = studio_mcp::tools::check_run(&ws, &args_no_renders).unwrap();
+    let findings = res["channels"]["youtube-thumb"]["findings"]
+        .as_array()
+        .unwrap();
+    assert!(findings.iter().any(|f| f["code"] == "NO_RENDERS"
+        && f["message_vi"]
+            .as_str()
+            .unwrap()
+            .contains("Chưa có bản render")));
+
+    // 2. Create a 1080x1350 render image in renders directory -> fail 1280x720 channel spec
+    let renders_dir = proj.renders_dir().join("thumb-01").join("hash1234");
+    std::fs::create_dir_all(&renders_dir).unwrap();
+    let render_file = renders_dir.join("output.png");
+    let img = image::RgbImage::new(1080, 1350);
+    img.save(&render_file).unwrap();
+
+    // check_run should automatically discover this latest render
+    let res_mismatch = studio_mcp::tools::check_run(&ws, &args_no_renders).unwrap();
+    let findings_mismatch = res_mismatch["channels"]["youtube-thumb"]["findings"]
+        .as_array()
+        .unwrap();
+    assert!(findings_mismatch
+        .iter()
+        .any(|f| f["code"] == "DIMENSIONS_MISMATCH"));
+    assert_eq!(res_mismatch["passed"], false);
+    // Check channel expected_specs is populated
+    assert_eq!(
+        res_mismatch["channels"]["youtube-thumb"]["expected_specs"]["formats"][0]["width"],
+        1280
+    );
+
+    // 3. Create matching 1280x720 render image -> passes
+    let img_pass = image::RgbImage::new(1280, 720);
+    img_pass.save(&render_file).unwrap();
+    let res_pass = studio_mcp::tools::check_run(&ws, &args_no_renders).unwrap();
+    let findings_pass = res_pass["channels"]["youtube-thumb"]["findings"]
+        .as_array()
+        .unwrap();
+    assert!(findings_pass.is_empty() || !findings_pass.iter().any(|f| f["severity"] == "error"));
+    assert_eq!(res_pass["passed"], true);
+}
+
+#[tokio::test]
+async fn test_capability_relocation_and_indexing() {
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("a"), "A").unwrap();
+    let proj = ws.create_project("my-project", "My Project").unwrap();
+
+    let st = state();
+    let mut turn_ctx = ctx(ws.root(), EngineKind::Claude);
+    turn_ctx.project = Some(proj.slug().to_string());
+    turn_ctx.turn_id = "turn-ai-1".into();
+
+    let token = st.tokens.issue(turn_ctx.clone());
+    let srv = server::start(st.clone(), 0).await.unwrap();
+    let port = srv.addr.port();
+
+    // Create a temporary generated file in the turn output directory to simulate tool output
+    let turn_dir = ws
+        .root()
+        .join(".studio")
+        .join("cache")
+        .join("turns")
+        .join("turn-ai-1");
+    std::fs::create_dir_all(&turn_dir).unwrap();
+    let temp_asset = turn_dir.join("generated_art.png");
+    let img = image::RgbImage::new(512, 512);
+    img.save(&temp_asset).unwrap();
+
+    let rel_source = ".studio/cache/turns/turn-ai-1/generated_art.png".to_string();
+
+    let call_body = call(
+        "capability_run",
+        json!({
+            "capability": "echo@1",
+            "provider": "echo",
+            "input": {
+                "prompt": "generate a sunset picture",
+                "files": [rel_source],
+                "provider_metadata": {
+                    "provider": "test.ai",
+                    "model": "model-v1",
+                    "estimated_cost_usd": 0.05
+                }
+            }
+        }),
+    );
+
+    let (status, resp) = post(port, Some(&token), None, call_body).await;
+    assert_eq!(status, 200, "Response: {:?}", resp);
+
+    let (text, is_err) = text_of(&resp);
+    assert!(!is_err, "Error in capability_run: {}", text);
+
+    let out_json: Value = serde_json::from_str(&text).unwrap();
+    let result_obj = &out_json["result"];
+    let files = result_obj["files"].as_array().unwrap();
+    assert_eq!(files.len(), 1);
+
+    let rel_file = files[0].as_str().unwrap();
+    // Path should be relocated to projects/my-project/assets/generated/<YYYY-MM-DD>/...
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let expected_prefix = format!("projects/my-project/assets/generated/{}", today);
+    assert!(
+        rel_file.starts_with(&expected_prefix),
+        "Relocated path {} should start with {}",
+        rel_file,
+        expected_prefix
+    );
+
+    // Verify physical file exists at relocated path
+    let abs_file = ws.scoped_path(rel_file).unwrap();
+    assert!(abs_file.exists());
+
+    // Verify assets_index entry in WorkspaceDb
+    let db = studio_workspace::WorkspaceDb::open(&ws).unwrap();
+    let mut stmt = db
+        .conn()
+        .prepare("SELECT path, name, metadata_json FROM assets_index WHERE id = ?1")
+        .unwrap();
+    let row: (String, String, String) = stmt
+        .query_row([rel_file], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap();
+    assert_eq!(row.0, rel_file);
+    let meta: Value = serde_json::from_str(&row.2).unwrap();
+    assert_eq!(meta["turn_id"], "turn-ai-1");
+    assert_eq!(meta["prompt"], "generate a sunset picture");
+}

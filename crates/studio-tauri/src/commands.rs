@@ -930,20 +930,11 @@ pub fn artifact_check(
     let ws = state.workspace()?;
     let p = Project::open(&ws, &project)?;
     let a = studio_artifacts::Artifact::load(&p, &id).map_err(|e| CmdError::msg(e.to_string()))?;
-    let renders: Vec<String> = std::fs::read_dir(p.renders_dir().join(&a.id))
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|d| std::fs::read_dir(d.path()).ok())
-        .flatten()
-        .flatten()
-        .map(|f| rel(&ws, &f.path()))
-        .collect();
+    // `check_run` resolves the newest render of the artifact itself (render table, then disk).
     let args = json!({
         "artifact_dir": rel(&ws, &a.dir(&p)),
         "brand": a.brand.clone().unwrap_or_else(|| "example".into()),
         "channels": channels.unwrap_or_else(|| a.channels.clone()),
-        "renders": renders,
     });
     studio_mcp::tools::check_run(&ws, &args).map_err(CmdError::msg)
 }

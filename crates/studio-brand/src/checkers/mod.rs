@@ -153,6 +153,9 @@ pub struct ChannelReport {
     pub passed: bool,
     /// List of findings for this channel
     pub findings: Vec<Finding>,
+    /// Expected specifications for this channel (formats, text limits, captions)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_specs: Option<ChannelSpec>,
 }
 
 /// What is being checked: the artifact source and its renders.
@@ -261,6 +264,7 @@ impl CheckerRegistry {
                     channel_id: channel.id.clone(),
                     passed: !has_error,
                     findings,
+                    expected_specs: Some((*channel).clone()),
                 },
             );
         }

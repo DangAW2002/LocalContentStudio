@@ -3825,10 +3825,15 @@ name = "studio-mcp"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "chrono",
+ "hex",
+ "image",
  "reqwest 0.12.28",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2",
  "studio-brand",
  "studio-catalog",
  "studio-jobs",

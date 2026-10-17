@@ -410,6 +410,34 @@ export const StagePane: React.FC<StagePaneProps> = ({
     }
   };
 
+  // Format prompt for agent to fix failed findings and insert into ThreadPane input
+  const handleAskAgentToFix = () => {
+    if (!checkResult || !onAskAi) return;
+    const srcPath = matchingArtifact ? matchingArtifact.source : selectedFilePath || "index.html";
+    const failedLines: string[] = [];
+
+    for (const [chId, chRes] of Object.entries(checkResult.channels)) {
+      if (!chRes.passed) {
+        for (const f of chRes.findings) {
+          if (f.severity === "error" || f.severity === "warn") {
+            let line = `- [Kênh ${chId}] [${f.code}] ${f.message_vi}`;
+            if (f.fix_hint_vi) {
+              line += ` (Gợi ý: ${f.fix_hint_vi})`;
+            }
+            if (f.location) {
+              line += ` tại ${f.location}`;
+            }
+            failedLines.push(line);
+          }
+        }
+      }
+    }
+
+    const promptText = `Hãy sửa artifact @${srcPath} để vượt qua các lỗi kiểm tra sau, sau đó re-render và re-check:\n${failedLines.join("\n")}`;
+    onAskAi(promptText);
+    setShowCheckDialog(false);
+  };
+
   // Render main viewer/editor based on file kind
   const renderViewer = () => {
     if (!fileData) return null;
@@ -918,9 +946,16 @@ export const StagePane: React.FC<StagePaneProps> = ({
           open={showCheckDialog}
           onClose={() => setShowCheckDialog(false)}
           actions={
-            <Button variant="secondary" onClick={() => setShowCheckDialog(false)}>
-              Đóng
-            </Button>
+            <div style={{ display: "flex", gap: "var(--cs-space-2)", alignItems: "center" }}>
+              {!checkResult.passed && onAskAi && (
+                <Button variant="primary" onClick={handleAskAgentToFix}>
+                  Nhờ agent sửa
+                </Button>
+              )}
+              <Button variant="secondary" onClick={() => setShowCheckDialog(false)}>
+                Đóng
+              </Button>
+            </div>
           }
         >
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-3)", maxHeight: 420, overflowY: "auto" }}>

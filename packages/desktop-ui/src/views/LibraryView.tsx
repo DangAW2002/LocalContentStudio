@@ -256,11 +256,25 @@ export const LibraryView: React.FC = () => {
               }}
             >
               {selectedAsset.previewUrl ? (
-                <img
-                  src={selectedAsset.previewUrl}
-                  alt={selectedAsset.name}
-                  style={{ maxHeight: "100%", maxWidth: "100%", objectFit: "contain" }}
-                />
+                selectedAsset.kind === "video" ? (
+                  <video
+                    src={selectedAsset.previewUrl}
+                    controls
+                    style={{ maxHeight: "100%", maxWidth: "100%", backgroundColor: "#000" }}
+                  />
+                ) : selectedAsset.kind === "audio" ? (
+                  <audio
+                    src={selectedAsset.previewUrl}
+                    controls
+                    style={{ width: "80%" }}
+                  />
+                ) : (
+                  <img
+                    src={selectedAsset.previewUrl}
+                    alt={selectedAsset.name}
+                    style={{ maxHeight: "100%", maxWidth: "100%", objectFit: "contain" }}
+                  />
+                )
               ) : (
                 <Icon name="file" size={48} color="var(--cs-fg-muted)" />
               )}

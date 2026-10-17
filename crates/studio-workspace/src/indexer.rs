@@ -46,6 +46,21 @@ pub struct AssetSidecarMeta {
     /// Optional MIME type override
     #[serde(default)]
     pub mime: Option<String>,
+    /// AI provider (e.g. google.imagen, openai.images)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// AI model used
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Generation prompt
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    /// Generation cost in USD
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    /// Associated turn ID
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
 }
 
 /// Indexer responsible for scanning and rebuilding search/artifact/asset indexes in `studio.db`.
@@ -130,13 +145,24 @@ impl Indexer {
             }
         }
 
-        // 2. Scan library: library/** (+ .meta.yaml sidecars)
-        let library_dir = ws.root().join("library");
-        if library_dir.exists() {
-            for entry in WalkDir::new(&library_dir)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
+        // 2. Scan asset directories: library/** and projects/*/assets/** (+ .meta.yaml sidecars)
+        let mut asset_roots = vec![ws.root().join("library")];
+        if projects_dir.exists() {
+            if let Ok(rd) = fs::read_dir(&projects_dir) {
+                for entry in rd.flatten() {
+                    let assets_dir = entry.path().join("assets");
+                    if assets_dir.exists() {
+                        asset_roots.push(assets_dir);
+                    }
+                }
+            }
+        }
+
+        for root_dir in asset_roots {
+            if !root_dir.exists() {
+                continue;
+            }
+            for entry in WalkDir::new(&root_dir).into_iter().filter_map(|e| e.ok()) {
                 let path = entry.path();
                 if path.is_file() {
                     let file_name = entry.file_name().to_string_lossy();

@@ -25,6 +25,20 @@ impl Checker for DimensionsChecker {
             return findings;
         }
 
+        // If no renders and no ffprobe_json are present, warn that render is required for dimension checks
+        if input.renders.is_empty() && input.ffprobe_json.is_none() {
+            findings.push(
+                Finding::warn(
+                    "NO_RENDERS",
+                    "Chưa có bản render — bấm Render trước khi kiểm tra kích thước/thời lượng",
+                )
+                .with_fix_hint(
+                    "Bấm nút Render hoặc chạy công cụ artifact_render trước khi kiểm tra.",
+                ),
+            );
+            return findings;
+        }
+
         // 1. Check video dimensions via ffprobe_json if provided
         if let Some(ffprobe) = input.ffprobe_json {
             let mut found_video_stream = false;
@@ -272,6 +286,74 @@ mod tests {
             "1080x1920 PNG should pass: {:?}",
             findings
         );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn test_dimensions_no_renders_warning() {
+        let brand = make_test_brand();
+        let channel = make_test_channel();
+        let checker = DimensionsChecker::new();
+
+        let input = CheckInput {
+            artifact_dir: Path::new("."),
+            source_content: None,
+            source_file: None,
+            renders: &[],
+            ffprobe_json: None,
+            brand: &brand,
+            brand_dir: None,
+            channel: &channel,
+        };
+
+        let findings = checker.check(&input);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].code, "NO_RENDERS");
+        assert_eq!(findings[0].severity, crate::checkers::Severity::Warn);
+        assert!(findings[0].message_vi.contains("Chưa có bản render"));
+    }
+
+    #[test]
+    fn test_dimensions_image_mismatch_1080x1350_vs_1280x720() {
+        let brand = make_test_brand();
+        let mut channel = make_test_channel();
+        channel.formats = vec![FormatSpec {
+            name: "youtube_thumbnail".to_string(),
+            width: 1280,
+            height: 720,
+            aspect: "16:9".to_string(),
+            fps: None,
+            max_duration_s: None,
+            min_duration_s: None,
+            safe_zone: SafeZone::default(),
+        }];
+        let checker = DimensionsChecker::new();
+
+        // 1080x1350 PNG fixture
+        let img_buf = image::RgbImage::new(1080, 1350);
+        let tmp_file = NamedTempFile::new().unwrap();
+        let path = tmp_file.path().with_extension("png");
+        img_buf.save(&path).unwrap();
+
+        let renders = vec![path.clone()];
+        let input = CheckInput {
+            artifact_dir: Path::new("."),
+            source_content: None,
+            source_file: None,
+            renders: &renders,
+            ffprobe_json: None,
+            brand: &brand,
+            brand_dir: None,
+            channel: &channel,
+        };
+
+        let findings = checker.check(&input);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].code, "DIMENSIONS_MISMATCH");
+        assert_eq!(findings[0].severity, crate::checkers::Severity::Error);
+        assert!(findings[0].message_vi.contains("1080×1350"));
+        assert!(findings[0].message_vi.contains("1280×720"));
 
         let _ = std::fs::remove_file(path);
     }
