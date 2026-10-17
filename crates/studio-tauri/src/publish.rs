@@ -4,8 +4,10 @@ use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
 use std::path::PathBuf;
 use studio_tools::publish::{
-    connect_youtube, export_bundle, publish_youtube_complete, PublishMetadata, PublishRequest,
-    PublishStatus, PublishTarget,
+    connect_youtube, export_bundle, extract_client_id_last6, publish_youtube_complete,
+    resolve_google_client_credentials, PublishMetadata, PublishRequest, PublishStatus,
+    PublishTarget, YouTubeChannelAccount, YouTubePublishParams, KEY_YOUTUBE_CLIENT_ID,
+    KEY_YOUTUBE_CLIENT_SECRET, KEY_YOUTUBE_REFRESH_TOKEN,
 };
 use studio_workspace::WorkspaceDb;
 use tauri::Emitter;
@@ -137,6 +139,7 @@ pub async fn publish_confirm(
     handle: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     id: String,
+    channel_id: Option<String>,
 ) -> CmdResult<PublishRequest> {
     let ws = state.workspace()?;
     let db = WorkspaceDb::open(&ws)?;
@@ -222,13 +225,18 @@ pub async fn publish_confirm(
             let org_name = ws.org().name();
             let ws_name = ws.name();
 
+            let publish_params = YouTubePublishParams {
+                channel_id: channel_id.as_deref(),
+                video_path: &video_file,
+                thumbnail_path: thumb_path.as_deref(),
+                metadata: &req.metadata,
+            };
+
             match publish_youtube_complete(
                 state.secrets.as_ref(),
                 org_name,
                 Some(ws_name),
-                &video_file,
-                thumb_path.as_deref(),
-                &req.metadata,
+                publish_params,
                 progress_cb,
             )
             .await
@@ -239,6 +247,13 @@ pub async fn publish_confirm(
                     req.error = None;
                     req.updated_at = chrono::Utc::now().to_rfc3339();
                     req.save(db.conn())?;
+
+                    if let Some(ref cid) = channel_id {
+                        if let Ok(app_db) = state.app_paths.open_app_db() {
+                            let _ = app_db.set_setting("publish:last_used_channel", cid);
+                        }
+                    }
+
                     emit_publish_event(
                         &handle,
                         &job_id,
@@ -263,7 +278,7 @@ pub async fn publish_confirm(
                         "Đăng video YouTube thất bại",
                         Some(&err_msg),
                     );
-                    Err(CmdError::msg(err_msg))
+                    Err(err.into())
                 }
             }
         }
@@ -369,13 +384,230 @@ pub fn publish_cancel(
     Ok(req)
 }
 
-/// Connect YouTube via OAuth 2.0 PKCE and loopback redirect server.
-#[tauri::command]
-pub async fn youtube_connect(state: tauri::State<'_, AppState>) -> CmdResult<String> {
-    let ws = state.workspace()?;
-    let org_name = ws.org().name();
-    let ws_name = ws.name();
+/// Result of importing a YouTube OAuth client.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YoutubeClientImportResult {
+    pub client_id_last6: String,
+    pub message: String,
+}
 
-    let msg = connect_youtube(state.secrets.as_ref(), org_name, Some(ws_name), 300).await?;
-    Ok(msg)
+/// Status of the configured YouTube OAuth client.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YoutubeClientStatus {
+    pub configured: bool,
+    pub client_id_last6: Option<String>,
+}
+
+/// Import a Google OAuth client JSON or raw Client ID + Secret into Windows Credential Manager.
+/// Never echoes secret values back, never logs them.
+#[tauri::command]
+pub async fn youtube_client_import(
+    state: tauri::State<'_, AppState>,
+    json: Option<String>,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+) -> CmdResult<YoutubeClientImportResult> {
+    let ws = state.workspace().ok();
+    let org_name = ws.as_ref().map(|w| w.org().name()).unwrap_or("");
+    let ws_name = ws.as_ref().map(|w| w.name());
+
+    let (cid, csec) = resolve_google_client_credentials(
+        json.as_deref(),
+        client_id.as_deref(),
+        client_secret.as_deref(),
+    )?;
+
+    // Store in Credential Manager
+    state
+        .secrets
+        .set(org_name, ws_name, KEY_YOUTUBE_CLIENT_ID, &cid)
+        .map_err(|e| CmdError::msg(format!("Lỗi lưu YOUTUBE_CLIENT_ID: {e}")))?;
+    state
+        .secrets
+        .set(org_name, ws_name, KEY_YOUTUBE_CLIENT_SECRET, &csec)
+        .map_err(|e| CmdError::msg(format!("Lỗi lưu YOUTUBE_CLIENT_SECRET: {e}")))?;
+
+    if ws_name.is_some() {
+        let _ = state.secrets.set("", None, KEY_YOUTUBE_CLIENT_ID, &cid);
+        let _ = state
+            .secrets
+            .set("", None, KEY_YOUTUBE_CLIENT_SECRET, &csec);
+    }
+
+    let last6 = extract_client_id_last6(&cid);
+    Ok(YoutubeClientImportResult {
+        client_id_last6: last6.clone(),
+        message: format!("Đã nạp (…{last6})"),
+    })
+}
+
+/// Retrieve status of the YouTube OAuth client (configured boolean and masked last 6 characters).
+#[tauri::command]
+pub async fn youtube_client_status(
+    state: tauri::State<'_, AppState>,
+) -> CmdResult<YoutubeClientStatus> {
+    let ws = state.workspace().ok();
+    let org_name = ws.as_ref().map(|w| w.org().name()).unwrap_or("");
+    let ws_name = ws.as_ref().map(|w| w.name());
+
+    if let Some(client_id) = state.secrets.get(org_name, ws_name, KEY_YOUTUBE_CLIENT_ID) {
+        let last6 = extract_client_id_last6(&client_id);
+        Ok(YoutubeClientStatus {
+            configured: true,
+            client_id_last6: Some(last6),
+        })
+    } else {
+        Ok(YoutubeClientStatus {
+            configured: false,
+            client_id_last6: None,
+        })
+    }
+}
+
+/// Connect YouTube via OAuth 2.0 PKCE, retrieve channel details, store non-secret metadata in app.db,
+/// and store refresh token keyed by channel ID.
+#[tauri::command]
+pub async fn youtube_connect(
+    state: tauri::State<'_, AppState>,
+) -> CmdResult<YouTubeChannelAccount> {
+    let ws = state.workspace().ok();
+    let org_name = ws.as_ref().map(|w| w.org().name()).unwrap_or("");
+    let ws_name = ws.as_ref().map(|w| w.name());
+
+    let channel = connect_youtube(state.secrets.as_ref(), org_name, ws_name, 300).await?;
+
+    // Store non-secret channel info in app.db
+    if let Ok(db) = state.app_paths.open_app_db() {
+        let mut channels: Vec<YouTubeChannelAccount> = db
+            .get_setting("publish:youtube_channels")
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+
+        if let Some(pos) = channels.iter().position(|c| c.id == channel.id) {
+            channels[pos] = channel.clone();
+        } else {
+            channels.push(channel.clone());
+        }
+
+        if let Ok(json_str) = serde_json::to_string(&channels) {
+            let _ = db.set_setting("publish:youtube_channels", &json_str);
+        }
+        let _ = db.set_setting("publish:last_used_channel", &channel.id);
+    }
+
+    Ok(channel)
+}
+
+/// List all connected YouTube channels from app.db.
+/// Provides automatic migration if a legacy single `YOUTUBE_REFRESH_TOKEN` exists in Credential Manager.
+#[tauri::command]
+pub async fn youtube_channels_list(
+    state: tauri::State<'_, AppState>,
+) -> CmdResult<Vec<YouTubeChannelAccount>> {
+    let db = state.app_paths.open_app_db().map_err(CmdError::from)?;
+    let mut channels: Vec<YouTubeChannelAccount> = db
+        .get_setting("publish:youtube_channels")
+        .ok()
+        .flatten()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    // Backward compatibility: If no channels stored in app.db, but legacy YOUTUBE_REFRESH_TOKEN exists:
+    // attempt migration on first query
+    if channels.is_empty() {
+        let ws = state.workspace().ok();
+        let org_name = ws.as_ref().map(|w| w.org().name()).unwrap_or("");
+        let ws_name = ws.as_ref().map(|w| w.name());
+
+        if let Ok(Some(channel)) = studio_tools::publish::migrate_legacy_youtube_account(
+            state.secrets.as_ref(),
+            org_name,
+            ws_name,
+        )
+        .await
+        {
+            channels.push(channel.clone());
+            if let Ok(json_str) = serde_json::to_string(&channels) {
+                let _ = db.set_setting("publish:youtube_channels", &json_str);
+            }
+            let _ = db.set_setting("publish:last_used_channel", &channel.id);
+        }
+    }
+
+    Ok(channels)
+}
+
+/// Result of disconnecting a YouTube channel.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YoutubeDisconnectResult {
+    pub success: bool,
+    pub revoke_url: String,
+}
+
+/// Disconnect a YouTube channel: deletes its refresh token from Credential Manager,
+/// removes its record from app.db, and returns the Google revocation link.
+#[tauri::command]
+pub async fn youtube_channel_disconnect(
+    state: tauri::State<'_, AppState>,
+    channel_id: String,
+) -> CmdResult<YoutubeDisconnectResult> {
+    let ws = state.workspace().ok();
+    let org_name = ws.as_ref().map(|w| w.org().name()).unwrap_or("");
+    let ws_name = ws.as_ref().map(|w| w.name());
+
+    // Delete refresh token
+    let _ = state.secrets.delete(
+        org_name,
+        ws_name,
+        &format!("YOUTUBE_REFRESH_TOKEN:{channel_id}"),
+    );
+    if ws_name.is_some() {
+        let _ = state
+            .secrets
+            .delete("", None, &format!("YOUTUBE_REFRESH_TOKEN:{channel_id}"));
+    }
+
+    // Update app.db stored channels
+    if let Ok(db) = state.app_paths.open_app_db() {
+        let mut channels: Vec<YouTubeChannelAccount> = db
+            .get_setting("publish:youtube_channels")
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+
+        channels.retain(|c| c.id != channel_id);
+
+        if channels.is_empty() {
+            let _ = db.delete_setting("publish:youtube_channels");
+            let _ = db.delete_setting("publish:last_used_channel");
+            // Delete legacy single token if no channels remain
+            let _ = state
+                .secrets
+                .delete(org_name, ws_name, KEY_YOUTUBE_REFRESH_TOKEN);
+            if ws_name.is_some() {
+                let _ = state.secrets.delete("", None, KEY_YOUTUBE_REFRESH_TOKEN);
+            }
+        } else {
+            if let Ok(json_str) = serde_json::to_string(&channels) {
+                let _ = db.set_setting("publish:youtube_channels", &json_str);
+            }
+            let last = db.get_setting("publish:last_used_channel").ok().flatten();
+            if last.as_deref() == Some(&channel_id) {
+                if let Some(first) = channels.first() {
+                    let _ = db.set_setting("publish:last_used_channel", &first.id);
+                }
+            }
+        }
+    }
+
+    Ok(YoutubeDisconnectResult {
+        success: true,
+        revoke_url: "https://myaccount.google.com/permissions".into(),
+    })
 }

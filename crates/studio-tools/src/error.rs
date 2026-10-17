@@ -80,4 +80,8 @@ pub enum ToolError {
     /// Install error.
     #[error("Lỗi cài đặt công cụ: {0}")]
     InstallError(String),
+
+    /// YouTube and publishing error with structured Vietnamese remediation.
+    #[error("{0}")]
+    PublishError(crate::publish::YouTubeErrorDetail),
 }

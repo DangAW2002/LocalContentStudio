@@ -709,10 +709,46 @@ export interface PublishPrepareOutcome {
 
 export interface PublishConfirmRequest {
   id: string;
+  channelId?: string;
 }
 
 export interface PublishCancelRequest {
   id: string;
+}
+
+export interface YouTubeErrorDetail {
+  code: string;
+  messageVi: string;
+  fixVi: string;
+}
+
+export interface YouTubeChannelAccount {
+  id: string;
+  title: string;
+  handle?: string;
+  avatarUrl?: string;
+  connectedAt: string;
+}
+
+export interface YoutubeClientImportRequest {
+  json?: string;
+  clientId?: string;
+  clientSecret?: string;
+}
+
+export interface YoutubeClientImportResult {
+  clientIdLast6: string;
+  message: string;
+}
+
+export interface YoutubeClientStatus {
+  configured: boolean;
+  clientIdLast6?: string;
+}
+
+export interface YoutubeDisconnectResult {
+  success: boolean;
+  revokeUrl: string;
 }
 
 

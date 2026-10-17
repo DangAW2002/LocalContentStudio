@@ -185,7 +185,11 @@ fn main() {
             publish::publish_update_metadata,
             publish::publish_confirm,
             publish::publish_cancel,
+            publish::youtube_client_import,
+            publish::youtube_client_status,
             publish::youtube_connect,
+            publish::youtube_channels_list,
+            publish::youtube_channel_disconnect,
         ])
         .run(tauri::generate_context!())
         .expect("không khởi động được Local Content Studio");

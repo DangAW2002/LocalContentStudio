@@ -8,7 +8,7 @@ import {
   Input,
   Spinner,
 } from "@studio/design-system";
-import { studioApi } from "../api/client";
+import { studioApi, parseYouTubeError } from "../api/client";
 import type {
   ArtifactSummary,
   PublishFinding,
@@ -16,7 +16,10 @@ import type {
   PublishPrivacy,
   PublishRequest,
   PublishTarget,
+  YouTubeChannelAccount,
+  YouTubeErrorDetail,
 } from "../api/types";
+import { YouTubeGuideModal } from "./YouTubeGuideModal";
 
 export interface PublishDialogProps {
   open: boolean;
@@ -89,18 +92,38 @@ export const PublishDialog: React.FC<PublishDialogProps> = ({
   const [files, setFiles] = React.useState<string[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [structuredError, setStructuredError] = React.useState<YouTubeErrorDetail | null>(null);
   const [oauthSuccess, setOauthSuccess] = React.useState<string | null>(null);
+  const [youtubeChannels, setYoutubeChannels] = React.useState<YouTubeChannelAccount[]>([]);
+  const [selectedChannelId, setSelectedChannelId] = React.useState<string>("");
+  const [guideModalOpen, setGuideModalOpen] = React.useState(false);
 
   // Progress state during publishing
   const [publishProgress, setPublishProgress] = React.useState<number | null>(null);
   const [publishMessage, setPublishMessage] = React.useState<string>("");
   const [publishResultUrl, setPublishResultUrl] = React.useState<string | null>(null);
 
+  // Fetch YouTube channels when dialog is opened
+  React.useEffect(() => {
+    if (open) {
+      studioApi
+        .youtubeChannelsList()
+        .then((list) => {
+          setYoutubeChannels(list);
+          if (list.length > 0 && !selectedChannelId) {
+            setSelectedChannelId(list[0].id);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [open, selectedChannelId]);
+
   // Initialize form from initialRequest or artifact
   React.useEffect(() => {
     if (!open) {
       setStep("edit");
       setError(null);
+      setStructuredError(null);
       setOauthSuccess(null);
       setPublishProgress(null);
       setPublishResultUrl(null);
@@ -251,12 +274,21 @@ export const PublishDialog: React.FC<PublishDialogProps> = ({
   const handleConnectYouTube = async () => {
     setBusy(true);
     setError(null);
+    setStructuredError(null);
     setOauthSuccess(null);
     try {
-      const res = await studioApi.youtubeConnect();
-      setOauthSuccess(res || "Đã kết nối tài khoản YouTube thành công.");
+      const chan = await studioApi.youtubeConnect();
+      setOauthSuccess(`Đã kết nối tài khoản YouTube thành công: ${chan.title} (${chan.handle ? "@" + chan.handle : chan.id})`);
+      const updatedList = await studioApi.youtubeChannelsList();
+      setYoutubeChannels(updatedList);
+      setSelectedChannelId(chan.id);
     } catch (err: any) {
-      setError(err?.message || "Không thể kết nối YouTube.");
+      const parsed = parseYouTubeError(err);
+      if (parsed) {
+        setStructuredError(parsed);
+      } else {
+        setError(err?.message || "Không thể kết nối YouTube.");
+      }
     } finally {
       setBusy(false);
     }
@@ -267,12 +299,16 @@ export const PublishDialog: React.FC<PublishDialogProps> = ({
     if (!currentRequest?.id) return;
     setBusy(true);
     setError(null);
+    setStructuredError(null);
     setStep("publishing");
     setPublishProgress(10);
     setPublishMessage("Đang khởi tạo tác vụ đăng tải...");
 
     try {
-      const req = await studioApi.publishConfirm(currentRequest.id);
+      const req = await studioApi.publishConfirm(
+        currentRequest.id,
+        target === "youtube" ? (selectedChannelId || undefined) : undefined
+      );
       setCurrentRequest(req);
       if (req.status === "published") {
         setPublishProgress(100);
@@ -281,7 +317,12 @@ export const PublishDialog: React.FC<PublishDialogProps> = ({
         if (onPublished) onPublished(req);
       }
     } catch (err: any) {
-      setError(err?.message || "Đăng tải thất bại. Bản đăng được giữ nguyên để bạn thử lại thủ công.");
+      const parsed = parseYouTubeError(err);
+      if (parsed) {
+        setStructuredError(parsed);
+      } else {
+        setError(err?.message || "Đăng tải thất bại. Bản đăng được giữ nguyên để bạn thử lại thủ công.");
+      }
       setStep("confirm");
     } finally {
       setBusy(false);
@@ -369,6 +410,34 @@ export const PublishDialog: React.FC<PublishDialogProps> = ({
 
         {/* Body Content */}
         <div style={{ padding: "var(--cs-space-4)", overflowY: "auto", flex: 1 }}>
+          {structuredError && (
+            <Callout
+              variant="danger"
+              title={structuredError.messageVi}
+              style={{ marginBottom: "var(--cs-space-3)" }}
+            >
+              <p style={{ margin: "0 0 8px 0" }}>{structuredError.fixVi}</p>
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    if (step === "confirm") {
+                      handleConfirmPublish();
+                    } else {
+                      handleConnectYouTube();
+                    }
+                  }}
+                >
+                  Thử lại
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => setGuideModalOpen(true)}>
+                  Mở hướng dẫn
+                </Button>
+              </div>
+            </Callout>
+          )}
+
           {error && (
             <Callout variant="danger" style={{ marginBottom: "var(--cs-space-3)" }}>
               {error}
@@ -397,6 +466,27 @@ export const PublishDialog: React.FC<PublishDialogProps> = ({
                   }}
                 />
               </div>
+
+              {/* YouTube Channel Selector */}
+              {target === "youtube" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {youtubeChannels.length > 0 ? (
+                    <Select
+                      label="Kênh YouTube đăng bài"
+                      options={youtubeChannels.map((c) => ({
+                        value: c.id,
+                        label: `${c.title} (${c.handle ? "@" + c.handle : c.id})`,
+                      }))}
+                      value={selectedChannelId || (youtubeChannels[0]?.id ?? "")}
+                      onChange={(e) => setSelectedChannelId(e.target.value)}
+                    />
+                  ) : (
+                    <Callout variant="warning">
+                      Chưa có kênh YouTube nào được kết nối. Hãy bấm &quot;Kết nối YouTube&quot; ở bên dưới để liên kết kênh của bạn.
+                    </Callout>
+                  )}
+                </div>
+              )}
 
               {/* Notice for non-YouTube targets */}
               {target !== "youtube" && (
@@ -517,6 +607,13 @@ export const PublishDialog: React.FC<PublishDialogProps> = ({
                   onChange={(e) => setPrivacy(e.target.value as PublishPrivacy)}
                 />
               </div>
+
+              {/* Privacy Warning for YouTube public / unlisted */}
+              {target === "youtube" && (privacy === "public" || privacy === "unlisted") && (
+                <Callout variant="warning">
+                  Project Google chưa qua kiểm duyệt API có thể bị YouTube giữ video ở chế độ Riêng tư.
+                </Callout>
+              )}
 
               {/* Thumbnail Input */}
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -644,6 +741,14 @@ export const PublishDialog: React.FC<PublishDialogProps> = ({
                   <strong style={{ color: "var(--cs-fg-secondary)" }}>Nền tảng: </strong>
                   <span style={{ color: "var(--cs-fg-primary)" }}>{TARGET_VI[target]}</span>
                 </div>
+                {target === "youtube" && (
+                  <div>
+                    <strong style={{ color: "var(--cs-fg-secondary)" }}>Kênh YouTube: </strong>
+                    <span style={{ color: "var(--cs-fg-primary)" }}>
+                      {youtubeChannels.find((c) => c.id === selectedChannelId)?.title || selectedChannelId || "Mặc định"}
+                    </span>
+                  </div>
+                )}
                 <div>
                   <strong style={{ color: "var(--cs-fg-secondary)" }}>Tiêu đề: </strong>
                   <span style={{ color: "var(--cs-fg-primary)" }}>{title}</span>
@@ -675,6 +780,12 @@ export const PublishDialog: React.FC<PublishDialogProps> = ({
                   )}
                 </div>
               </div>
+
+              {target === "youtube" && (privacy === "public" || privacy === "unlisted") && (
+                <Callout variant="warning">
+                  Project Google chưa qua kiểm duyệt API có thể bị YouTube giữ video ở chế độ Riêng tư.
+                </Callout>
+              )}
             </div>
           )}
 
@@ -840,6 +951,8 @@ export const PublishDialog: React.FC<PublishDialogProps> = ({
           )}
         </div>
       </div>
+
+      <YouTubeGuideModal open={guideModalOpen} onClose={() => setGuideModalOpen(false)} />
     </div>
   );
 };

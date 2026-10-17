@@ -482,19 +482,77 @@ interface EnvProbeItem {
 - **Output**: `PublishRequest`
 
 #### `publish_confirm`
-- **Mục đích**: Xác nhận và tiến hành xuất bản/đăng tải (chạy dưới dạng tác vụ trong scheduler với sự kiện `job-event`). Đảm bảo tính bất biến (idempotent): bản đăng đã `published` không thể gửi lại; bản đăng `failed` cần người dùng xác nhận thử lại rõ ràng. Tuyệt đối không tự động thử lại (NEVER auto-retry).
-- **Input**: `{ id: string }`
+- **Mục đích**: Xác nhận và tiến hành xuất bản/đăng tải (chạy dưới dạng tác vụ trong scheduler với sự kiện `job-event`). Hỗ trợ chọn kênh đăng cụ thể qua `channelId` (mặc định kênh dùng gần nhất). Đảm bảo tính bất biến (idempotent): bản đăng đã `published` không thể gửi lại; bản đăng `failed` cần người dùng xác nhận thử lại rõ ràng. Tuyệt đối không tự động thử lại (NEVER auto-retry).
+- **Input**: `{ id: string, channelId?: string }`
 - **Output**: `PublishRequest`
+- **Lỗi**: Với YouTube, trả về cấu trúc lỗi `YouTubeErrorDetail` (`{ code, messageVi, fixVi }`).
 
 #### `publish_cancel`
 - **Mục đích**: Hủy yêu cầu xuất bản đang chờ xác nhận (chuyển về nháp) hoặc hủy tiến trình đang đăng.
 - **Input**: `{ id: string }`
 - **Output**: `PublishRequest`
 
-#### `youtube_connect`
-- **Mục đích**: Khởi chạy luồng ủy quyền OAuth 2.0 PKCE cho YouTube qua loopback server cục bộ trên trình duyệt hệ thống và lưu refresh token an toàn vào Credential Manager.
+#### `youtube_client_import`
+- **Mục đích**: Nạp cấu hình Google OAuth Client từ nội dung tệp JSON (`installed` Desktop app) hoặc nhập trực tiếp Client ID & Client Secret. Phân tích `installed` và từ chối tệp loại `web` với thông báo tiếng Việt: "Hãy tạo client loại Desktop app". Lưu khóa an toàn vào Windows Credential Manager (`YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`), không bao giờ echo giá trị hoặc ghi log.
+- **Input**: `{ json?: string, clientId?: string, clientSecret?: string }`
+- **Output**: `YoutubeClientImportResult`
+```ts
+interface YoutubeClientImportResult {
+  ok: boolean;
+  clientIdLast6: string;
+}
+```
+
+#### `youtube_client_status`
+- **Mục đích**: Kiểm tra xem Google OAuth Client đã được nạp hay chưa và trả về 6 ký tự cuối của Client ID nếu có.
 - **Input**: None
-- **Output**: `string`
+- **Output**: `YoutubeClientStatus`
+```ts
+interface YoutubeClientStatus {
+  configured: boolean;
+  clientIdLast6?: string;
+}
+```
+
+#### `youtube_connect`
+- **Mục đích**: Khởi chạy luồng ủy quyền OAuth 2.0 PKCE cho YouTube qua loopback server cục bộ (thời gian chờ 5 phút). Khi hoàn tất, gọi YouTube Data API `channels.list?part=snippet&mine=true` lấy thông tin kênh, lưu refresh token theo kênh (`YOUTUBE_REFRESH_TOKEN:<channelId>`) trong Credential Manager và lưu thông tin kênh không bí mật (id, title, handle, avatarUrl) vào `app.db`.
+- **Input**: None
+- **Output**: `YouTubeChannelAccount`
+```ts
+interface YouTubeChannelAccount {
+  id: string;
+  title: string;
+  handle?: string;
+  avatarUrl?: string;
+  connectedAt: string;
+}
+```
+- **Lỗi**: Trả về `YouTubeErrorDetail` ánh xạ tiếng Việt:
+```ts
+interface YouTubeErrorDetail {
+  code: string;
+  messageVi: string;
+  fixVi: string;
+}
+```
+Bao gồm các mã lỗi chuẩn: `youtubeSignupRequired`, `access_denied`, `redirect_uri_mismatch`, `invalid_grant`, `quotaExceeded`, `uploadLimitExceeded`, `forbidden`, `timeout`, `network`.
+
+#### `youtube_channels_list`
+- **Mục đích**: Liệt kê các kênh YouTube đã liên kết từ `app.db`. Hỗ trợ tính tương thích ngược bằng cách tự động migrate refresh token đơn cũ `YOUTUBE_REFRESH_TOKEN` sang `YOUTUBE_REFRESH_TOKEN:<channelId>`.
+- **Input**: None
+- **Output**: `YouTubeChannelAccount[]`
+
+#### `youtube_channel_disconnect`
+- **Mục đích**: Ngắt kết nối kênh YouTube: xóa refresh token của kênh khỏi Credential Manager và xóa bản ghi kênh khỏi `app.db`. Trả về đường link để người dùng thu hồi hoàn toàn quyền trên tài khoản Google nếu muốn.
+- **Input**: `{ channelId: string }`
+- **Output**: `YoutubeDisconnectResult`
+```ts
+interface YoutubeDisconnectResult {
+  ok: boolean;
+  channelId: string;
+  revokeUrl: string;
+}
+```
 
 ```ts
 type PublishTarget = "youtube" | "facebook" | "tiktok" | "instagram" | "export";
