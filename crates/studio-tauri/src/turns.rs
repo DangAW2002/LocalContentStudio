@@ -262,7 +262,7 @@ pub async fn start_turn(
         ) {
             Ok(()) => Some(dir),
             Err(e) => {
-                let note = json!({ "type": "Text", "text": format!("(Không nạp được skill của kit: {})", e.0) });
+                let note = json!({ "type": "Text", "text": format!("(Không nạp được skill của kit: {e})") });
                 emit(&app, &thread_id, &turn_id, &note);
                 None
             }

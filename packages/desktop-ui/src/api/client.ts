@@ -75,6 +75,12 @@ import type {
   PublishMetadata,
   PublishPrepareRequest,
   PublishPrepareOutcome,
+  YouTubeErrorDetail,
+  YouTubeChannelAccount,
+  YoutubeClientImportRequest,
+  YoutubeClientImportResult,
+  YoutubeClientStatus,
+  YoutubeDisconnectResult,
 } from "./types";
 
 export class StudioApiClient {
@@ -510,8 +516,8 @@ export class StudioApiClient {
    * Confirm and run a publish request.
    * Command: `publish_confirm`
    */
-  async publishConfirm(id: string): Promise<PublishRequest> {
-    return invoke<PublishRequest>("publish_confirm", { id });
+  async publishConfirm(id: string, channelId?: string): Promise<PublishRequest> {
+    return invoke<PublishRequest>("publish_confirm", { id, channelId });
   }
 
   /**
@@ -523,12 +529,142 @@ export class StudioApiClient {
   }
 
   /**
+   * Import Google OAuth Client JSON or raw credentials.
+   * Command: `youtube_client_import`
+   */
+  async youtubeClientImport(req: YoutubeClientImportRequest): Promise<YoutubeClientImportResult> {
+    return invoke<YoutubeClientImportResult>("youtube_client_import", { ...req });
+  }
+
+  /**
+   * Get YouTube OAuth client status.
+   * Command: `youtube_client_status`
+   */
+  async youtubeClientStatus(): Promise<YoutubeClientStatus> {
+    return invoke<YoutubeClientStatus>("youtube_client_status");
+  }
+
+  /**
    * Connect YouTube using OAuth 2.0 PKCE and loopback listener.
    * Command: `youtube_connect`
    */
-  async youtubeConnect(): Promise<string> {
-    return invoke<string>("youtube_connect");
+  async youtubeConnect(): Promise<YouTubeChannelAccount> {
+    return invoke<YouTubeChannelAccount>("youtube_connect");
   }
+
+  /**
+   * List connected YouTube channel accounts.
+   * Command: `youtube_channels_list`
+   */
+  async youtubeChannelsList(): Promise<YouTubeChannelAccount[]> {
+    return invoke<YouTubeChannelAccount[]>("youtube_channels_list");
+  }
+
+  /**
+   * Disconnect a YouTube channel account.
+   * Command: `youtube_channel_disconnect`
+   */
+  async youtubeChannelDisconnect(channelId: string): Promise<YoutubeDisconnectResult> {
+    return invoke<YoutubeDisconnectResult>("youtube_channel_disconnect", { channelId });
+  }
+}
+
+/**
+ * Parse structured or serialized YouTube error into YouTubeErrorDetail.
+ */
+export function parseYouTubeError(err: any): YouTubeErrorDetail | null {
+  if (!err) return null;
+  if (typeof err === "object" && err.code && (err.messageVi || err.fixVi)) {
+    return {
+      code: err.code,
+      messageVi: err.messageVi || err.message_vi || "",
+      fixVi: err.fixVi || err.fix_vi || "",
+    };
+  }
+  const str = typeof err === "string" ? err : err.message || "";
+  try {
+    const parsed = JSON.parse(str);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      parsed.code &&
+      (parsed.messageVi || parsed.fixVi || parsed.message_vi || parsed.fix_vi)
+    ) {
+      return {
+        code: parsed.code,
+        messageVi: parsed.messageVi || parsed.message_vi || "",
+        fixVi: parsed.fixVi || parsed.fix_vi || "",
+      };
+    }
+  } catch {}
+
+  // Fallback pattern matching for string errors
+  const lower = str.toLowerCase();
+  if (lower.includes("youtubesignuprequired") || (lower.includes("unauthorized") && lower.includes("kênh"))) {
+    return {
+      code: "youtubeSignupRequired",
+      messageVi: "Tài khoản này chưa có kênh YouTube",
+      fixVi: "Vào youtube.com → Tạo kênh, rồi bấm Thử lại",
+    };
+  }
+  if (lower.includes("access_denied")) {
+    return {
+      code: "access_denied",
+      messageVi: "Email chưa có trong Test users của OAuth consent screen",
+      fixVi: "Vào Google Cloud Console → APIs & Services → OAuth consent screen → Audience → Test users → thêm đúng email sở hữu kênh, rồi thử lại.",
+    };
+  }
+  if (lower.includes("redirect_uri_mismatch") || lower.includes("desktop app")) {
+    return {
+      code: "redirect_uri_mismatch",
+      messageVi: "Client phải là loại Desktop app",
+      fixVi: "Tạo lại OAuth client trên Google Cloud Console với Application type là 'Desktop app' (không phải Web application), rồi nạp lại tệp JSON.",
+    };
+  }
+  if (lower.includes("invalid_grant") || lower.includes("token revoked") || lower.includes("expired or revoked")) {
+    return {
+      code: "invalid_grant",
+      messageVi: "Phiên đăng nhập hết hạn",
+      fixVi: "Bấm Kết nối YouTube lại để cấp quyền mới.",
+    };
+  }
+  if (lower.includes("quotaexceeded")) {
+    return {
+      code: "quotaExceeded",
+      messageVi: "Hết hạn mức API YouTube hôm nay (mặc định ~6 lần tải/ngày)",
+      fixVi: "Thử lại vào ngày mai (hạn mức đặt lại vào nửa đêm giờ Thái Bình Dương PT) hoặc yêu cầu tăng hạn mức trên Google Cloud.",
+    };
+  }
+  if (lower.includes("uploadlimitexceeded")) {
+    return {
+      code: "uploadLimitExceeded",
+      messageVi: "Kênh đã vượt quá giới hạn số lượng video được tải lên trong ngày của YouTube",
+      fixVi: "Chờ 24 giờ rồi thử tải lại video.",
+    };
+  }
+  if (lower.includes("forbidden") || lower.includes("403")) {
+    return {
+      code: "forbidden",
+      messageVi: "Không có quyền truy cập YouTube Data API (HTTP 403)",
+      fixVi: "Kiểm tra xem YouTube Data API v3 đã được Enable trong Google Cloud project chưa, và tài khoản đã được cấp quyền chưa.",
+    };
+  }
+  if (lower.includes("timeout") || lower.includes("hết thời gian chờ")) {
+    return {
+      code: "timeout",
+      messageVi: "Hết thời gian chờ xác thực YouTube từ trình duyệt",
+      fixVi: "Bấm Kết nối YouTube lại và hoàn tất đăng nhập trong vòng 5 phút. Đừng tắt Studio khi đang đăng nhập.",
+    };
+  }
+  if (lower.includes("connection refused") || lower.includes("error sending request") || lower.includes("kết nối mạng")) {
+    return {
+      code: "network",
+      messageVi: "Lỗi kết nối mạng tới máy chủ Google/YouTube",
+      fixVi: "Kiểm tra kết nối mạng internet hoặc thiết lập proxy/tường lửa của máy tính, rồi thử lại.",
+    };
+  }
+
+  return null;
 }
 
 export const studioApi = new StudioApiClient();
