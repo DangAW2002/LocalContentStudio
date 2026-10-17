@@ -63,6 +63,56 @@ pub fn policy_check(ctx: &TurnContext, tool_name: &str, input: &Value) -> Option
             }
         }
     }
+    if tool_name == "artifact_render" || tool_name == "mcp__studio__artifact_render" {
+        if let Some(ref turn_proj) = ctx.project {
+            if let Some(p) = input.get("project").and_then(Value::as_str) {
+                if p != turn_proj {
+                    return Some(format!(
+                        "Studio chặn {tool_name}: lượt này bị giới hạn trong project \"{turn_proj}\", không được thao tác project \"{p}\"."
+                    ));
+                }
+            }
+            if let Some(art) = input.get("artifact").and_then(Value::as_str) {
+                if art.starts_with("projects/") {
+                    let parts: Vec<&str> = art.split('/').collect();
+                    if parts.len() >= 2 && parts[1] != turn_proj {
+                        return Some(format!(
+                            "Studio chặn {tool_name}: lượt này bị giới hạn trong project \"{turn_proj}\", không được thao tác project \"{}\".",
+                            parts[1]
+                        ));
+                    }
+                }
+            }
+        }
+        if let Some(art) = input.get("artifact").and_then(Value::as_str) {
+            if art.contains("..")
+                || art.starts_with('/')
+                || art.starts_with('\\')
+                || (art.len() >= 2 && art.chars().nth(1) == Some(':'))
+            {
+                return Some(format!(
+                    "Studio chặn {tool_name}: artifact nằm ngoài workspace."
+                ));
+            }
+            let p_slug = input
+                .get("project")
+                .and_then(Value::as_str)
+                .or(ctx.project.as_deref());
+            if let Some(slug) = p_slug {
+                let art_path = ws
+                    .root()
+                    .join("projects")
+                    .join(slug)
+                    .join("artifacts")
+                    .join(art);
+                if art_path.exists() && !ws.can_write(&art_path) {
+                    return Some(format!(
+                        "Studio chặn {tool_name}: artifact thuộc tầng chỉ đọc."
+                    ));
+                }
+            }
+        }
+    }
     None
 }
 

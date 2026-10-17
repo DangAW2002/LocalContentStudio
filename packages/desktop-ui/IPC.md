@@ -428,6 +428,38 @@ interface SecretStatusItem {
 - **Input**: `{ toolId: string, baseUrl?: string | null }`
 - **Output**: `void`
 
+#### `provider_pricing_get`
+- **Mục đích**: Lấy cấu hình giá ước tính tuỳ chỉnh theo từng provider từ `app.db`.
+- **Input**: None
+- **Output**: `Record<string, ProviderPricing>`
+```ts
+interface ProviderPricing {
+  image_usd?: number | null;
+  video_usd_per_s?: number | null;
+  models?: Record<string, ProviderPricing>;
+}
+```
+
+#### `provider_pricing_set`
+- **Mục đích**: Cập nhật hoặc đặt lại giá ước tính theo provider trong `app.db`. Giá phải là số hữu hạn không âm (`>= 0`).
+- **Input**: `{ providerId: string, pricing?: ProviderPricing | null }`
+- **Output**: `void`
+
+#### `env_probe`
+- **Mục đích**: Kiểm tra sự hiện diện và phiên bản của các công cụ phụ thuộc ngoài (Node, npx, FFmpeg, ffprobe, Chrome/Edge, claude, agy) bằng cách thực thi trực tiếp binary thật (`--version`).
+- **Input**: None
+- **Output**: `EnvProbeItem[]`
+```ts
+interface EnvProbeItem {
+  id: string;
+  name: string;
+  found: boolean;
+  version?: string | null;
+  path?: string | null;
+  hint: string;
+}
+```
+
 ---
 
 ## 2. Events
@@ -445,7 +477,7 @@ interface SecretStatusItem {
   - `FileChange`: `{ type: "FileChange", path: string, op: "create" | "modify" | "delete" }`
   - `PermissionRequest`: `{ type: "PermissionRequest", requestId: string, tool: string, input: unknown }`
   - `PermissionDenied`: `{ type: "PermissionDenied", tool: string, input: unknown }`
-  - `Usage`: `{ type: "Usage", inputTokens: number, outputTokens: number, cacheReadTokens: number, costUsd?: number }`
+  - `Usage`: `{ type: "Usage", inputTokens: number, outputTokens: number, cacheReadTokens: number, costUsd?: number | null, estimatedCostUsd?: number | null }`
   - `Done`: `{ type: "Done", status: string, text?: string }`
   - `Error`: `{ type: "Error", message: string }`
 

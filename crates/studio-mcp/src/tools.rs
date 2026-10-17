@@ -28,6 +28,7 @@ pub fn definitions() -> Vec<Value> {
         tool("workspace_map", "Bản đồ thư mục workspace hiện tại (độ sâu 3, bỏ qua .studio).", json!({}), &[]),
         tool("artifact_list", "Liệt kê artifact (id, kind, title) của một project hoặc mọi project.", json!({ "project": s("slug project, bỏ trống = tất cả") }), &[]),
         tool("artifact_get", "Đọc một tệp trong workspace theo đường dẫn tương đối.", json!({ "path": s("đường dẫn tương đối trong workspace") }), &["path"]),
+        tool("artifact_render", "Render một artifact thành tệp đầu ra (PNG, PDF, MP4...) qua job scheduler. Render an artifact into output files via job scheduler.", json!({ "artifact": s("ID artifact (vd thumb-01) hoặc đường dẫn tương đối (Artifact ID or relative path)"), "project": s("Slug project, tùy chọn nếu artifact chứa đường dẫn hoặc trong ngữ cảnh project (Optional project slug)"), "format": s("Định dạng xuất tùy chọn, vd png, pdf (Optional output format)") }), &["artifact"]),
         tool("brand_get", "Lấy Brand (màu, font, logo, giọng văn, quy tắc). Bỏ trống slug để liệt kê.", json!({ "slug": s("slug brand") }), &[]),
         tool("channel_get", "Lấy spec kênh (kích thước, độ dài, safe zone, giới hạn chữ). Bỏ trống id để liệt kê.", json!({ "id": s("id kênh, vd youtube-shorts") }), &[]),
         tool("playbook_get", "Lấy playbook (quy trình mẫu). Bỏ trống id để liệt kê.", json!({ "id": s("id playbook") }), &[]),
@@ -39,7 +40,7 @@ pub fn definitions() -> Vec<Value> {
         tool("capability_search", "Tìm capability theo từ khóa (vd tts, render, ảnh).", json!({ "query": s("từ khóa") }), &["query"]),
         tool("capability_describe", "Mô tả một capability: schema vào/ra và các provider.", json!({ "id": s("vd tts.synthesize@1") }), &["id"]),
         tool("capability_run", "Chạy một capability qua provider đã chọn (hoặc mặc định, có dự phòng).", json!({ "capability": s("vd tts.synthesize@1"), "provider": s("id tool, tùy chọn"), "input": { "type": "object" } }), &["capability", "input"]),
-        tool("check_run", "Kiểm artifact theo Brand và kênh (palette, tương phản, logo, safe zone, kích thước, thời lượng, giới hạn chữ, phụ đề, từ cấm).", json!({ "artifact_dir": s("thư mục artifact tương đối"), "brand": s("slug brand"), "channels": { "type": "array", "items": { "type": "string" } }, "renders": { "type": "array", "items": { "type": "string" } } }), &["artifact_dir", "brand", "channels"]),
+        tool("check_run", "Kiểm artifact theo Brand và kênh (hãy render trước rồi kiểm tra — render first, then check).", json!({ "artifact_dir": s("thư mục artifact tương đối"), "brand": s("slug brand"), "channels": { "type": "array", "items": { "type": "string" } }, "renders": { "type": "array", "items": { "type": "string" } } }), &["artifact_dir", "brand", "channels"]),
         tool("approve", "Nội bộ: xử lý yêu cầu cấp quyền của engine.", json!({ "tool_name": s("tên tool"), "input": { "type": "object" } }), &["tool_name", "input"]),
     ]
 }
@@ -181,6 +182,13 @@ pub async fn call(
             json!({ "capability": cap, "providers": providers })
         }
         "capability_run" => capability_run(state, ctx, &ws, args).await?,
+        "artifact_render" => {
+            let artifact_raw = required(args, "artifact")?;
+            let project_raw = arg(args, "project");
+            let format_raw = arg(args, "format");
+            let (proj, id) = resolve_artifact_target(&ws, ctx, artifact_raw, project_raw)?;
+            render_artifact_shared(&ws, &state.scheduler, &proj, &id, format_raw).await?
+        }
         "check_run" => check_run(&ws, args)?,
         other => return Err(format!("Không có tool \"{other}\".")),
     };
@@ -331,6 +339,7 @@ async fn capability_run(
         return Err(format!("Chưa có provider nào cho \"{cap}\"."));
     }
     let endpoints = state.endpoints.read().await.clone();
+    let pricing = state.pricing.read().await.clone();
     let run_ctx = ToolRunContext {
         workspace: ws,
         turn_id: Some(ctx.turn_id.clone()),
@@ -339,6 +348,7 @@ async fn capability_run(
         scheduler: &state.scheduler,
         secret_store: state.secrets.as_ref(),
         endpoints,
+        pricing,
     };
     let mut errors = Vec::new();
     for provider in &providers {
@@ -698,4 +708,135 @@ fn ffprobe_json(path: &Path) -> Option<Value> {
         .output()
         .ok()?;
     serde_json::from_slice(&out.stdout).ok()
+}
+
+/// Shared render execution path used by both MCP tool and desktop Tauri command.
+pub async fn render_artifact_shared(
+    ws: &Workspace,
+    scheduler: &studio_jobs::Scheduler,
+    project_slug: &str,
+    artifact_id: &str,
+    format: Option<&str>,
+) -> Result<Value, String> {
+    let p = Project::open(ws, project_slug).map_err(|e| e.to_string())?;
+    let mut artifact = studio_artifacts::Artifact::load(&p, artifact_id)
+        .map_err(|e| format!("Không tải được artifact \"{artifact_id}\": {e}"))?;
+
+    let art_dir = artifact.dir(&p);
+    if !ws.can_write(&art_dir) {
+        return Err("Artifact này thuộc tầng chỉ đọc, không thể render.".into());
+    }
+
+    if let Some(f) = format {
+        match f.to_lowercase().as_str() {
+            "pdf" => artifact.renderer = Some("render.html_pdf@1".into()),
+            "png" => artifact.renderer = Some("render.html_png@1".into()),
+            _ => {}
+        }
+    }
+
+    let outcome = studio_artifacts::render(ws, &p, &artifact, scheduler)
+        .await
+        .map_err(|e| format!("Render lỗi: {e}"))?;
+
+    let outputs: Vec<String> = outcome.outputs.iter().map(|o| rel(ws, o)).collect();
+    let job_id = outcome.job_id.map(|j| j.to_string());
+
+    Ok(json!({
+        "cached": outcome.cached,
+        "outputs": outputs,
+        "job_id": job_id.clone(),
+        "jobId": job_id,
+        "probes": outcome.probe_report.iter().map(|r| json!({ "name": r.name, "available": r.available, "note": r.note })).collect::<Vec<_>>(),
+    }))
+}
+
+fn resolve_artifact_target(
+    ws: &Workspace,
+    ctx: &TurnContext,
+    artifact_raw: &str,
+    project_raw: Option<&str>,
+) -> Result<(String, String), String> {
+    let raw = artifact_raw.trim().replace('\\', "/");
+    if raw.is_empty() {
+        return Err("Tham số \"artifact\" không được để trống.".into());
+    }
+    if raw.contains("..")
+        || raw.starts_with('/')
+        || (raw.len() >= 2 && raw.chars().nth(1) == Some(':'))
+    {
+        return Err("Đường dẫn artifact không hợp lệ (path traversal).".into());
+    }
+
+    let parts: Vec<&str> = raw.split('/').filter(|p| !p.is_empty()).collect();
+    let (inferred_proj, art_id) = if parts.first() == Some(&"projects") {
+        if parts.len() < 3 {
+            return Err(format!(
+                "Đường dẫn artifact không hợp lệ: \"{artifact_raw}\"."
+            ));
+        }
+        let proj = parts[1].to_string();
+        let id = if parts.len() >= 4 && parts[2] == "artifacts" {
+            parts[3].trim_end_matches(".yaml").to_string()
+        } else {
+            parts[2].trim_end_matches(".yaml").to_string()
+        };
+        (Some(proj), id)
+    } else if parts.first() == Some(&"artifacts") {
+        if parts.len() < 2 {
+            return Err(format!(
+                "Đường dẫn artifact không hợp lệ: \"{artifact_raw}\"."
+            ));
+        }
+        let id = parts[1].trim_end_matches(".yaml").to_string();
+        (None, id)
+    } else {
+        let id = parts[0].trim_end_matches(".yaml").to_string();
+        (None, id)
+    };
+
+    let target_proj = match (project_raw, inferred_proj) {
+        (Some(p_arg), Some(p_inf)) => {
+            if p_arg != p_inf {
+                return Err(format!(
+                    "Slug project được truyền (\"{p_arg}\") không khớp với đường dẫn artifact (\"{p_inf}\")."
+                ));
+            }
+            p_arg.to_string()
+        }
+        (Some(p_arg), None) => p_arg.to_string(),
+        (None, Some(p_inf)) => p_inf,
+        (None, None) => {
+            if let Some(ref cp) = ctx.project {
+                cp.clone()
+            } else {
+                let projects = ws.list_projects().map_err(|e| e.to_string())?;
+                let matching: Vec<_> = projects
+                    .into_iter()
+                    .filter(|p| p.artifacts_dir().join(&art_id).exists())
+                    .collect();
+                if matching.len() == 1 {
+                    matching[0].slug().to_string()
+                } else if matching.is_empty() {
+                    return Err(format!(
+                        "Không tìm thấy artifact \"{art_id}\" trong project nào. Hãy chỉ định tham số \"project\"."
+                    ));
+                } else {
+                    return Err(format!(
+                        "Artifact \"{art_id}\" xuất hiện ở nhiều project. Hãy chỉ định rõ tham số \"project\"."
+                    ));
+                }
+            }
+        }
+    };
+
+    if let Some(ref turn_proj) = ctx.project {
+        if *turn_proj != target_proj {
+            return Err(format!(
+                "Lượt này bị giới hạn trong project \"{turn_proj}\", không được thao tác project \"{target_proj}\"."
+            ));
+        }
+    }
+
+    Ok((target_proj, art_id))
 }

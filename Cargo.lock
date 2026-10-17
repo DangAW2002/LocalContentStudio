@@ -3834,6 +3834,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
+ "studio-artifacts",
  "studio-brand",
  "studio-catalog",
  "studio-jobs",

@@ -220,6 +220,7 @@ async fn test_secret_only_reaches_env_when_declared() {
         scheduler: &scheduler,
         secret_store: &secret_store,
         endpoints: std::collections::HashMap::new(),
+        pricing: std::collections::HashMap::new(),
     };
 
     let result = run_tool(&reg, "secret-reader", serde_json::json!({}), &ctx)
@@ -252,6 +253,7 @@ async fn test_run_tool_echo_end_to_end_through_scheduler() {
         scheduler: &scheduler,
         secret_store: &secret_store,
         endpoints: std::collections::HashMap::new(),
+        pricing: std::collections::HashMap::new(),
     };
 
     let input_payload = serde_json::json!({
@@ -309,6 +311,7 @@ async fn test_paid_over_budget_needs_approval() {
         scheduler: &scheduler,
         secret_store: &secret_store,
         endpoints: std::collections::HashMap::new(),
+        pricing: std::collections::HashMap::new(),
     };
 
     let outcome = run_tool(&reg, "expensive-generator", serde_json::json!({}), &ctx)
@@ -335,6 +338,7 @@ async fn test_paid_over_budget_needs_approval() {
         scheduler: &scheduler,
         secret_store: &secret_store,
         endpoints: std::collections::HashMap::new(),
+        pricing: std::collections::HashMap::new(),
     };
 
     let approved_outcome = run_tool(
@@ -452,6 +456,7 @@ async fn real_sapi_tts_synthesizes_vietnamese_wav() {
         scheduler: &scheduler,
         secret_store: &secret_store,
         endpoints: std::collections::HashMap::new(),
+        pricing: std::collections::HashMap::new(),
     };
 
     let input = serde_json::json!({

@@ -24,6 +24,7 @@ fn state() -> Arc<ServerState> {
         catalog_paths: vec![],
         shim_secret: "shim-secret".into(),
         endpoints: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        pricing: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
     })
 }
 
@@ -477,4 +478,54 @@ async fn test_capability_relocation_and_indexing() {
     let meta: Value = serde_json::from_str(&row.2).unwrap();
     assert_eq!(meta["turn_id"], "turn-ai-1");
     assert_eq!(meta["prompt"], "generate a sunset picture");
+}
+
+#[tokio::test]
+async fn artifact_render_validation_and_scope_refusal() {
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("a"), "A").unwrap();
+    let _proj_a = ws.create_project("proj-a", "Project A").unwrap();
+    let _proj_b = ws.create_project("proj-b", "Project B").unwrap();
+
+    let st = state();
+    let mut turn_ctx = ctx(ws.root(), EngineKind::Claude);
+    turn_ctx.project = Some("proj-a".into());
+    let token = st.tokens.issue(turn_ctx);
+    let srv = server::start(st.clone(), 0).await.unwrap();
+    let port = srv.addr.port();
+
+    // 1. Missing artifact argument
+    let call_missing = call("artifact_render", json!({}));
+    let (status, resp) = post(port, Some(&token), None, call_missing).await;
+    assert_eq!(status, 200);
+    let (text, is_err) = text_of(&resp);
+    assert!(is_err);
+    assert!(text.contains("Thiếu tham số \"artifact\""));
+
+    // 2. Path traversal rejection
+    let call_traversal = call("artifact_render", json!({ "artifact": "../outside" }));
+    let (_, resp) = post(port, Some(&token), None, call_traversal).await;
+    let (text, is_err) = text_of(&resp);
+    assert!(is_err);
+    assert!(text.contains("path traversal") || text.contains("nằm ngoài workspace"));
+
+    // 3. Project scope refusal: turn is scoped to proj-a, but user/agent tries to render proj-b
+    let call_scope = call(
+        "artifact_render",
+        json!({ "artifact": "thumb-01", "project": "proj-b" }),
+    );
+    let (_, resp) = post(port, Some(&token), None, call_scope).await;
+    let (text, is_err) = text_of(&resp);
+    assert!(is_err);
+    assert!(text.contains("Lượt này bị giới hạn trong project \"proj-a\""));
+
+    // Also check path with prefix projects/proj-b/artifacts/thumb-01
+    let call_scope_path = call(
+        "artifact_render",
+        json!({ "artifact": "projects/proj-b/artifacts/thumb-01" }),
+    );
+    let (_, resp) = post(port, Some(&token), None, call_scope_path).await;
+    let (text, is_err) = text_of(&resp);
+    assert!(is_err);
+    assert!(text.contains("Lượt này bị giới hạn trong project \"proj-a\""));
 }

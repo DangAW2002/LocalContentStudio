@@ -3,6 +3,7 @@
 
 pub mod error;
 pub mod manifest;
+pub mod pricing;
 pub mod probe;
 pub mod providers;
 pub mod registry;
@@ -15,6 +16,7 @@ pub use error::{Result, ToolError};
 pub use manifest::{
     CapabilitySchema, SideEffect, ToolCost, ToolKind, ToolManifest, ToolRunSpec, ToolRunType,
 };
+pub use pricing::{ProviderPricing, DEFAULT_IMAGE_USD, DEFAULT_VIDEO_USD_PER_S};
 pub use probe::{find_in_path, probe, probe_application, probe_binary, ProbeResult};
 pub use registry::{ManifestProblem, Registry};
 pub use router::route;

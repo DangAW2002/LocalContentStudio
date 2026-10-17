@@ -63,6 +63,9 @@ import type {
   SecretSetRequest,
   SecretDeleteRequest,
   ProviderEndpointSetRequest,
+  ProviderPricing,
+  ProviderPricingSetRequest,
+  EnvProbeItem,
 } from "./types";
 
 export class StudioApiClient {
@@ -405,6 +408,21 @@ export class StudioApiClient {
   /** Command: `provider_endpoint_set`. */
   async setProviderEndpoint(req: ProviderEndpointSetRequest): Promise<void> {
     return invoke<void>("provider_endpoint_set", { ...req });
+  }
+
+  /** Command: `provider_pricing_get`. */
+  async getProviderPricing(): Promise<Record<string, ProviderPricing>> {
+    return invoke<Record<string, ProviderPricing>>("provider_pricing_get");
+  }
+
+  /** Command: `provider_pricing_set`. */
+  async setProviderPricing(req: ProviderPricingSetRequest): Promise<void> {
+    return invoke<void>("provider_pricing_set", { ...req });
+  }
+
+  /** Command: `env_probe`. */
+  async envProbe(): Promise<EnvProbeItem[]> {
+    return invoke<EnvProbeItem[]>("env_probe");
   }
 }
 

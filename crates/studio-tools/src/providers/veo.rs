@@ -20,6 +20,7 @@ pub async fn run_google_veo(
     input: &Value,
     api_key: &str,
     base_override: Option<&str>,
+    pricing: Option<&crate::pricing::ProviderPricing>,
 ) -> Result<Value> {
     let prompt = input
         .get("prompt")
@@ -270,6 +271,10 @@ pub async fn run_google_veo(
     };
 
     let rel_path = to_workspace_relative(ws, &final_path);
+    let (unit_cost_per_s, is_default) = pricing
+        .map(|p| p.resolve_video_cost_per_s(Some("veo-2.0-generate-001")))
+        .unwrap_or((crate::pricing::DEFAULT_VIDEO_USD_PER_S, true));
+    let estimated_cost = unit_cost_per_s * duration_s.max(1.0);
 
     Ok(json!({
         "files": [rel_path.clone()],
@@ -280,7 +285,8 @@ pub async fn run_google_veo(
             "operation_name": op_name,
             "duration_s": duration_s,
             "aspect": aspect,
-            "estimated_cost_usd": 0.20
+            "estimated_cost_usd": estimated_cost,
+            "cost_is_default": is_default
         }
     }))
 }
