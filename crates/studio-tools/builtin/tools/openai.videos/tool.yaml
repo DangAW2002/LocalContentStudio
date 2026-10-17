@@ -1,0 +1,21 @@
+id: openai.videos
+kind: generator
+description: "Tạo video clip qua OpenAI Videos API"
+provides:
+  - "video.generate@1"
+run:
+  type: builtin
+  command: "openai.videos"
+needs:
+  - "secret:OPENAI_API_KEY"
+cost:
+  unit: "second"
+  estimate: 0.20
+side_effect: paid
+resources:
+  ram_mb: 128
+  cpu: light
+  gpu_vram_mb: 0
+  exclusive: []
+  rate_key: "provider:openai"
+lifecycle: per_call

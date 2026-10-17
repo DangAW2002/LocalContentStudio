@@ -42,9 +42,9 @@ pub async fn run_openai_images(
     let base_url = base_override
         .map(String::from)
         .or_else(|| std::env::var("OPENAI_API_BASE_URL").ok())
-        .unwrap_or_else(|| "https://api.openai.com".to_string());
+        .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
 
-    let endpoint = format!("{}/v1/images/generations", base_url.trim_end_matches('/'));
+    let endpoint = format!("{}/images/generations", base_url.trim_end_matches('/'));
 
     let request_body = json!({
         "model": model,
@@ -120,12 +120,23 @@ pub async fn run_openai_images(
             saved_files.push(to_workspace_relative(ws, &final_path));
         } else if let Some(url) = item.get("url").and_then(Value::as_str) {
             let dest = out_dir.join(format!("openai-{}.png", i));
+            let mut download_headers = HeaderMap::new();
+            if crate::providers::http::same_origin(url, &base_url) {
+                download_headers.insert(
+                    AUTHORIZATION,
+                    HeaderValue::from_str(&format!("Bearer {}", api_key.trim())).map_err(|_| {
+                        ToolError::SecretStoreError(
+                            "Khóa OPENAI_API_KEY chứa ký tự không hợp lệ".into(),
+                        )
+                    })?,
+                );
+            }
             let (_, ext) = stream_download_to_file(
                 &client,
                 "provider:openai",
                 "openai.images",
                 url,
-                HeaderMap::new(),
+                download_headers,
                 &dest,
                 MediaKind::Image,
             )

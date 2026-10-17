@@ -27,6 +27,7 @@ chrono = { workspace = true }
 rusqlite = { workspace = true }
 thiserror = { workspace = true }
 notify = "6"
+url = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

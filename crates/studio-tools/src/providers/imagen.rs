@@ -41,12 +41,17 @@ pub async fn run_google_imagen(
     let base_url = base_override
         .map(String::from)
         .or_else(|| std::env::var("GEMINI_API_BASE_URL").ok())
-        .unwrap_or_else(|| "https://generativelanguage.googleapis.com".to_string());
+        .unwrap_or_else(|| "https://generativelanguage.googleapis.com/v1beta".to_string());
 
-    let endpoint = format!(
-        "{}/v1beta/models/imagen-3.0-generate-002:predict",
-        base_url.trim_end_matches('/')
-    );
+    let base_trimmed = base_url.trim_end_matches('/');
+    let endpoint = if base_trimmed.ends_with("/v1beta") || base_trimmed.ends_with("/v1") {
+        format!("{}/models/imagen-3.0-generate-002:predict", base_trimmed)
+    } else {
+        format!(
+            "{}/v1beta/models/imagen-3.0-generate-002:predict",
+            base_trimmed
+        )
+    };
 
     // Build instance
     let mut instance = json!({

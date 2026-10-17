@@ -36,6 +36,8 @@ pub struct AppState {
     pub broker: Arc<UiBroker>,
     /// Studio MCP port (set once the server is up).
     pub mcp_port: OnceLock<u16>,
+    /// Host-set API endpoint overrides by tool id.
+    pub endpoints: Arc<tokio::sync::RwLock<HashMap<String, String>>>,
     /// Currently open workspace root.
     pub current: Mutex<Option<PathBuf>>,
     /// Running turns by id.
@@ -66,7 +68,7 @@ impl AppState {
                 .join("LocalContentStudio")
                 .join("catalog")
                 .join("sources"),
-            app_paths,
+            app_paths: app_paths.clone(),
             scheduler: Scheduler::new(
                 SchedulerConfig::default(),
                 Arc::new(SysinfoProbe::new()),
@@ -76,6 +78,19 @@ impl AppState {
             secrets: Arc::new(CredentialManagerStore::new()),
             broker: Arc::new(UiBroker::default()),
             mcp_port: OnceLock::new(),
+            endpoints: {
+                let mut map = HashMap::new();
+                if let Ok(db) = app_paths.open_app_db() {
+                    if let Ok(list) = db.list_settings_by_prefix("endpoint:") {
+                        for (key, val) in list {
+                            if let Some(tool_id) = key.strip_prefix("endpoint:") {
+                                map.insert(tool_id.to_string(), val);
+                            }
+                        }
+                    }
+                }
+                Arc::new(tokio::sync::RwLock::new(map))
+            },
             current: Mutex::new(None),
             turns: Mutex::new(HashMap::new()),
             watcher: Mutex::new(None),

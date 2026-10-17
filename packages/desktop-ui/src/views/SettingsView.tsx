@@ -1,6 +1,6 @@
 import React from "react";
 import { Icon } from "../components/Icon";
-import { Tabs, Badge, Button, EmptyState, ErrorState, Callout } from "@studio/design-system";
+import { Tabs, Badge, Button, EmptyState, ErrorState, Callout, Input } from "@studio/design-system";
 import { studioApi } from "../api/client";
 import { cleanDisplayPath } from "../utils/path";
 import type {
@@ -8,14 +8,26 @@ import type {
   CatalogKit,
   CatalogModule,
   DiskUsageReport,
+  SecretStatusItem,
 } from "../api/types";
 
 export const SettingsView: React.FC = () => {
-  const [activeTab, setActiveTab] = React.useState<"engines" | "catalog" | "jobs" | "disk">("engines");
+  const [activeTab, setActiveTab] = React.useState<"engines" | "catalog" | "jobs" | "disk" | "api-keys">("engines");
   const [engines, setEngines] = React.useState<EngineProbeResult[]>([]);
   const [kits, setKits] = React.useState<CatalogKit[]>([]);
   const [modules, setModules] = React.useState<CatalogModule[]>([]);
   const [diskUsage, setDiskUsage] = React.useState<DiskUsageReport | null>(null);
+
+  // API Keys and Endpoints state
+  const [secrets, setSecrets] = React.useState<SecretStatusItem[]>([]);
+  const [secretInputs, setSecretInputs] = React.useState<Record<string, string>>({});
+  const [secretErrors, setSecretErrors] = React.useState<Record<string, string>>({});
+  const [secretSuccess, setSecretSuccess] = React.useState<Record<string, string>>({});
+
+  const [endpoints, setEndpoints] = React.useState<Record<string, string>>({});
+  const [endpointInputs, setEndpointInputs] = React.useState<Record<string, string>>({});
+  const [endpointErrors, setEndpointErrors] = React.useState<Record<string, string>>({});
+  const [endpointSuccess, setEndpointSuccess] = React.useState<Record<string, string>>({});
 
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -67,16 +79,21 @@ export const SettingsView: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const [engList, kitList, modList, disk] = await Promise.all([
+      const [engList, kitList, modList, disk, secretList, endpointMap] = await Promise.all([
         studioApi.probeEngines().catch(() => []),
         studioApi.getCatalogKits().catch(() => []),
         studioApi.getCatalogModules().catch(() => []),
         studioApi.getDiskUsage().catch(() => null),
+        studioApi.getSecretStatus().catch(() => []),
+        studioApi.getProviderEndpoints().catch(() => ({})),
       ]);
       setEngines(engList);
       setKits(kitList);
       setModules(modList);
       setDiskUsage(disk);
+      setSecrets(secretList);
+      setEndpoints(endpointMap);
+      setEndpointInputs(endpointMap);
     } catch (err: any) {
       setError(err?.message || "Chưa kết nối Studio core");
     } finally {
@@ -88,8 +105,67 @@ export const SettingsView: React.FC = () => {
     loadData();
   }, [loadData]);
 
+  const handleSaveSecret = async (name: string) => {
+    const val = secretInputs[name] || "";
+    if (!val.trim()) {
+      setSecretErrors((prev) => ({ ...prev, [name]: "Vui lòng nhập giá trị khoá" }));
+      return;
+    }
+    setSecretErrors((prev) => ({ ...prev, [name]: "" }));
+    try {
+      await studioApi.setSecret({ name, value: val });
+      setSecretSuccess((prev) => ({ ...prev, [name]: "Đã lưu khoá thành công" }));
+      setSecretInputs((prev) => ({ ...prev, [name]: "" }));
+      // Reload secret status
+      const updated = await studioApi.getSecretStatus();
+      setSecrets(updated);
+      setTimeout(() => {
+        setSecretSuccess((prev) => ({ ...prev, [name]: "" }));
+      }, 3000);
+    } catch (err: any) {
+      setSecretErrors((prev) => ({ ...prev, [name]: err?.message || "Lỗi khi lưu khoá" }));
+    }
+  };
+
+  const handleDeleteSecret = async (name: string) => {
+    try {
+      await studioApi.deleteSecret({ name });
+      setSecretInputs((prev) => ({ ...prev, [name]: "" }));
+      setSecretErrors((prev) => ({ ...prev, [name]: "" }));
+      setSecretSuccess((prev) => ({ ...prev, [name]: "Đã xoá khoá thành công" }));
+      const updated = await studioApi.getSecretStatus();
+      setSecrets(updated);
+      setTimeout(() => {
+        setSecretSuccess((prev) => ({ ...prev, [name]: "" }));
+      }, 3000);
+    } catch (err: any) {
+      setSecretErrors((prev) => ({ ...prev, [name]: err?.message || "Lỗi khi xoá khoá" }));
+    }
+  };
+
+  const handleSaveEndpoint = async (toolId: string) => {
+    const raw = (endpointInputs[toolId] || "").trim();
+    setEndpointErrors((prev) => ({ ...prev, [toolId]: "" }));
+    try {
+      await studioApi.setProviderEndpoint({
+        toolId,
+        baseUrl: raw.length > 0 ? raw : null,
+      });
+      setEndpointSuccess((prev) => ({ ...prev, [toolId]: "Đã lưu endpoint thành công" }));
+      const updated = await studioApi.getProviderEndpoints();
+      setEndpoints(updated);
+      setEndpointInputs(updated);
+      setTimeout(() => {
+        setEndpointSuccess((prev) => ({ ...prev, [toolId]: "" }));
+      }, 3000);
+    } catch (err: any) {
+      setEndpointErrors((prev) => ({ ...prev, [toolId]: err?.message || "Lỗi kiểm tra hoặc lưu endpoint" }));
+    }
+  };
+
   const tabs = [
     { id: "engines", label: "Engines & Công cụ" },
+    { id: "api-keys", label: "Khoá API & Endpoint" },
     { id: "catalog", label: "Catalog Modules & Kits" },
     { id: "jobs", label: "Cấu hình Tác vụ" },
     { id: "disk", label: "Dung lượng Đĩa" },
@@ -339,7 +415,247 @@ export const SettingsView: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 2: CATALOG MODULES & KITS */}
+          {/* TAB: KHOÁ API & ENDPOINT */}
+          {activeTab === "api-keys" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-5)" }}>
+              <Callout variant="neutral" title="Bảo mật khoá API">
+                Khoá API được mã hoá và lưu duy nhất trong Windows Credential Manager. Giao diện người dùng không bao giờ hiển thị lại giá trị khoá sau khi lưu.
+              </Callout>
+
+              {/* SECTION 1: KHOÁ API */}
+              <div
+                style={{
+                  padding: "var(--cs-space-4)",
+                  backgroundColor: "var(--cs-bg-panel)",
+                  border: "1px solid var(--cs-border-subtle)",
+                  borderRadius: "var(--cs-radius-control)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "var(--cs-space-4)",
+                }}
+              >
+                <div>
+                  <h2 style={{ margin: "0 0 4px 0", fontSize: "var(--cs-text-md)", fontWeight: 700 }}>
+                    Khoá bí mật (API Keys)
+                  </h2>
+                  <p style={{ margin: 0, fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)" }}>
+                    Quản lý khoá bảo mật được sử dụng bởi các công cụ tạo sinh ảnh/video và tổng hợp giọng nói.
+                  </p>
+                </div>
+
+                {secrets.length === 0 ? (
+                  <div style={{ fontSize: "var(--cs-text-sm)", color: "var(--cs-fg-muted)" }}>
+                    Chưa có khoá API nào được yêu cầu bởi các công cụ đã cài đặt.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-3)" }}>
+                    {secrets.map((item) => {
+                      const inputVal = secretInputs[item.name] || "";
+                      const err = secretErrors[item.name];
+                      const succ = secretSuccess[item.name];
+
+                      return (
+                        <div
+                          key={item.name}
+                          style={{
+                            padding: "var(--cs-space-3) var(--cs-space-4)",
+                            backgroundColor: "var(--cs-bg-raised)",
+                            border: "1px solid var(--cs-border-subtle)",
+                            borderRadius: "var(--cs-radius-control)",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "var(--cs-space-2)",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <Icon name="shield" size={16} color="var(--cs-accent)" />
+                              <span style={{ fontWeight: 600, fontSize: "var(--cs-text-sm)", fontFamily: "var(--cs-font-mono)" }}>
+                                {item.name}
+                              </span>
+                              <Badge variant={item.present ? "success" : "warning"}>
+                                {item.present ? "Đã có khoá" : "Chưa cấu hình"}
+                              </Badge>
+                            </div>
+                          </div>
+
+                          <div style={{ display: "flex", gap: "var(--cs-space-2)", alignItems: "flex-start", marginTop: 4 }}>
+                            <div style={{ flex: 1 }}>
+                              <Input
+                                type="password"
+                                placeholder={item.present ? "•••••••••••••••• (Nhập khoá mới để cập nhật)" : "Nhập khoá API..."}
+                                value={inputVal}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setSecretInputs((prev) => ({ ...prev, [item.name]: val }));
+                                  if (secretErrors[item.name]) {
+                                    setSecretErrors((prev) => ({ ...prev, [item.name]: "" }));
+                                  }
+                                }}
+                                error={err}
+                              />
+                            </div>
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={() => handleSaveSecret(item.name)}
+                              disabled={!inputVal.trim()}
+                            >
+                              Lưu
+                            </Button>
+                            {item.present && (
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => handleDeleteSecret(item.name)}
+                              >
+                                Xoá
+                              </Button>
+                            )}
+                          </div>
+
+                          {succ && (
+                            <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-success)", fontWeight: 500 }}>
+                              ✓ {succ}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* SECTION 2: ENDPOINT TUỲ CHỈNH */}
+              <div
+                style={{
+                  padding: "var(--cs-space-4)",
+                  backgroundColor: "var(--cs-bg-panel)",
+                  border: "1px solid var(--cs-border-subtle)",
+                  borderRadius: "var(--cs-radius-control)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "var(--cs-space-4)",
+                }}
+              >
+                <div>
+                  <h2 style={{ margin: "0 0 4px 0", fontSize: "var(--cs-text-md)", fontWeight: 700 }}>
+                    Endpoint Nhà cung cấp (Provider Endpoints)
+                  </h2>
+                  <p style={{ margin: 0, fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)" }}>
+                    Định tuyến các yêu cầu gọi model sang gateway tương thích cục bộ hoặc máy chủ proxy.
+                  </p>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-4)" }}>
+                  {[
+                    {
+                      id: "google.imagen",
+                      title: "Google Imagen (image.generate@1)",
+                      defaultUrl: "https://generativelanguage.googleapis.com/v1beta",
+                    },
+                    {
+                      id: "google.veo",
+                      title: "Google Veo (video.generate@1)",
+                      defaultUrl: "https://generativelanguage.googleapis.com/v1beta",
+                    },
+                    {
+                      id: "openai.images",
+                      title: "OpenAI Images (image.generate@1)",
+                      defaultUrl: "https://api.openai.com/v1",
+                    },
+                    {
+                      id: "openai.videos",
+                      title: "OpenAI Videos (video.generate@1)",
+                      defaultUrl: "https://api.openai.com/v1",
+                    },
+                  ].map((p) => {
+                    const currentVal = endpointInputs[p.id] ?? (endpoints[p.id] || "");
+                    const err = endpointErrors[p.id];
+                    const succ = endpointSuccess[p.id];
+
+                    return (
+                      <div
+                        key={p.id}
+                        style={{
+                          padding: "var(--cs-space-3) var(--cs-space-4)",
+                          backgroundColor: "var(--cs-bg-raised)",
+                          border: "1px solid var(--cs-border-subtle)",
+                          borderRadius: "var(--cs-radius-control)",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "var(--cs-space-2)",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <span style={{ fontWeight: 600, fontSize: "var(--cs-text-sm)" }}>
+                            {p.title}
+                          </span>
+                          <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)", fontFamily: "var(--cs-font-mono)" }}>
+                            ID: {p.id}
+                          </span>
+                        </div>
+
+                        <div style={{ display: "flex", gap: "var(--cs-space-2)", alignItems: "flex-start", marginTop: 4 }}>
+                          <div style={{ flex: 1 }}>
+                            <Input
+                              label="Endpoint tuỳ chỉnh"
+                              placeholder={p.defaultUrl}
+                              hint="Để trống để dùng endpoint chính thức. Ví dụ gateway tương thích OpenAI: https://…/v1"
+                              value={currentVal}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setEndpointInputs((prev) => ({ ...prev, [p.id]: val }));
+                                if (endpointErrors[p.id]) {
+                                  setEndpointErrors((prev) => ({ ...prev, [p.id]: "" }));
+                                }
+                              }}
+                              error={err}
+                            />
+                          </div>
+                          <div style={{ marginTop: 22, display: "flex", gap: "var(--cs-space-2)" }}>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleSaveEndpoint(p.id)}
+                            >
+                              Lưu
+                            </Button>
+                            {endpoints[p.id] && (
+                              <Button
+                                variant="quiet"
+                                size="sm"
+                                onClick={() => {
+                                  setEndpointInputs((prev) => ({ ...prev, [p.id]: "" }));
+                                  studioApi.setProviderEndpoint({ toolId: p.id, baseUrl: null }).then(() => {
+                                    setEndpoints((prev) => {
+                                      const next = { ...prev };
+                                      delete next[p.id];
+                                      return next;
+                                    });
+                                  });
+                                }}
+                              >
+                                Đặt lại mặc định
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+
+                        {succ && (
+                          <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-success)", fontWeight: 500 }}>
+                            ✓ {succ}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: CATALOG MODULES & KITS */}
           {activeTab === "catalog" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-5)" }}>
               {/* Kits section */}
