@@ -1,0 +1,20 @@
+id: tts.piper
+kind: generator
+description: "Tổng hợp giọng nói tiếng Việt nhanh, nhẹ, offline sử dụng Piper TTS và mô hình ONNX"
+provides:
+  - "tts.synthesize@1"
+run:
+  type: builtin
+  command: "tts.piper"
+needs:
+  - "bin:piper"
+cost:
+  unit: "call"
+  estimate: 0.0
+side_effect: none
+resources:
+  ram_mb: 512
+  cpu: light
+  gpu_vram_mb: 0
+  exclusive: []
+lifecycle: per_call

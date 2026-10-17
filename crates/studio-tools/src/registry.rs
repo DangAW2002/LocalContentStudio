@@ -237,6 +237,8 @@ impl Registry {
             include_str!("../builtin/tools/echo/tool.yaml"),
             include_str!("../builtin/tools/ffmpeg.probe/tool.yaml"),
             include_str!("../builtin/tools/tts.windows-sapi/tool.yaml"),
+            include_str!("../builtin/tools/tts.vieneu/tool.yaml"),
+            include_str!("../builtin/tools/tts.piper/tool.yaml"),
             include_str!("../builtin/tools/tts.fake/tool.yaml"),
             include_str!("../builtin/tools/google.imagen/tool.yaml"),
             include_str!("../builtin/tools/openai.images/tool.yaml"),
