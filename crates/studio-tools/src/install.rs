@@ -78,11 +78,12 @@ pub struct ToolInstallPreview {
 
 /// Information about an installed tool.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InstalledToolInfo {
     /// Tool identifier
     pub id: String,
-    /// Tool version
-    pub version: String,
+    /// Tool version (null for built-in tools)
+    pub version: Option<String>,
     /// Scope: app or workspace (or builtin)
     pub scope: String,
     /// Absolute directory of the tool
@@ -92,6 +93,7 @@ pub struct InstalledToolInfo {
     /// Current probe result
     pub probe: ProbeResult,
     /// Whether this tool can be uninstalled (builtin tools cannot be uninstalled)
+    #[serde(alias = "can_uninstall")]
     pub can_uninstall: bool,
 }
 
@@ -275,7 +277,7 @@ pub fn confirm_install(
 
     Ok(InstalledToolInfo {
         id: manifest.id.clone(),
-        version: preview.version.clone(),
+        version: Some(preview.version.clone()),
         scope: preview.scope.to_vietnamese().to_string(),
         path: target_path.to_string_lossy().to_string(),
         manifest,
@@ -326,6 +328,7 @@ pub fn list_tools_with_probe(
     app_paths: &AppPaths,
 ) -> Vec<InstalledToolInfo> {
     let mut list = Vec::new();
+    let dev_mode = std::env::var("STUDIO_DEV").as_deref() == Ok("1");
 
     // 1. Scan app installed tools: <app>/tools/<id>@<version>
     let app_tools_dir = app_paths.data_dir().join("tools");
@@ -339,6 +342,9 @@ pub fn list_tools_with_probe(
 
     // 3. Builtin tools and other registry tools
     for tool in registry.list_tools() {
+        if tool.internal && !dev_mode {
+            continue;
+        }
         // If already in list as installed tool, skip duplicate
         if list.iter().any(|item| item.id == tool.id) {
             continue;
@@ -346,11 +352,8 @@ pub fn list_tools_with_probe(
         let probe_res = probe(tool, secrets, ws);
         list.push(InstalledToolInfo {
             id: tool.id.clone(),
-            version: tool
-                .version
-                .clone()
-                .unwrap_or_else(|| "builtin".to_string()),
-            scope: "Có sẵn (Built-in)".to_string(),
+            version: None,
+            scope: "Có sẵn".to_string(),
             path: "builtin".to_string(),
             manifest: tool.clone(),
             probe: probe_res,
@@ -372,6 +375,7 @@ fn scan_installed_dir(
     if !dir.exists() || !dir.is_dir() {
         return;
     }
+    let dev_mode = std::env::var("STUDIO_DEV").as_deref() == Ok("1");
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -384,6 +388,9 @@ fn scan_installed_dir(
         if let Ok(manifest_path) = find_manifest_in_dir(&p) {
             if let Ok(content) = fs::read_to_string(&manifest_path) {
                 if let Ok(manifest) = serde_yaml::from_str::<ToolManifest>(&content) {
+                    if manifest.internal && !dev_mode {
+                        continue;
+                    }
                     let probe_res = probe(&manifest, secrets, ws);
                     let folder_name = p.file_name().unwrap_or_default().to_string_lossy();
                     let version = manifest
@@ -394,7 +401,7 @@ fn scan_installed_dir(
 
                     out.push(InstalledToolInfo {
                         id: manifest.id.clone(),
-                        version,
+                        version: Some(version),
                         scope: scope_label.to_string(),
                         path: p.to_string_lossy().to_string(),
                         manifest,
@@ -733,7 +740,7 @@ side_effect: none
         let secrets = MemoryStore::new();
         let installed = confirm_install(&preview, &secrets, None).unwrap();
         assert_eq!(installed.id, "test-tool");
-        assert_eq!(installed.version, "1.2.3");
+        assert_eq!(installed.version.as_deref(), Some("1.2.3"));
         assert!(installed.probe.available);
 
         // Test reinstall same version

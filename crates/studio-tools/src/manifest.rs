@@ -165,6 +165,9 @@ pub struct ToolManifest {
         serialize_with = "serialize_lifecycle"
     )]
     pub lifecycle: Lifecycle,
+    /// Internal test tool not shown to users unless STUDIO_DEV=1.
+    #[serde(default)]
+    pub internal: bool,
 }
 
 fn deserialize_lifecycle<'de, D>(deserializer: D) -> std::result::Result<Lifecycle, D::Error>

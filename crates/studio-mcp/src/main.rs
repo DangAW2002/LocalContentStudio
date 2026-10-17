@@ -4,10 +4,7 @@
 async fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("--shim") {
-        let path = args
-            .get(1)
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(studio_mcp::runtime::default_path);
+        let path = args.get(1).map(std::path::PathBuf::from);
         return studio_mcp::shim::run(path).await;
     }
     eprintln!("Dùng: studio-mcp --shim [đường-dẫn-runtime.json]\nMCP server chạy bên trong ứng dụng Studio.");

@@ -123,6 +123,49 @@ providers:
 }
 
 #[test]
+fn test_internal_tools_hidden_by_default() {
+    std::env::remove_var("STUDIO_DEV");
+
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("ws"), "ws").unwrap();
+    let reg = Registry::load(&ws);
+    let tools: Vec<ToolManifest> = reg.list_tools().into_iter().cloned().collect();
+
+    // In route fallback list, internal tools (tts.fake, echo) must be hidden
+    let providers = route("tts.synthesize@1", None, &ws, &tools);
+    assert!(!providers.contains(&"tts.fake".to_string()));
+
+    let echo_providers = route("echo@1", None, &ws, &tools);
+    assert!(!echo_providers.contains(&"echo".to_string()));
+
+    // In list_tools_with_probe, internal tools must be hidden and builtins must have version: None, scope: "Có sẵn", note_vi filled
+    let app_paths = studio_workspace::AppPaths::new(tmp.path().join("app"));
+    let installed =
+        studio_tools::list_tools_with_probe(&reg, &MemoryStore::new(), Some(&ws), &app_paths);
+    assert!(!installed
+        .iter()
+        .any(|t| t.id == "echo" || t.id == "tts.fake"));
+
+    for item in &installed {
+        assert!(
+            item.version.is_none(),
+            "Builtin tool {} should have null version",
+            item.id
+        );
+        assert_eq!(
+            item.scope, "Có sẵn",
+            "Builtin tool {} should have scope 'Có sẵn'",
+            item.id
+        );
+        assert!(
+            !item.probe.note_vi.is_empty(),
+            "Builtin tool {} should have filled probe.note_vi",
+            item.id
+        );
+    }
+}
+
+#[test]
 fn test_probe_missing_binary() {
     let secret_store = MemoryStore::new();
     let mut tool = ToolManifest {
@@ -141,6 +184,7 @@ fn test_probe_missing_binary() {
         side_effect: SideEffect::None,
         resources: ResourceSpec::default(),
         lifecycle: studio_jobs::Lifecycle::PerCall,
+        internal: false,
     };
 
     let result = probe(&tool, &secret_store, None);
@@ -210,6 +254,7 @@ async fn test_secret_only_reaches_env_when_declared() {
         side_effect: SideEffect::None,
         resources: ResourceSpec::default(),
         lifecycle: studio_jobs::Lifecycle::PerCall,
+        internal: false,
     };
     reg.register_tool(tool);
 
@@ -302,6 +347,7 @@ async fn test_paid_over_budget_needs_approval() {
         side_effect: SideEffect::Paid,
         resources: ResourceSpec::default(),
         lifecycle: studio_jobs::Lifecycle::PerCall,
+        internal: false,
     };
     reg.register_tool(paid_tool);
 
@@ -564,4 +610,38 @@ async fn real_sapi_tts_synthesizes_vietnamese_wav() {
         "Duration should be > 0.5s for spoken sentence, got {:.2}s",
         duration_secs
     );
+}
+
+#[test]
+fn test_list_tools_with_probe_builtins() {
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("ws"), "ws").unwrap();
+    let reg = Registry::load(&ws);
+    let secrets = MemoryStore::new();
+    let app_paths = studio_workspace::AppPaths::new(tmp.path().join("app"));
+
+    let list = studio_tools::list_tools_with_probe(&reg, &secrets, Some(&ws), &app_paths);
+
+    // Internal tools must be hidden
+    assert!(
+        !list.iter().any(|t| t.id == "echo" || t.id == "tts.fake"),
+        "Internal tools should not appear in list_tools_with_probe"
+    );
+
+    // User visible tools must be present
+    let sapi = list.iter().find(|t| t.id == "tts.windows-sapi");
+    assert!(sapi.is_some(), "tts.windows-sapi should be listed");
+    let sapi_tool = sapi.unwrap();
+    assert_eq!(sapi_tool.version, None);
+    assert_eq!(sapi_tool.scope, "Có sẵn");
+    assert!(!sapi_tool.can_uninstall);
+    assert!(!sapi_tool.probe.note_vi.is_empty());
+
+    // Check JSON serialization
+    let json_val = serde_json::to_value(sapi_tool).unwrap();
+    assert_eq!(json_val["version"], serde_json::Value::Null);
+    assert_eq!(json_val["scope"], "Có sẵn");
+    assert_eq!(json_val["canUninstall"], false);
+    assert!(json_val["probe"]["noteVi"].is_string());
+    assert!(!json_val["probe"]["noteVi"].as_str().unwrap().is_empty());
 }

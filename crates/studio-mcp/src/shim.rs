@@ -1,6 +1,6 @@
 //! stdio ⇄ HTTP shim for engines that only support globally configured stdio MCP servers (agy, ADR-008 §4).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -35,6 +35,143 @@ pub async fn fetch_token(
         .ok_or_else(|| "Không có lượt agy đang hoạt động trong workspace này.".to_string())
 }
 
+/// Discover running Studio instance and fetch active token using provided search directories and liveness function.
+/// Order of discovery:
+/// 1. `explicit_path` (if provided) and/or `STUDIO_APP_DIR` runtime.json
+/// 2. default runtime.json (`%APPDATA%/LocalContentStudio/runtime.json`)
+/// 3. every `runtime.d` entry whose process is alive. Stale entries are ignored/cleaned.
+///
+/// Returns the first instance that returns a valid token for `dirs`.
+pub async fn discover_and_fetch_token_in<F>(
+    client: &reqwest::Client,
+    explicit_path: Option<&Path>,
+    studio_app_dir: Option<&Path>,
+    default_runtime_path: Option<&Path>,
+    runtime_d_dir: Option<&Path>,
+    dirs: &[PathBuf],
+    is_alive: F,
+) -> Result<(u16, String), String>
+where
+    F: Fn(u32) -> bool,
+{
+    let mut attempted_paths: Vec<PathBuf> = Vec::new();
+    let mut last_error: Option<String> = None;
+
+    // 1. Explicit path (e.g. CLI argument)
+    if let Some(path) = explicit_path {
+        attempted_paths.push(path.to_path_buf());
+        if let Ok(info) = crate::runtime::read_entry(path) {
+            match fetch_token(client, &info, dirs).await {
+                Ok(tok) => return Ok((info.port, tok)),
+                Err(e) => last_error = Some(e),
+            }
+        }
+    }
+
+    // 1b. STUDIO_APP_DIR runtime.json
+    if let Some(app_dir) = studio_app_dir {
+        let path = app_dir.join("runtime.json");
+        if !attempted_paths.contains(&path) {
+            attempted_paths.push(path.clone());
+            if let Ok(info) = crate::runtime::read_entry(&path) {
+                match fetch_token(client, &info, dirs).await {
+                    Ok(tok) => return Ok((info.port, tok)),
+                    Err(e) => last_error = Some(e),
+                }
+            }
+        }
+    }
+
+    // 2. Default runtime.json
+    if let Some(def_path) = default_runtime_path {
+        if !attempted_paths.contains(&def_path.to_path_buf()) {
+            attempted_paths.push(def_path.to_path_buf());
+            if let Ok(info) = crate::runtime::read_entry(def_path) {
+                match fetch_token(client, &info, dirs).await {
+                    Ok(tok) => return Ok((info.port, tok)),
+                    Err(e) => last_error = Some(e),
+                }
+            }
+        }
+    }
+
+    // 3. runtime.d directory entries
+    if let Some(d_dir) = runtime_d_dir {
+        if d_dir.exists() && d_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(d_dir) {
+                let mut files: Vec<PathBuf> = entries
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("json"))
+                    .collect();
+                files.sort();
+
+                let mut alive_entries = Vec::new();
+                for file_path in files {
+                    let file_pid = file_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .and_then(|s| s.parse::<u32>().ok());
+
+                    match crate::runtime::read_entry(&file_path) {
+                        Ok(info) => {
+                            let pid = info.pid;
+                            if !is_alive(pid) {
+                                // Stale entry: clean it up
+                                let _ = std::fs::remove_file(&file_path);
+                            } else {
+                                alive_entries.push(info);
+                            }
+                        }
+                        Err(_) => {
+                            // If unreadable, check if file_pid is dead to clean it
+                            if let Some(pid) = file_pid {
+                                if !is_alive(pid) {
+                                    let _ = std::fs::remove_file(&file_path);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                for info in alive_entries {
+                    match fetch_token(client, &info, dirs).await {
+                        Ok(tok) => return Ok((info.port, tok)),
+                        Err(e) => last_error = Some(e),
+                    }
+                }
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| "Studio chưa chạy.".to_string()))
+}
+
+/// Discover running Studio instance and fetch active token using system defaults.
+pub async fn discover_and_fetch_token<F>(
+    client: &reqwest::Client,
+    explicit_path: Option<&Path>,
+    dirs: &[PathBuf],
+    is_alive: F,
+) -> Result<(u16, String), String>
+where
+    F: Fn(u32) -> bool,
+{
+    let studio_app_dir = std::env::var("STUDIO_APP_DIR").ok().map(PathBuf::from);
+    let def_path = crate::runtime::fixed_default_path();
+    let d_dir = crate::runtime::runtime_d_dir();
+    discover_and_fetch_token_in(
+        client,
+        explicit_path,
+        studio_app_dir.as_deref(),
+        Some(&def_path),
+        Some(&d_dir),
+        dirs,
+        is_alive,
+    )
+    .await
+}
+
 /// Forward one JSON-RPC message; `None` for notifications.
 pub async fn forward(
     client: &reqwest::Client,
@@ -65,7 +202,8 @@ pub async fn forward(
 }
 
 /// Run the shim on stdin/stdout until EOF.
-pub async fn run(runtime_path: PathBuf) -> std::io::Result<()> {
+pub async fn run(explicit_path: impl Into<Option<PathBuf>>) -> std::io::Result<()> {
+    let explicit_path = explicit_path.into();
     let client = reqwest::Client::builder()
         .no_proxy()
         .build()
@@ -100,12 +238,13 @@ pub async fn run(runtime_path: PathBuf) -> std::io::Result<()> {
             }
         }
         if token.is_none() {
-            let resolved = match crate::runtime::read(&runtime_path) {
-                Ok(info) => fetch_token(&client, &info, &dirs)
-                    .await
-                    .map(|t| (info.port, t)),
-                Err(_) => Err("Studio chưa chạy.".to_string()),
-            };
+            let resolved = discover_and_fetch_token(
+                &client,
+                explicit_path.as_deref(),
+                &dirs,
+                crate::runtime::is_process_alive,
+            )
+            .await;
             match resolved {
                 Ok(t) => token = Some(t),
                 Err(e) => {

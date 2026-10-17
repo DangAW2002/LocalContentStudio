@@ -48,14 +48,16 @@ fn main() {
             let port = running.addr.port();
             let _ = state.mcp_port.set(port);
             let runtime_path = studio_mcp::runtime::default_path();
-            studio_mcp::runtime::write(
-                &runtime_path,
-                &RuntimeInfo {
-                    port,
-                    shim_secret,
-                    pid: std::process::id(),
-                },
-            )?;
+            let runtime_info = RuntimeInfo {
+                port,
+                shim_secret,
+                pid: std::process::id(),
+                runtime_path: Some(runtime_path.clone()),
+            };
+            studio_mcp::runtime::write(&runtime_path, &runtime_info)?;
+            if let Err(e) = studio_mcp::runtime::write_runtime_d(&runtime_info) {
+                eprintln!("Không ghi được runtime.d: {e}");
+            }
             // Keep the server alive for the whole process lifetime.
             std::mem::forget(running);
 
@@ -126,6 +128,7 @@ fn main() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 studio_mcp::runtime::remove(&studio_mcp::runtime::default_path());
+                studio_mcp::runtime::remove_runtime_d(std::process::id());
                 let _ = window;
             }
         })

@@ -1,6 +1,6 @@
 id: ffmpeg.probe
 kind: checker
-description: "Inspect media metadata using ffprobe"
+description: "Kiểm tra thông tin siêu dữ liệu (metadata) của tệp đa phương tiện bằng ffprobe"
 provides:
   - "ffmpeg.probe@1"
 run:

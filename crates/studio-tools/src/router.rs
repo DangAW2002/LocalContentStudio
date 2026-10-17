@@ -91,8 +91,12 @@ pub fn route(
     }
 
     // 5. Fallback list: any tool that provides this capability
+    let dev_mode = std::env::var("STUDIO_DEV").as_deref() == Ok("1");
     let base_cap = cap.split('@').next().unwrap_or(cap);
     for tool in registered_tools {
+        if tool.internal && !dev_mode {
+            continue;
+        }
         let provides_cap = tool
             .provides
             .iter()

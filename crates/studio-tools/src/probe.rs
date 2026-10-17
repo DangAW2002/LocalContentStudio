@@ -10,12 +10,14 @@ use studio_workspace::Workspace;
 
 /// Result of probing a tool's declared dependencies.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProbeResult {
     /// True if all declared dependencies are available and verified.
     pub available: bool,
     /// List of declared dependencies that could not be verified.
     pub missing: Vec<String>,
     /// Vietnamese note describing status.
+    #[serde(alias = "note_vi")]
     pub note_vi: String,
 }
 
@@ -59,6 +61,21 @@ pub fn probe(
             note_vi: "Sẵn sàng".to_string(),
         }
     } else {
+        let missing_vi: Vec<String> = missing
+            .iter()
+            .map(|m| {
+                if let Some(bin) = m.strip_prefix("bin:") {
+                    format!("lệnh '{bin}'")
+                } else if let Some(secret) = m.strip_prefix("secret:") {
+                    format!("khoá API {secret}")
+                } else if let Some(app) = m.strip_prefix("app:") {
+                    format!("ứng dụng '{app}'")
+                } else {
+                    m.clone()
+                }
+            })
+            .collect();
+
         let note = if missing.iter().all(|m| m.starts_with("secret:")) {
             let keys: Vec<&str> = missing
                 .iter()
@@ -69,18 +86,22 @@ pub fn probe(
                 keys.join(", ")
             )
         } else if let Some(first_secret) = missing.iter().find_map(|m| m.strip_prefix("secret:")) {
-            format!(
-                "Chưa có khoá API {} — thêm trong Cài đặt → Khoá API (thiếu thêm: {})",
-                first_secret,
-                missing
-                    .iter()
-                    .filter(|m| !m.starts_with("secret:"))
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
+            let extra: Vec<String> = missing_vi
+                .iter()
+                .filter(|m| !m.starts_with("khoá API"))
+                .cloned()
+                .collect();
+            if extra.is_empty() {
+                format!("Chưa có khoá API {first_secret} — thêm trong Cài đặt → Khoá API")
+            } else {
+                format!(
+                    "Chưa có khoá API {} — thêm trong Cài đặt → Khoá API (thiếu thêm: {})",
+                    first_secret,
+                    extra.join(", ")
+                )
+            }
         } else {
-            format!("Thiếu phụ thuộc: {}", missing.join(", "))
+            format!("Thiếu phụ thuộc: {}", missing_vi.join(", "))
         };
         ProbeResult {
             available: false,
