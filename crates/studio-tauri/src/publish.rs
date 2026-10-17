@@ -376,6 +376,6 @@ pub async fn youtube_connect(state: tauri::State<'_, AppState>) -> CmdResult<Str
     let org_name = ws.org().name();
     let ws_name = ws.name();
 
-    let msg = connect_youtube(state.secrets.as_ref(), org_name, Some(ws_name), 120).await?;
+    let msg = connect_youtube(state.secrets.as_ref(), org_name, Some(ws_name), 300).await?;
     Ok(msg)
 }

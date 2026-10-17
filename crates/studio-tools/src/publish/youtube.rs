@@ -204,10 +204,11 @@ pub async fn connect_youtube(
 
     let auth_url = build_oauth_url(&client_id, &redirect_uri, &code_challenge, &state_expected);
 
-    // Open browser
+    // Open browser. Not via `cmd /C start`: cmd treats every `&` in the query string as a command
+    // separator, so the browser would get a truncated URL (and the rest would be run as commands).
     #[cfg(windows)]
-    let _ = std::process::Command::new("cmd")
-        .args(["/C", "start", "", &auth_url])
+    let _ = std::process::Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", &auth_url])
         .spawn();
 
     #[cfg(not(windows))]
