@@ -446,7 +446,7 @@ interface ProviderPricing {
 - **Output**: `void`
 
 #### `env_probe`
-- **Mục đích**: Kiểm tra sự hiện diện và phiên bản của các công cụ phụ thuộc ngoài (Node, npx, FFmpeg, ffprobe, Chrome/Edge, claude, agy) bằng cách thực thi trực tiếp binary thật (`--version`).
+- **Mục đích**: Kiểm tra sự hiện diện và phiên bản của các công cụ phụ thuộc ngoài (Node, npx, FFmpeg, ffprobe, Chrome/Edge, yt-dlp, claude, agy) bằng cách thực thi trực tiếp binary thật (`--version`).
 - **Input**: None
 - **Output**: `EnvProbeItem[]`
 ```ts
@@ -459,6 +459,64 @@ interface EnvProbeItem {
   hint: string;
 }
 ```
+
+---
+
+### 1.8 Cài đặt và Quản lý Công cụ (Tools)
+
+#### `tool_install_preview`
+- **Mục đích**: Phân tích cú pháp và xác thực manifest công cụ từ thư mục cục bộ hoặc URL HTTPS tải zip (tối đa 100MB, kiểm tra an toàn zip-slip/symlink). Trả về thông tin chi tiết (lệnh, tham số, khả năng, phụ thuộc, rủi ro) trước khi người dùng xác nhận.
+- **Input**: `{ source: string, scope: "app" | "workspace" }`
+- **Output**: `ToolInstallPreview`
+```ts
+interface ToolInstallPreview {
+  previewId: string;
+  toolId: string;
+  version: string;
+  kind: string;
+  description: string;
+  command: string;
+  args: string[];
+  provides: string[];
+  needs: string[];
+  network?: string | null;
+  sideEffect: string;
+  scope: "app" | "workspace";
+  targetDir: string;
+  stagedDir: string;
+  isReinstall: boolean;
+}
+```
+
+#### `tool_install_confirm`
+- **Mục đích**: Xác nhận cài đặt công cụ đã xem trước. Chuyển thư mục tạm vào thư mục đích (`<app>/tools/<id>@<version>` hoặc `<workspace>/.studio/tools/<id>@<version>`). Không chạy bất kỳ lệnh nào ngoại trừ probe phụ thuộc được khai báo trong manifest.
+- **Input**: `{ previewId: string }`
+- **Output**: `InstalledToolInfo`
+
+#### `tool_list_installed`
+- **Mục đích**: Liệt kê toàn bộ công cụ đã cài đặt và các công cụ có sẵn (builtin), kèm kết quả probe kiểm tra phụ thuộc.
+- **Input**: None
+- **Output**: `InstalledToolInfo[]`
+```ts
+interface InstalledToolInfo {
+  id: string;
+  version: string;
+  scope: string;
+  path: string;
+  manifest: any;
+  probe: {
+    available: boolean;
+    missing: string[];
+    noteVi: string;
+  };
+  canUninstall: boolean;
+}
+```
+
+#### `tool_uninstall`
+- **Mục đích**: Gỡ bỏ cài đặt công cụ khỏi ứng dụng hoặc workspace.
+- **Input**: `{ toolId: string, version?: string | null, scope?: "app" | "workspace" | null }`
+- **Output**: `boolean`
 
 ---
 

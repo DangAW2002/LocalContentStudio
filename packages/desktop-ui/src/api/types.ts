@@ -587,3 +587,56 @@ export interface EnvProbeItem {
   hint: string;
 }
 
+// ==========================================
+// Tool Installation & Management Types
+// ==========================================
+
+export type ToolInstallScope = "app" | "workspace";
+
+export interface ToolInstallPreviewRequest {
+  source: string;
+  scope: ToolInstallScope;
+}
+
+export interface ToolInstallConfirmRequest {
+  previewId: string;
+}
+
+export interface ToolUninstallRequest {
+  toolId: string;
+  version?: string | null;
+  scope?: ToolInstallScope | null;
+}
+
+export interface ToolInstallPreview {
+  previewId: string;
+  toolId: string;
+  version: string;
+  kind: string;
+  description: string;
+  command: string;
+  args: string[];
+  provides: string[];
+  needs: string[];
+  network?: string | null;
+  sideEffect: string;
+  scope: ToolInstallScope;
+  targetDir: string;
+  stagedDir: string;
+  isReinstall: boolean;
+}
+
+export interface InstalledToolInfo {
+  id: string;
+  version: string;
+  scope: string;
+  path: string;
+  manifest: any;
+  probe: {
+    available: boolean;
+    missing: string[];
+    noteVi: string;
+  };
+  canUninstall: boolean;
+}
+

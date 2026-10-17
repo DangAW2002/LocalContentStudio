@@ -50,6 +50,8 @@ pub struct AppState {
     pub catalog_path: PathBuf,
     /// Cloned catalog sources (`%LOCALAPPDATA%/LocalContentStudio/catalog/sources`).
     pub sources_dir: PathBuf,
+    /// Pending tool installation previews waiting for user confirmation.
+    pub tool_previews: Mutex<HashMap<String, studio_tools::ToolInstallPreview>>,
     /// Claude Code engine adapter.
     pub claude: ClaudeEngine,
     /// Antigravity engine adapter.
@@ -112,6 +114,7 @@ impl AppState {
             },
             current: Mutex::new(None),
             turns: Mutex::new(HashMap::new()),
+            tool_previews: Mutex::new(HashMap::new()),
             watcher: Mutex::new(None),
             claude: ClaudeEngine::new(),
             agy: AgyEngine::new(),

@@ -19,6 +19,9 @@ walkdir = "2.5"
 rusqlite = { workspace = true }
 reqwest = { workspace = true }
 base64 = "0.22"
+zip = { workspace = true }
+url = { workspace = true }
+tempfile = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_Security_Credentials", "Win32_Foundation"] }

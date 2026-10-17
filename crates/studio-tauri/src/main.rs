@@ -171,6 +171,10 @@ fn main() {
             commands::provider_pricing_get,
             commands::provider_pricing_set,
             commands::env_probe,
+            commands::tool_install_preview,
+            commands::tool_install_confirm,
+            commands::tool_list_installed,
+            commands::tool_uninstall,
         ])
         .run(tauri::generate_context!())
         .expect("không khởi động được Local Content Studio");

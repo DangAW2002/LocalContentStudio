@@ -1247,6 +1247,17 @@ pub async fn env_probe(state: State<'_, AppState>) -> CmdResult<Vec<EnvProbeItem
         hint: "Cài đặt Google Chrome (https://google.com/chrome) hoặc Microsoft Edge để render HTML sang PNG/PDF".into(),
     });
 
+    let ytdlp_path = studio_tools::find_in_path("yt-dlp");
+    let ytdlp_ver = studio_tools::probe_ytdlp().ok();
+    items.push(EnvProbeItem {
+        id: "yt-dlp".into(),
+        name: "yt-dlp".into(),
+        found: ytdlp_path.is_some(),
+        version: ytdlp_ver,
+        path: ytdlp_path.as_deref().map(strip_verbatim),
+        hint: "Cài đặt yt-dlp qua winget: 'winget install yt-dlp' hoặc tải từ https://github.com/yt-dlp/yt-dlp".into(),
+    });
+
     let claude = state.claude.probe().await;
     items.push(EnvProbeItem {
         id: "claude".into(),
@@ -1268,6 +1279,110 @@ pub async fn env_probe(state: State<'_, AppState>) -> CmdResult<Vec<EnvProbeItem
     });
 
     Ok(items)
+}
+
+/// Request payload for tool install preview.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolInstallPreviewRequest {
+    pub source: String,
+    pub scope: studio_tools::ToolInstallScope,
+}
+
+/// Request payload for tool install confirmation.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolInstallConfirmRequest {
+    pub preview_id: String,
+}
+
+/// Request payload for tool uninstallation.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolUninstallRequest {
+    pub tool_id: String,
+    pub version: Option<String>,
+    pub scope: Option<studio_tools::ToolInstallScope>,
+}
+
+/// Previews a tool installation from a local folder or an HTTPS zip URL.
+#[tauri::command]
+pub async fn tool_install_preview(
+    state: State<'_, AppState>,
+    req: ToolInstallPreviewRequest,
+) -> CmdResult<studio_tools::ToolInstallPreview> {
+    let ws = state.workspace().ok();
+    let preview =
+        studio_tools::preview_install(&req.source, req.scope, ws.as_ref(), &state.app_paths)
+            .await
+            .map_err(|e| CmdError::msg(e.to_string()))?;
+
+    // Store in pending previews
+    if let Ok(mut map) = state.tool_previews.lock() {
+        map.insert(preview.preview_id.clone(), preview.clone());
+    }
+
+    Ok(preview)
+}
+
+/// Confirms and finalizes an installation preview.
+#[tauri::command]
+pub async fn tool_install_confirm(
+    state: State<'_, AppState>,
+    req: ToolInstallConfirmRequest,
+) -> CmdResult<studio_tools::InstalledToolInfo> {
+    let preview = {
+        let mut map = state
+            .tool_previews
+            .lock()
+            .map_err(|_| CmdError::msg("Không thể khóa bộ nhớ xem trước"))?;
+        map.remove(&req.preview_id)
+            .ok_or_else(|| CmdError::msg("Phiên xem trước cài đặt không tồn tại hoặc đã hết hạn"))?
+    };
+
+    let ws = state.workspace().ok();
+    let installed = studio_tools::confirm_install(&preview, state.secrets.as_ref(), ws.as_ref())
+        .map_err(|e| CmdError::msg(e.to_string()))?;
+
+    Ok(installed)
+}
+
+/// Lists all tools (builtin and installed) with their probe results.
+#[tauri::command]
+pub async fn tool_list_installed(
+    state: State<'_, AppState>,
+) -> CmdResult<Vec<studio_tools::InstalledToolInfo>> {
+    let ws = state.workspace().ok();
+    let reg = match ws.as_ref() {
+        Some(w) => studio_tools::Registry::load(w),
+        None => studio_tools::Registry::with_builtins(),
+    };
+
+    let list = studio_tools::list_tools_with_probe(
+        &reg,
+        state.secrets.as_ref(),
+        ws.as_ref(),
+        &state.app_paths,
+    );
+
+    Ok(list)
+}
+
+/// Uninstalls an installed tool.
+#[tauri::command]
+pub async fn tool_uninstall(
+    state: State<'_, AppState>,
+    req: ToolUninstallRequest,
+) -> CmdResult<bool> {
+    let ws = state.workspace().ok();
+    studio_tools::uninstall_tool(
+        &req.tool_id,
+        req.version.as_deref(),
+        req.scope,
+        ws.as_ref(),
+        &state.app_paths,
+    )
+    .map_err(|e| CmdError::msg(e.to_string()))
 }
 
 #[cfg(test)]

@@ -72,4 +72,8 @@ pub enum ToolError {
     /// Setup error.
     #[error("Lỗi cài đặt agy: {0}")]
     SetupError(String),
+
+    /// Install error.
+    #[error("Lỗi cài đặt công cụ: {0}")]
+    InstallError(String),
 }

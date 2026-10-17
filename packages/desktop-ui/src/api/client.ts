@@ -66,6 +66,11 @@ import type {
   ProviderPricing,
   ProviderPricingSetRequest,
   EnvProbeItem,
+  ToolInstallPreviewRequest,
+  ToolInstallConfirmRequest,
+  ToolUninstallRequest,
+  ToolInstallPreview,
+  InstalledToolInfo,
 } from "./types";
 
 export class StudioApiClient {
@@ -423,6 +428,42 @@ export class StudioApiClient {
   /** Command: `env_probe`. */
   async envProbe(): Promise<EnvProbeItem[]> {
     return invoke<EnvProbeItem[]>("env_probe");
+  }
+
+  // ==========================================
+  // Tool Management Commands
+  // ==========================================
+
+  /**
+   * Preview a tool installation from folder or URL.
+   * Command: `tool_install_preview`
+   */
+  async toolInstallPreview(req: ToolInstallPreviewRequest): Promise<ToolInstallPreview> {
+    return invoke<ToolInstallPreview>("tool_install_preview", { req });
+  }
+
+  /**
+   * Confirm and finalize tool installation.
+   * Command: `tool_install_confirm`
+   */
+  async toolInstallConfirm(req: ToolInstallConfirmRequest): Promise<InstalledToolInfo> {
+    return invoke<InstalledToolInfo>("tool_install_confirm", { req });
+  }
+
+  /**
+   * List all installed and builtin tools with probe results.
+   * Command: `tool_list_installed`
+   */
+  async toolListInstalled(): Promise<InstalledToolInfo[]> {
+    return invoke<InstalledToolInfo[]>("tool_list_installed");
+  }
+
+  /**
+   * Uninstall a tool.
+   * Command: `tool_uninstall`
+   */
+  async toolUninstall(req: ToolUninstallRequest): Promise<boolean> {
+    return invoke<boolean>("tool_uninstall", { req });
   }
 }
 
