@@ -233,13 +233,16 @@ pub fn resolve_google_client_credentials(
 }
 
 /// Extract the last 6 characters of client ID for display purposes.
+///
+/// Every Google client id ends with `.apps.googleusercontent.com`, so that suffix is dropped first;
+/// otherwise every client would display as "…nt.com".
 pub fn extract_client_id_last6(client_id: &str) -> String {
     let trimmed = client_id.trim();
-    if trimmed.len() <= 6 {
-        trimmed.to_string()
-    } else {
-        trimmed[trimmed.len() - 6..].to_string()
-    }
+    let core = trimmed
+        .strip_suffix(".apps.googleusercontent.com")
+        .unwrap_or(trimmed);
+    let chars: Vec<char> = core.chars().collect();
+    chars[chars.len().saturating_sub(6)..].iter().collect()
 }
 
 /// Call `channels.list?part=snippet&mine=true` to retrieve the authenticated YouTube channel's details.
@@ -1179,7 +1182,7 @@ mod tests {
         assert_eq!(extract_client_id_last6("123456"), "123456");
         assert_eq!(
             extract_client_id_last6("123456789-abcdef.apps.googleusercontent.com"),
-            "nt.com"
+            "abcdef"
         );
         assert_eq!(extract_client_id_last6("  short  "), "short");
     }

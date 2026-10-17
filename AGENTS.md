@@ -32,6 +32,7 @@ Legacy crates of the previous multi-user design were removed on 2026-10-16 (see 
 - Never fake capabilities: probes must run the real binary; tests for external CLIs use recorded fixtures.
 - Never write secrets to files, logs or test fixtures.
 - UI copy is Vietnamese; no raw enums shown to users.
+- Never add `Co-Authored-By` lines or any bot/AI attributions to git commits.
 
 ## Gate (must pass before you report done)
 
@@ -42,4 +43,4 @@ cargo test -p <your-crate>
 ```
 For UI: `pnpm --filter @studio/desktop-ui typecheck` and `pnpm --filter @studio/desktop-ui build`.
 
-Do not commit; the orchestrator reviews and commits. Report: what you built, public API, tests, gate output, known gaps.
+Do not commit; the orchestrator reviews and commits. When committing, strictly forbid `Co-Authored-By` or AI attribution trailers. Report: what you built, public API, tests, gate output, known gaps.
