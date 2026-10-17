@@ -87,7 +87,7 @@ interface ProjectFileEntry {
 ```
 
 #### `file_read`
-- **Mục đích**: Đọc nội dung tệp hoặc lấy asset URL an toàn cho media.
+- **Mục đích**: Đọc nội dung tệp hoặc lấy asset URL an toàn cho media (hỗ trợ đường dẫn relative theo project hoặc workspace-relative).
 - **Input**: `{ project?: string, path: string }`
 - **Output**: `FileReadResult`
 ```ts
@@ -96,6 +96,17 @@ interface FileReadResult {
   mime: string;
   text?: string;
   assetUrl?: string;
+  size: number;
+}
+```
+
+#### `file_write`
+- **Mục đích**: Ghi nội dung văn bản vào tệp nguồn (sửa trực tiếp trên Stage; hỗ trợ relative theo project hoặc workspace).
+- **Input**: `{ project?: string, path: string, text: string }`
+- **Output**: `{ path: string, size: number }`
+```ts
+interface FileWriteResult {
+  path: string;
   size: number;
 }
 ```
@@ -173,6 +184,11 @@ interface CheckpointSummary {
 - **Mục đích**: Phục hồi trạng thái tệp về một checkpoint.
 - **Input**: `{ id: string }`
 - **Output**: `{ success: boolean, restoredCheckpointId: string }`
+
+#### `checkpoint_create`
+- **Mục đích**: Tạo điểm kiểm soát CAS thủ công (ví dụ trước khi sửa trực tiếp trên Stage).
+- **Input**: `{ label?: string }`
+- **Output**: `{ id: string }`
 
 ---
 
@@ -311,6 +327,64 @@ interface DiskUsageReport {
     library: string;
     total: string;
   };
+}
+```
+
+---
+
+### 1.8 Quản lý Thành phẩm (Artifacts)
+
+#### `artifact_list`
+- **Mục đích**: Liệt kê các thành phẩm (artifact) của một dự án.
+- **Input**: `{ project: string }`
+- **Output**: `ArtifactSummary[]`
+```ts
+interface ArtifactSummary {
+  id: string;
+  kind: string;
+  title: string;
+  brand?: string;
+  channels?: string[];
+  dir: string;    // Workspace-relative path
+  source: string; // Workspace-relative path
+}
+```
+
+#### `artifact_render`
+- **Mục đích**: Kích hoạt pipeline render cho một artifact (HTML->PNG/PDF, HyperFrames->video, FFmpeg timeline).
+- **Input**: `{ project: string, id: string }`
+- **Output**: `ArtifactRenderResult`
+```ts
+interface ArtifactRenderResult {
+  cached: boolean;
+  outputs: string[]; // Workspace-relative paths
+  jobId?: string;
+  probes: Array<{ name: string; available: boolean; note?: string }>;
+}
+```
+
+#### `artifact_check`
+- **Mục đích**: Chạy checker kiểm tra tiêu chuẩn Brand và Channel cho một artifact.
+- **Input**: `{ project: string, id: string, channels?: string[] }`
+- **Output**: `ArtifactCheckResult`
+```ts
+interface CheckFinding {
+  severity: "info" | "warn" | "error";
+  code: string;
+  message_vi: string;
+  location?: string;
+  fix_hint_vi?: string;
+}
+
+interface ChannelCheckResult {
+  channel_id: string;
+  passed: boolean;
+  findings: CheckFinding[];
+}
+
+interface ArtifactCheckResult {
+  passed: boolean;
+  channels: Record<string, ChannelCheckResult>;
 }
 ```
 

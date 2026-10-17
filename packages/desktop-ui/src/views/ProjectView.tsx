@@ -27,6 +27,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   const [projectFiles, setProjectFiles] = React.useState<ProjectFileEntry[]>([]);
   const [playbooks, setPlaybooks] = React.useState<ScopeItem[]>([]);
   const [selectedFilePath, setSelectedFilePath] = React.useState<string | null>(null);
+  const [pendingInsert, setPendingInsert] = React.useState<string | null>(null);
 
   // Layout states: resizable & narrow tab mode
   const [threadWidth, setThreadWidth] = React.useState(380);
@@ -35,6 +36,13 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   const [isNarrow, setIsNarrow] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+
+  const handleAskAi = React.useCallback((text: string) => {
+    setPendingInsert(text);
+    if (isNarrow) {
+      setNarrowTab("thread");
+    }
+  }, [isNarrow]);
 
   // Track window width for responsive tabs
   React.useEffect(() => {
@@ -222,6 +230,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 activeThread={activeThread}
                 projectFiles={projectFiles}
                 playbooks={playbooks}
+                pendingInsert={pendingInsert}
+                onInsertConsumed={() => setPendingInsert(null)}
                 onSelectFile={(path) => {
                   setSelectedFilePath(path);
                   setNarrowTab("stage");
@@ -233,6 +243,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 projectSlug={currentSlug}
                 selectedFilePath={selectedFilePath}
                 onClearSelection={() => setSelectedFilePath(null)}
+                onAskAi={handleAskAi}
+                onSelectFile={setSelectedFilePath}
               />
             )}
             {narrowTab === "outputs" && (
@@ -256,6 +268,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 activeThread={activeThread}
                 projectFiles={projectFiles}
                 playbooks={playbooks}
+                pendingInsert={pendingInsert}
+                onInsertConsumed={() => setPendingInsert(null)}
                 onSelectFile={setSelectedFilePath}
               />
             </div>
@@ -266,6 +280,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 projectSlug={currentSlug}
                 selectedFilePath={selectedFilePath}
                 onClearSelection={() => setSelectedFilePath(null)}
+                onAskAi={handleAskAi}
+                onSelectFile={setSelectedFilePath}
               />
             </div>
 

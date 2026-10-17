@@ -3,6 +3,7 @@ import { Icon } from "../../components/Icon";
 import { Tabs, Button, Badge, Dialog, EmptyState } from "@studio/design-system";
 import { studioApi } from "../../api/client";
 import type {
+  ArtifactSummary,
   CheckpointSummary,
   ProjectFileEntry,
   CatalogKit,
@@ -21,6 +22,7 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
   onSelectFile,
 }) => {
   const [activeTab, setActiveTab] = React.useState<string>("artifacts");
+  const [artifacts, setArtifacts] = React.useState<ArtifactSummary[]>([]);
   const [checkpoints, setCheckpoints] = React.useState<CheckpointSummary[]>([]);
   const [kits, setKits] = React.useState<CatalogKit[]>([]);
   const [modules, setModules] = React.useState<CatalogModule[]>([]);
@@ -29,19 +31,31 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
   const [restoring, setRestoring] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
 
-  // Load checkpoints and catalog info
+  // Load artifacts, checkpoints and catalog info
+  const loadArtifactsData = React.useCallback(async () => {
+    if (!projectSlug) return;
+    try {
+      const artList = await studioApi.listArtifacts(projectSlug).catch(() => []);
+      setArtifacts(artList);
+    } catch {
+      // ignore
+    }
+  }, [projectSlug]);
+
   React.useEffect(() => {
     let isMounted = true;
     setLoading(true);
 
     const loadData = async () => {
       try {
-        const [cpList, kitList, modList] = await Promise.all([
+        const [artList, cpList, kitList, modList] = await Promise.all([
+          studioApi.listArtifacts(projectSlug).catch(() => []),
           studioApi.getCheckpoints().catch(() => []),
           studioApi.getCatalogKits().catch(() => []),
           studioApi.getCatalogModules().catch(() => []),
         ]);
         if (isMounted) {
+          setArtifacts(artList);
           setCheckpoints(cpList);
           setKits(kitList);
           setModules(modList);
@@ -59,6 +73,40 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
     };
   }, [projectSlug]);
 
+  // Refresh artifacts and checkpoints on fs-event or turn Done
+  React.useEffect(() => {
+    let unlistenFs: (() => void) | undefined;
+    let unlistenTurn: (() => void) | undefined;
+
+    const setupListeners = async () => {
+      try {
+        unlistenFs = await studioApi.onFsEvent(() => {
+          loadArtifactsData();
+          studioApi.getCheckpoints().then(setCheckpoints).catch(() => {});
+        });
+      } catch {
+        // Core absent
+      }
+
+      try {
+        unlistenTurn = await studioApi.onTurnEvent((payload) => {
+          if (payload.event.type === "Done") {
+            loadArtifactsData();
+            studioApi.getCheckpoints().then(setCheckpoints).catch(() => {});
+          }
+        });
+      } catch {
+        // Core absent
+      }
+    };
+
+    setupListeners();
+    return () => {
+      if (unlistenFs) unlistenFs();
+      if (unlistenTurn) unlistenTurn();
+    };
+  }, [loadArtifactsData]);
+
   // Handle restore checkpoint
   const handleRestoreCheckpoint = async () => {
     if (!restoreConfirmId) return;
@@ -66,9 +114,13 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
     try {
       await studioApi.restoreCheckpoint({ id: restoreConfirmId });
       setRestoreConfirmId(null);
-      // Reload checkpoints
-      const updated = await studioApi.getCheckpoints();
-      setCheckpoints(updated);
+      // Reload checkpoints & artifacts
+      const [updatedCp, updatedArt] = await Promise.all([
+        studioApi.getCheckpoints().catch(() => []),
+        studioApi.listArtifacts(projectSlug).catch(() => []),
+      ]);
+      setCheckpoints(updatedCp);
+      setArtifacts(updatedArt);
     } catch (err: any) {
       alert(err?.message || "Không thể khôi phục checkpoint.");
     } finally {
@@ -76,8 +128,17 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
     }
   };
 
+  const ARTIFACT_KIND_VI: Record<string, string> = {
+    design: "Thiết kế",
+    motion: "Chuyển động",
+    timeline: "Dòng thời gian",
+    text: "Văn bản",
+    generation: "AI sinh",
+    audio: "Âm thanh",
+  };
+
   const tabs = [
-    { id: "artifacts", label: "Thành phẩm", count: projectFiles.length },
+    { id: "artifacts", label: "Thành phẩm", count: artifacts.length > 0 ? artifacts.length : projectFiles.length },
     { id: "checkpoints", label: "Checkpoints", count: checkpoints.length },
     { id: "modules", label: "Modules & Ngân sách" },
   ];
@@ -121,6 +182,127 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
       <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
         {activeTab === "artifacts" && (
           <div style={{ display: "flex", flexDirection: "column" }}>
+            {/* Artifacts section */}
+            <div
+              style={{
+                padding: "6px var(--cs-space-3)",
+                fontSize: "var(--cs-text-xs)",
+                fontWeight: 700,
+                color: "var(--cs-fg-muted)",
+                backgroundColor: "var(--cs-bg-panel)",
+                borderBottom: "1px solid var(--cs-border-subtle)",
+                textTransform: "uppercase",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <span>Artifacts ({artifacts.length})</span>
+            </div>
+
+            {artifacts.length === 0 ? (
+              <div
+                style={{
+                  padding: "var(--cs-space-3)",
+                  fontSize: "var(--cs-text-xs)",
+                  color: "var(--cs-fg-muted)",
+                  borderBottom: "1px solid var(--cs-border-subtle)",
+                }}
+              >
+                Chưa có artifact nào được định nghĩa trong dự án.
+              </div>
+            ) : (
+              artifacts.map((art) => (
+                <div
+                  key={art.id}
+                  onClick={() => onSelectFile(art.source)}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                    padding: "8px var(--cs-space-3)",
+                    borderBottom: "1px solid var(--cs-border-subtle)",
+                    cursor: "pointer",
+                    fontSize: "var(--cs-text-xs)",
+                    transition: "background-color var(--cs-motion-duration) ease",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--cs-bg-hover)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                >
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                      <Icon
+                        name={
+                          art.kind === "design"
+                            ? "design"
+                            : art.kind === "motion"
+                            ? "motion"
+                            : art.kind === "timeline"
+                            ? "video"
+                            : art.kind === "audio"
+                            ? "audio"
+                            : "package"
+                        }
+                        size={14}
+                        color="var(--cs-accent)"
+                      />
+                      <span
+                        style={{
+                          fontWeight: 600,
+                          color: "var(--cs-fg-primary)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {art.title || art.id}
+                      </span>
+                    </div>
+                    <Badge variant="info">
+                      {ARTIFACT_KIND_VI[art.kind] || art.kind}
+                    </Badge>
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "var(--cs-fg-muted)", fontSize: 11 }}>
+                    <span style={{ fontFamily: "var(--cs-font-mono)" }}>{art.source}</span>
+                    {art.channels && art.channels.length > 0 && (
+                      <div style={{ display: "flex", gap: 4 }}>
+                        {art.channels.map((ch) => (
+                          <span
+                            key={ch}
+                            style={{
+                              padding: "1px 4px",
+                              backgroundColor: "var(--cs-bg-raised)",
+                              borderRadius: "var(--cs-radius-control)",
+                              border: "1px solid var(--cs-border-subtle)",
+                            }}
+                          >
+                            {ch}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+
+            {/* Project files tree section */}
+            <div
+              style={{
+                padding: "6px var(--cs-space-3)",
+                fontSize: "var(--cs-text-xs)",
+                fontWeight: 700,
+                color: "var(--cs-fg-muted)",
+                backgroundColor: "var(--cs-bg-panel)",
+                borderBottom: "1px solid var(--cs-border-subtle)",
+                borderTop: "1px solid var(--cs-border-subtle)",
+                textTransform: "uppercase",
+              }}
+            >
+              Cây tệp dự án ({projectFiles.length})
+            </div>
+
             {projectFiles.length === 0 ? (
               <EmptyState
                 icon={<Icon name="package" size={24} />}
@@ -128,75 +310,60 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
                 description="Khi agent tạo hoặc xuất bản artifact (ảnh, video, văn bản), tệp sẽ xuất hiện tại đây."
               />
             ) : (
-              <div style={{ display: "flex", flexDirection: "column" }}>
+              projectFiles.map((file) => (
                 <div
+                  key={file.path}
+                  onClick={() => onSelectFile(file.path)}
                   style={{
-                    padding: "6px var(--cs-space-3)",
-                    fontSize: "var(--cs-text-xs)",
-                    fontWeight: 700,
-                    color: "var(--cs-fg-muted)",
-                    backgroundColor: "var(--cs-bg-panel)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "8px var(--cs-space-3)",
                     borderBottom: "1px solid var(--cs-border-subtle)",
-                    textTransform: "uppercase",
+                    cursor: "pointer",
+                    fontSize: "var(--cs-text-xs)",
+                    transition: "background-color var(--cs-motion-duration) ease",
                   }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--cs-bg-hover)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                 >
-                  Cây tệp dự án ({projectFiles.length})
-                </div>
-                {projectFiles.map((file) => (
-                  <div
-                    key={file.path}
-                    onClick={() => onSelectFile(file.path)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      padding: "8px var(--cs-space-3)",
-                      borderBottom: "1px solid var(--cs-border-subtle)",
-                      cursor: "pointer",
-                      fontSize: "var(--cs-text-xs)",
-                      transition: "background-color var(--cs-motion-duration) ease",
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--cs-bg-hover)")}
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                      <Icon
-                        name={
-                          file.kind === "image"
-                            ? "image"
-                            : file.kind === "video"
-                            ? "video"
-                            : file.kind === "audio"
-                            ? "audio"
-                            : file.kind === "markdown" || file.kind === "text"
-                            ? "file-text"
-                            : "file"
-                        }
-                        size={14}
-                        color="var(--cs-accent)"
-                      />
-                      <span
-                        style={{
-                          fontWeight: 500,
-                          fontFamily: "var(--cs-font-mono)",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {file.path}
-                      </span>
-                    </div>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <Badge variant="neutral">{file.kind}</Badge>
-                      <span style={{ color: "var(--cs-fg-muted)" }}>
-                        {(file.size / 1024).toFixed(1)}k
-                      </span>
-                    </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                    <Icon
+                      name={
+                        file.kind === "image"
+                          ? "image"
+                          : file.kind === "video"
+                          ? "video"
+                          : file.kind === "audio"
+                          ? "audio"
+                          : file.kind === "markdown" || file.kind === "text"
+                          ? "file-text"
+                          : "file"
+                      }
+                      size={14}
+                      color="var(--cs-accent)"
+                    />
+                    <span
+                      style={{
+                        fontWeight: 500,
+                        fontFamily: "var(--cs-font-mono)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {file.path}
+                    </span>
                   </div>
-                ))}
-              </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <Badge variant="neutral">{file.kind}</Badge>
+                    <span style={{ color: "var(--cs-fg-muted)" }}>
+                      {(file.size / 1024).toFixed(1)}k
+                    </span>
+                  </div>
+                </div>
+              ))
             )}
           </div>
         )}
