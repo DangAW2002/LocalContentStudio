@@ -159,9 +159,20 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
     return Math.ceil(maxT) + 2; // Extra padding at end
   }, [doc]);
 
-  // Zoom: pixels per second on the timeline lanes
-  const pxPerSec = 50;
+  // Zoom: pixels per second on the timeline lanes (fit / +/-)
+  const [pxPerSec, setPxPerSec] = React.useState<number>(50);
   const timelineWidth = Math.max(600, totalDuration * pxPerSec);
+
+  // Undo history stack for edits & clip deletion
+  const [history, setHistory] = React.useState<TimelineDoc[]>([]);
+
+  const handleZoomIn = () => setPxPerSec((prev) => Math.min(200, prev + 15));
+  const handleZoomOut = () => setPxPerSec((prev) => Math.max(15, prev - 15));
+  const handleZoomFit = () => {
+    const availableWidth = rulerRef.current?.clientWidth || 800;
+    const target = Math.max(15, Math.floor((availableWidth - 80) / Math.max(1, totalDuration)));
+    setPxPerSec(target);
+  };
 
   // Playhead animation when playing without video
   React.useEffect(() => {
@@ -217,7 +228,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
     }
   };
 
-  // Mutate clip in doc and notify parent
+  // Mutate clip in doc and notify parent, recording history for undo
   const updateSelectedClip = (updater: (clip: TimelineClip) => void) => {
     if (!doc || !selectedClipKey) return;
     const { trackIdx, clipIdx } = selectedClipKey;
@@ -225,12 +236,72 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
     const targetClip = newDoc.tracks[trackIdx]?.clips[clipIdx];
     if (!targetClip) return;
 
+    // Save previous snapshot in history
+    setHistory((h) => [...h.slice(-20), JSON.parse(JSON.stringify(doc))]);
+
     updater(targetClip);
 
     const valid = validateTimelineDoc(newDoc);
     setDoc(newDoc);
     onChange(JSON.stringify(newDoc, null, 2), valid);
   };
+
+  // Delete currently selected clip and record for undo
+  const handleDeleteSelectedClip = React.useCallback(() => {
+    if (!doc || !selectedClipKey) return;
+    const { trackIdx, clipIdx } = selectedClipKey;
+    const newDoc = JSON.parse(JSON.stringify(doc)) as TimelineDoc;
+    if (!newDoc.tracks[trackIdx]?.clips[clipIdx]) return;
+
+    // Save previous snapshot in history
+    setHistory((h) => [...h.slice(-20), JSON.parse(JSON.stringify(doc))]);
+
+    newDoc.tracks[trackIdx].clips.splice(clipIdx, 1);
+    setSelectedClipKey(null);
+
+    const valid = validateTimelineDoc(newDoc);
+    setDoc(newDoc);
+    onChange(JSON.stringify(newDoc, null, 2), valid);
+  }, [doc, selectedClipKey, onChange]);
+
+  // Undo the last edit or deletion
+  const handleUndo = React.useCallback(() => {
+    if (history.length === 0) return;
+    const prevDoc = history[history.length - 1];
+    setHistory((h) => h.slice(0, h.length - 1));
+    const valid = validateTimelineDoc(prevDoc);
+    setDoc(prevDoc);
+    onChange(JSON.stringify(prevDoc, null, 2), valid);
+  }, [history, onChange]);
+
+  // Keyboard shortcut listener: Delete removes selected clip, Ctrl+Z undoes
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInput =
+        activeEl &&
+        (activeEl.tagName === "INPUT" ||
+          activeEl.tagName === "TEXTAREA" ||
+          (activeEl as HTMLElement).isContentEditable);
+
+      if ((e.key === "Delete" || e.key === "Backspace") && !isInput) {
+        if (selectedClipKey) {
+          e.preventDefault();
+          handleDeleteSelectedClip();
+        }
+      } else if (
+        (e.ctrlKey || e.metaKey) &&
+        e.key.toLowerCase() === "z" &&
+        !e.shiftKey &&
+        !isInput
+      ) {
+        e.preventDefault();
+        handleUndo();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedClipKey, handleDeleteSelectedClip, handleUndo]);
 
   const selectedClip = React.useMemo(() => {
     if (!doc || !selectedClipKey) return null;
@@ -242,6 +313,52 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
     if (!doc || !selectedClipKey) return null;
     return doc.tracks[selectedClipKey.trackIdx] || null;
   }, [doc, selectedClipKey]);
+
+  // Clip validation errors in Vietnamese
+  const clipErrors = React.useMemo(() => {
+    if (!selectedClip || !selectedTrack || !selectedClipKey) return {};
+    const errors: Record<string, string> = {};
+
+    if (!selectedClip.id.trim()) {
+      errors.id = "Mã clip không được để trống";
+    } else {
+      const duplicate = selectedTrack.clips.some(
+        (c, idx) => idx !== selectedClipKey.clipIdx && c.id === selectedClip.id.trim()
+      );
+      if (duplicate) {
+        errors.id = "Mã clip đã tồn tại trong track này";
+      }
+    }
+
+    if (!selectedClip.source.trim()) {
+      errors.source =
+        selectedTrack.kind === "captions" || selectedTrack.kind === "caption"
+          ? "Nội dung phụ đề không được để trống"
+          : "Đường dẫn nguồn media không được để trống";
+    }
+
+    if (selectedClip.start < 0) {
+      errors.start = "Thời điểm bắt đầu phải ≥ 0s";
+    }
+
+    if (selectedClip.duration <= 0) {
+      errors.duration = "Thời lượng phải lớn hơn 0s";
+    }
+
+    if (selectedClip.in_point !== undefined && selectedClip.in_point < 0) {
+      errors.in_point = "Điểm vào phải ≥ 0s";
+    }
+
+    if (
+      selectedClip.out_point !== undefined &&
+      selectedClip.out_point !== null &&
+      selectedClip.out_point <= (selectedClip.in_point ?? 0)
+    ) {
+      errors.out_point = "Điểm ra phải lớn hơn điểm vào";
+    }
+
+    return errors;
+  }, [selectedClip, selectedTrack, selectedClipKey]);
 
   if (parseError) {
     return (
@@ -328,13 +445,33 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
+                justifyContent: "center",
                 gap: 8,
                 color: "var(--cs-fg-muted)",
                 fontSize: "var(--cs-text-xs)",
+                padding: "var(--cs-space-4)",
+                textAlign: "center",
               }}
             >
               <Icon name="video" size={36} color="var(--cs-fg-muted)" />
-              <span>Chưa có bản render xem trước (bấm Render ở trên để xuất MP4)</span>
+              <div style={{ fontWeight: 600, color: "var(--cs-fg-secondary)", fontSize: "var(--cs-text-sm)" }}>
+                Chưa có bản render — bấm Render
+              </div>
+              <div style={{ color: "var(--cs-fg-muted)", maxWidth: 320 }}>
+                Bản xem trước video MP4 sẽ xuất hiện tại đây sau khi render timeline thành công.
+              </div>
+              {onRenderRequest && (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  busy={rendering}
+                  busyText="Đang render..."
+                  onClick={onRenderRequest}
+                  leftIcon={<Icon name="play" size={12} />}
+                >
+                  Render ngay
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -395,7 +532,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
         </div>
       </div>
 
-      {/* Middle Controls Bar */}
+      {/* Middle Controls Bar with Playhead & Zoom Controls */}
       <div
         style={{
           height: 38,
@@ -422,7 +559,54 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
           </span>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {/* Zoom & History Undo Controls */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ color: "var(--cs-fg-muted)", fontSize: 11 }}>Thu phóng:</span>
+            <Button
+              size="sm"
+              variant="quiet"
+              onClick={handleZoomOut}
+              disabled={pxPerSec <= 15}
+              title="Thu nhỏ timeline (-)"
+            >
+              -
+            </Button>
+            <span style={{ fontFamily: "var(--cs-font-mono)", fontSize: 11, minWidth: 44, textAlign: "center", color: "var(--cs-fg-primary)" }}>
+              {pxPerSec}px/s
+            </span>
+            <Button
+              size="sm"
+              variant="quiet"
+              onClick={handleZoomIn}
+              disabled={pxPerSec >= 200}
+              title="Phóng to timeline (+)"
+            >
+              +
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={handleZoomFit}
+              title="Tự động thu phóng vừa khung nhìn"
+            >
+              Vừa khung
+            </Button>
+          </div>
+
+          <div style={{ width: 1, height: 16, backgroundColor: "var(--cs-border-subtle)" }} />
+
+          <Button
+            size="sm"
+            variant="quiet"
+            onClick={handleUndo}
+            disabled={history.length === 0}
+            leftIcon={<Icon name="undo" size={12} />}
+            title="Hoàn tác thao tác trước (Ctrl+Z)"
+          >
+            Hoàn tác
+          </Button>
+
           <Button
             size="sm"
             variant="secondary"
@@ -540,6 +724,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                             e.stopPropagation();
                             setSelectedClipKey({ trackIdx, clipIdx });
                           }}
+                          title={`[${clip.id}] ${clip.source} (${clip.start}s - ${(clip.start + clip.duration).toFixed(1)}s)`}
                           style={{
                             position: "absolute",
                             left,
@@ -561,6 +746,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                           }}
                         >
                           <div
+                            title={clip.id}
                             style={{
                               fontSize: 11,
                               fontWeight: 600,
@@ -573,6 +759,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                             {clip.id}
                           </div>
                           <div
+                            title={clip.source}
                             style={{
                               fontSize: 10,
                               color: "var(--cs-fg-muted)",
@@ -646,77 +833,142 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                 </Badge>
               </div>
 
+              {/* Clip ID Field with Validation */}
               <label style={labelStyle}>
-                Mã định danh (ID)
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>Mã định danh (ID)</span>
+                  {clipErrors.id && (
+                    <span style={{ color: "var(--cs-danger)", fontSize: 10, fontWeight: 500 }}>
+                      {clipErrors.id}
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   value={selectedClip.id}
                   onChange={(e) => updateSelectedClip((c) => (c.id = e.target.value))}
-                  style={inputStyle}
+                  style={{
+                    ...inputStyle,
+                    borderColor: clipErrors.id ? "var(--cs-danger)" : "var(--cs-border-subtle)",
+                  }}
                 />
               </label>
 
-              {/* Caption text or source asset path */}
+              {/* Caption text or source asset path with Validation */}
               <label style={labelStyle}>
-                {selectedTrack.kind === "captions" || selectedTrack.kind === "caption"
-                  ? "Nội dung phụ đề (Text)"
-                  : "Nguồn media (Source path)"}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>
+                    {selectedTrack.kind === "captions" || selectedTrack.kind === "caption"
+                      ? "Nội dung phụ đề (Text)"
+                      : "Nguồn media (Source path)"}
+                  </span>
+                  {clipErrors.source && (
+                    <span style={{ color: "var(--cs-danger)", fontSize: 10, fontWeight: 500 }}>
+                      {clipErrors.source}
+                    </span>
+                  )}
+                </div>
                 {selectedTrack.kind === "captions" || selectedTrack.kind === "caption" ? (
                   <textarea
                     rows={3}
                     value={selectedClip.source}
                     onChange={(e) => updateSelectedClip((c) => (c.source = e.target.value))}
-                    style={{ ...inputStyle, resize: "vertical" }}
+                    style={{
+                      ...inputStyle,
+                      resize: "vertical",
+                      borderColor: clipErrors.source ? "var(--cs-danger)" : "var(--cs-border-subtle)",
+                    }}
                   />
                 ) : (
                   <input
                     type="text"
                     value={selectedClip.source}
                     onChange={(e) => updateSelectedClip((c) => (c.source = e.target.value))}
-                    style={inputStyle}
+                    style={{
+                      ...inputStyle,
+                      borderColor: clipErrors.source ? "var(--cs-danger)" : "var(--cs-border-subtle)",
+                    }}
                   />
                 )}
               </label>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 <label style={labelStyle}>
-                  Bắt đầu (s)
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>Bắt đầu (s)</span>
+                    {clipErrors.start && (
+                      <span style={{ color: "var(--cs-danger)", fontSize: 9 }}>!</span>
+                    )}
+                  </div>
                   <input
                     type="number"
                     step="0.1"
                     min="0"
                     value={selectedClip.start}
-                    onChange={(e) => updateSelectedClip((c) => (c.start = Math.max(0, parseFloat(e.target.value) || 0)))}
-                    style={inputStyle}
+                    onChange={(e) => updateSelectedClip((c) => (c.start = parseFloat(e.target.value) || 0))}
+                    style={{
+                      ...inputStyle,
+                      borderColor: clipErrors.start ? "var(--cs-danger)" : "var(--cs-border-subtle)",
+                    }}
                   />
+                  {clipErrors.start && (
+                    <span style={{ color: "var(--cs-danger)", fontSize: 10 }}>{clipErrors.start}</span>
+                  )}
                 </label>
 
                 <label style={labelStyle}>
-                  Thời lượng (s)
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>Thời lượng (s)</span>
+                    {clipErrors.duration && (
+                      <span style={{ color: "var(--cs-danger)", fontSize: 9 }}>!</span>
+                    )}
+                  </div>
                   <input
                     type="number"
                     step="0.1"
                     min="0.1"
                     value={selectedClip.duration}
-                    onChange={(e) => updateSelectedClip((c) => (c.duration = Math.max(0.1, parseFloat(e.target.value) || 0.1)))}
-                    style={inputStyle}
+                    onChange={(e) => updateSelectedClip((c) => (c.duration = parseFloat(e.target.value) || 0))}
+                    style={{
+                      ...inputStyle,
+                      borderColor: clipErrors.duration ? "var(--cs-danger)" : "var(--cs-border-subtle)",
+                    }}
                   />
+                  {clipErrors.duration && (
+                    <span style={{ color: "var(--cs-danger)", fontSize: 10 }}>{clipErrors.duration}</span>
+                  )}
                 </label>
 
                 <label style={labelStyle}>
-                  Điểm vào (In s)
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>Điểm vào (In s)</span>
+                    {clipErrors.in_point && (
+                      <span style={{ color: "var(--cs-danger)", fontSize: 9 }}>!</span>
+                    )}
+                  </div>
                   <input
                     type="number"
                     step="0.1"
                     min="0"
                     value={selectedClip.in_point ?? 0}
-                    onChange={(e) => updateSelectedClip((c) => (c.in_point = Math.max(0, parseFloat(e.target.value) || 0)))}
-                    style={inputStyle}
+                    onChange={(e) => updateSelectedClip((c) => (c.in_point = parseFloat(e.target.value) || 0))}
+                    style={{
+                      ...inputStyle,
+                      borderColor: clipErrors.in_point ? "var(--cs-danger)" : "var(--cs-border-subtle)",
+                    }}
                   />
+                  {clipErrors.in_point && (
+                    <span style={{ color: "var(--cs-danger)", fontSize: 10 }}>{clipErrors.in_point}</span>
+                  )}
                 </label>
 
                 <label style={labelStyle}>
-                  Điểm ra (Out s)
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span>Điểm ra (Out s)</span>
+                    {clipErrors.out_point && (
+                      <span style={{ color: "var(--cs-danger)", fontSize: 9 }}>!</span>
+                    )}
+                  </div>
                   <input
                     type="number"
                     step="0.1"
@@ -729,13 +981,30 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                         c.out_point = val === "" ? undefined : parseFloat(val) || 0;
                       })
                     }
-                    style={inputStyle}
+                    style={{
+                      ...inputStyle,
+                      borderColor: clipErrors.out_point ? "var(--cs-danger)" : "var(--cs-border-subtle)",
+                    }}
                   />
+                  {clipErrors.out_point && (
+                    <span style={{ color: "var(--cs-danger)", fontSize: 10 }}>{clipErrors.out_point}</span>
+                  )}
                 </label>
               </div>
 
-              <div style={{ color: "var(--cs-fg-muted)", fontSize: "var(--cs-text-xs)", lineHeight: 1.5 }}>
-                Chỉnh sửa thông số sẽ tự động cập nhật timeline và lưu khi bấm nút Lưu.
+              {/* Actions: Delete Clip */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={handleDeleteSelectedClip}
+                  leftIcon={<Icon name="x" size={12} />}
+                >
+                  Xóa clip này (Delete)
+                </Button>
+                <div style={{ color: "var(--cs-fg-muted)", fontSize: 11, lineHeight: 1.4 }}>
+                  Mẹo: Nhấn phím <b>Delete</b> hoặc <b>Backspace</b> để xóa nhanh clip đang chọn. Nhấn <b>Ctrl+Z</b> để hoàn tác.
+                </div>
               </div>
             </div>
           ) : (

@@ -4,6 +4,7 @@ import { Tabs, Button, Badge, Dialog, EmptyState } from "@studio/design-system";
 import { studioApi } from "../../api/client";
 import { ProjectFolderTree } from "./ProjectFolderTree";
 import { PublishDialog } from "../../components/PublishDialog";
+import { CreateArtifactDialog } from "./CreateArtifactDialog";
 import type {
   ArtifactSummary,
   CheckpointSummary,
@@ -34,6 +35,7 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
   const [loading, setLoading] = React.useState(false);
   const [publishArtifact, setPublishArtifact] = React.useState<ArtifactSummary | null>(null);
   const [publishDialogOpen, setPublishDialogOpen] = React.useState(false);
+  const [showCreateArtifactDialog, setShowCreateArtifactDialog] = React.useState(false);
   const [showHiddenFiles, setShowHiddenFiles] = React.useState(false);
 
   // Load artifacts, checkpoints and catalog info
@@ -203,6 +205,14 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
               }}
             >
               <span>Artifacts ({artifacts.length})</span>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setShowCreateArtifactDialog(true)}
+                leftIcon={<Icon name="plus" size={11} />}
+              >
+                Tạo artifact
+              </Button>
             </div>
 
             {artifacts.length === 0 ? (
@@ -212,9 +222,21 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
                   fontSize: "var(--cs-text-xs)",
                   color: "var(--cs-fg-muted)",
                   borderBottom: "1px solid var(--cs-border-subtle)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                  alignItems: "flex-start",
                 }}
               >
-                Chưa có artifact nào được định nghĩa trong dự án.
+                <span>Chưa có artifact nào được định nghĩa trong dự án.</span>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={() => setShowCreateArtifactDialog(true)}
+                  leftIcon={<Icon name="plus" size={11} />}
+                >
+                  Tạo artifact đầu tiên
+                </Button>
               </div>
             ) : (
               artifacts.map((art) => (
@@ -544,6 +566,18 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
         }}
         projectSlug={projectSlug}
         artifact={publishArtifact}
+      />
+
+      {/* Create Artifact Dialog */}
+      <CreateArtifactDialog
+        open={showCreateArtifactDialog}
+        onClose={() => setShowCreateArtifactDialog(false)}
+        projectSlug={projectSlug}
+        existingIds={artifacts.map((a) => a.id)}
+        onCreated={(sourcePath) => {
+          loadArtifactsData();
+          onSelectFile(sourcePath);
+        }}
       />
     </div>
   );

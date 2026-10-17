@@ -48,6 +48,7 @@ export interface ThreadPaneProps {
   pendingInsert?: string | null;
   onInsertConsumed?: () => void;
   onNavigateSettings?: (tab?: string) => void;
+  onUndoTurnSuccess?: () => void;
 }
 
 export interface ToolCallItem {
@@ -203,6 +204,7 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
   pendingInsert,
   onInsertConsumed,
   onNavigateSettings,
+  onUndoTurnSuccess,
 }) => {
   const [messages, setMessages] = React.useState<ThreadMessage[]>([]);
   const [inputPrompt, setInputPrompt] = React.useState("");
@@ -210,6 +212,8 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
   const [pickerMode, setPickerMode] = React.useState<"@" | "/" | null>(null);
   const [pickerIndex, setPickerIndex] = React.useState(0);
   const [undoTurnTarget, setUndoTurnTarget] = React.useState<string | null>(null);
+  const [undoing, setUndoing] = React.useState(false);
+  const [undoToast, setUndoToast] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [pendingPublishRequests, setPendingPublishRequests] = React.useState<PublishRequest[]>([]);
   const [selectedPublishRequest, setSelectedPublishRequest] = React.useState<PublishRequest | null>(null);
@@ -376,13 +380,21 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
 
   // Handle undo turn
   const handleUndoTurn = async (turnId: string) => {
+    setUndoing(true);
     try {
       await studioApi.undoTurn({ turnId });
       setUndoTurnTarget(null);
       // Remove undone messages
       setMessages((prev) => prev.filter((m) => m.turnId !== turnId));
+      // Show result toast
+      setUndoToast("Đã hoàn tác lượt thành công! Các tệp đã được khôi phục về điểm kiểm soát trước đó.");
+      setTimeout(() => setUndoToast(null), 4000);
+      // Notify parent to reload Stage open file
+      onUndoTurnSuccess?.();
     } catch (err: any) {
       setError(err?.message || "Không thể hoàn tác lượt.");
+    } finally {
+      setUndoing(false);
     }
   };
 
@@ -1053,20 +1065,26 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
                   {msg.turnId && !msg.isStreaming && (
                     <button
                       type="button"
+                      disabled={Boolean(runningTurnId)}
                       onClick={() => setUndoTurnTarget(msg.turnId!)}
                       style={{
                         background: "none",
                         border: "none",
                         padding: "2px 4px",
-                        color: "var(--cs-fg-secondary)",
-                        cursor: "pointer",
+                        color: Boolean(runningTurnId) ? "var(--cs-fg-muted)" : "var(--cs-fg-secondary)",
+                        cursor: Boolean(runningTurnId) ? "not-allowed" : "pointer",
+                        opacity: Boolean(runningTurnId) ? 0.4 : 1,
                         display: "inline-flex",
                         alignItems: "center",
                         gap: 4,
                         fontSize: "var(--cs-text-xs)",
                         borderRadius: "var(--cs-radius-control)",
                       }}
-                      title="Hoàn tác các file đã sửa trong lượt này"
+                      title={
+                        Boolean(runningTurnId)
+                          ? "Không thể hoàn tác khi agent đang chạy một lượt khác"
+                          : "Hoàn tác các file đã sửa trong lượt này"
+                      }
                     >
                       <Icon name="undo" size={12} />
                       <span>Hoàn tác lượt này</span>
@@ -1252,29 +1270,123 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
       </div>
 
       {/* Undo Confirm Dialog */}
-      {undoTurnTarget && (
-        <Dialog
-          title="Xác nhận hoàn tác lượt này?"
-          open={Boolean(undoTurnTarget)}
-          onClose={() => setUndoTurnTarget(null)}
-          actions={
-            <>
-              <Button variant="secondary" onClick={() => setUndoTurnTarget(null)}>
-                Hủy
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() => handleUndoTurn(undoTurnTarget)}
-              >
-                Hoàn tác lượt
-              </Button>
-            </>
-          }
+      {undoTurnTarget && (() => {
+        const targetMsg = messages.find((m) => m.turnId === undoTurnTarget);
+        const files = targetMsg?.fileChanges || [];
+
+        return (
+          <Dialog
+            title="Xác nhận hoàn tác lượt này?"
+            open={Boolean(undoTurnTarget)}
+            onClose={() => setUndoTurnTarget(null)}
+            actions={
+              <>
+                <Button variant="secondary" onClick={() => setUndoTurnTarget(null)} disabled={undoing}>
+                  Hủy
+                </Button>
+                <Button
+                  variant="destructive"
+                  busy={undoing}
+                  busyText="Đang hoàn tác..."
+                  onClick={() => handleUndoTurn(undoTurnTarget)}
+                >
+                  Hoàn tác lượt
+                </Button>
+              </>
+            }
+          >
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <p style={{ margin: 0, fontSize: "var(--cs-text-sm)", lineHeight: 1.5 }}>
+                Thao tác này sẽ khôi phục lại toàn bộ tệp bị thay đổi trong lượt agent này về điểm kiểm soát (checkpoint) ngay trước đó.
+              </p>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <span style={{ fontSize: "var(--cs-text-xs)", fontWeight: 600, color: "var(--cs-fg-secondary)" }}>
+                  Các tệp sẽ được khôi phục ({files.length}):
+                </span>
+                {files.length > 0 ? (
+                  <div
+                    style={{
+                      maxHeight: 160,
+                      overflowY: "auto",
+                      backgroundColor: "var(--cs-bg-raised)",
+                      border: "1px solid var(--cs-border-subtle)",
+                      borderRadius: "var(--cs-radius-control)",
+                      padding: "6px 10px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                    }}
+                  >
+                    {files.map((fc, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--cs-text-xs)" }}>
+                        <Badge
+                          variant={
+                            fc.op === "create"
+                              ? "success"
+                              : fc.op === "delete"
+                              ? "danger"
+                              : "info"
+                          }
+                        >
+                          {fc.op === "create" ? "Tạo mới" : fc.op === "delete" ? "Xóa" : "Sửa đổi"}
+                        </Badge>
+                        <code style={{ fontFamily: "var(--cs-font-mono)", color: "var(--cs-fg-primary)" }}>
+                          {fc.path}
+                        </code>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)", fontStyle: "italic" }}>
+                    Tất cả các tệp source bị thay đổi bởi agent trong lượt này sẽ được hoàn tác.
+                  </div>
+                )}
+              </div>
+            </div>
+          </Dialog>
+        );
+      })()}
+
+      {/* Undo Result Toast */}
+      {undoToast && (
+        <div
+          style={{
+            position: "absolute",
+            top: 16,
+            left: "50%",
+            transform: "translateX(-50%)",
+            backgroundColor: "var(--cs-bg-panel)",
+            border: "1px solid var(--cs-success, #10b981)",
+            boxShadow: "var(--cs-shadow-overlay)",
+            borderRadius: "var(--cs-radius-control)",
+            padding: "8px 16px",
+            zIndex: 100,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: "var(--cs-text-xs)",
+            color: "var(--cs-fg-primary)",
+          }}
         >
-          <p style={{ margin: 0, fontSize: "var(--cs-text-sm)", lineHeight: 1.5 }}>
-            Thao tác này sẽ khôi phục lại toàn bộ tệp source bị thay đổi bởi lượt agent này về điểm kiểm soát (checkpoint) ngay trước đó.
-          </p>
-        </Dialog>
+          <span style={{ color: "var(--cs-success, #10b981)", fontWeight: 700 }}>✓</span>
+          <span>{undoToast}</span>
+          <button
+            type="button"
+            onClick={() => setUndoToast(null)}
+            style={{
+              background: "none",
+              border: "none",
+              color: "var(--cs-fg-muted)",
+              cursor: "pointer",
+              marginLeft: 4,
+              fontSize: 14,
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
       )}
 
       {/* Publish Dialog */}

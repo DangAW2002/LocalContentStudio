@@ -169,7 +169,7 @@ pub const MOTION_STARTER_HTML: &str = r##"<!doctype html>
 </html>
 "##;
 
-pub const TIMELINE_STARTER_JSON: &str = r#"{
+pub const TIMELINE_STARTER: &str = r#"{
   "version": 1,
   "width": 1920,
   "height": 1080,
@@ -178,7 +178,17 @@ pub const TIMELINE_STARTER_JSON: &str = r#"{
     {
       "id": "video-1",
       "kind": "video",
-      "clips": []
+      "clips": [
+        {
+          "id": "clip-video-1",
+          "source": "color:#1e88e5",
+          "in_point": 0.0,
+          "out_point": 5.0,
+          "start": 0.0,
+          "duration": 5.0,
+          "transition": "none"
+        }
+      ]
     },
     {
       "id": "audio-1",
@@ -188,11 +198,26 @@ pub const TIMELINE_STARTER_JSON: &str = r#"{
     {
       "id": "captions-1",
       "kind": "captions",
-      "clips": []
+      "clips": [
+        {
+          "id": "cap-1",
+          "source": "Xin chào! Chào mừng bạn đến với Local Content Studio.",
+          "start": 0.5,
+          "duration": 2.0
+        },
+        {
+          "id": "cap-2",
+          "source": "Dựng video dễ dàng với AI và timeline trực quan.",
+          "start": 2.5,
+          "duration": 2.0
+        }
+      ]
     }
   ]
 }
 "#;
+
+pub const TIMELINE_STARTER_JSON: &str = TIMELINE_STARTER;
 
 pub const TEXT_STARTER_MD: &str = r#"---
 title: Tiêu đề nội dung
