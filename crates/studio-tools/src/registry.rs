@@ -30,10 +30,14 @@ impl Registry {
         Self::default()
     }
 
-    /// Create registry initialized with built-in capabilities and tools.
+    /// Create registry initialized with built-in capabilities and tools, plus app-level installed tools.
     pub fn with_builtins() -> Self {
         let mut reg = Self::new();
         reg.load_builtins();
+        let app_tools_dir = studio_workspace::AppPaths::from_env()
+            .data_dir()
+            .join("tools");
+        reg.load_tools_from_dir(&app_tools_dir);
         reg
     }
 
@@ -59,7 +63,64 @@ impl Registry {
             registry.load_tool_item(&item);
         }
 
+        // 4. Also scan installed tools (<app>/tools/ and <ws>/.studio/tools/)
+        let app_paths = ScopeChain::new(ws);
+        let _ = app_paths;
+        let app_tools_dir = studio_workspace::AppPaths::from_env()
+            .data_dir()
+            .join("tools");
+        registry.load_tools_from_dir(&app_tools_dir);
+
+        let ws_installed_tools = ws.root().join(".studio").join("tools");
+        registry.load_tools_from_dir(&ws_installed_tools);
+
         registry
+    }
+
+    /// Load tools from directory containing `<id>` or `<id>@<version>` subdirectories.
+    pub fn load_tools_from_dir(&mut self, dir: &std::path::Path) {
+        if !dir.exists() || !dir.is_dir() {
+            return;
+        }
+        let entries = match fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let yml = path.join("tool.yaml");
+                let yml_path = if yml.exists() {
+                    yml
+                } else {
+                    path.join("tool.yml")
+                };
+                if yml_path.exists() {
+                    match fs::read_to_string(&yml_path) {
+                        Ok(content) => match serde_yaml::from_str::<ToolManifest>(&content) {
+                            Ok(tool) => {
+                                self.tools.insert(tool.id.clone(), tool);
+                            }
+                            Err(err) => {
+                                self.problems.push(ManifestProblem {
+                                    path: yml_path,
+                                    message: format!(
+                                        "Không thể phân tích cú pháp tệp tool.yaml: {}",
+                                        err
+                                    ),
+                                });
+                            }
+                        },
+                        Err(err) => {
+                            self.problems.push(ManifestProblem {
+                                path: yml_path,
+                                message: format!("Không thể đọc tệp tool.yaml: {}", err),
+                            });
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Get capability by full ID (e.g. `tts.synthesize@1`) or base ID (e.g. `tts.synthesize`).

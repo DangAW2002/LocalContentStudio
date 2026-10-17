@@ -134,6 +134,9 @@ impl SideEffect {
 pub struct ToolManifest {
     /// Unique identifier of the tool (e.g. `echo`, `ffmpeg.probe`).
     pub id: String,
+    /// Tool version (e.g. "1.0.0" or "1").
+    #[serde(default)]
+    pub version: Option<String>,
     /// Tool category.
     pub kind: ToolKind,
     /// Human-readable description.

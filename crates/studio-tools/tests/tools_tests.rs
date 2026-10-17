@@ -127,6 +127,7 @@ fn test_probe_missing_binary() {
     let secret_store = MemoryStore::new();
     let mut tool = ToolManifest {
         id: "test-missing-bin".into(),
+        version: None,
         kind: ToolKind::Checker,
         description: "Test".into(),
         provides: vec![],
@@ -182,6 +183,7 @@ async fn test_secret_only_reaches_env_when_declared() {
     // Tool only asks for ALLOWED_SECRET
     let tool = ToolManifest {
         id: "secret-reader".into(),
+        version: None,
         kind: ToolKind::Generator,
         description: "Echo env test".into(),
         provides: vec!["secret.test@1".into()],
@@ -283,6 +285,7 @@ async fn test_paid_over_budget_needs_approval() {
     let mut reg = Registry::new();
     let paid_tool = ToolManifest {
         id: "expensive-generator".into(),
+        version: None,
         kind: ToolKind::Generator,
         description: "Paid AI generation".into(),
         provides: vec!["video.gen@1".into()],
