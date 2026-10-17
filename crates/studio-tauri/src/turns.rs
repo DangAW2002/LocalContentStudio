@@ -8,7 +8,6 @@ use serde_json::{json, Value};
 use studio_engine::{DoneStatus, Engine, Event, FileOp, McpHttp, SessionRef, Turn, TurnRequest};
 use studio_mcp::{EngineKind as McpEngine, TurnContext};
 use studio_workspace::{CheckpointService, Project, Workspace, WorkspaceDb};
-use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Notify;
 
 use crate::error::{CmdError, CmdResult};
@@ -121,8 +120,8 @@ pub fn persist(db: &WorkspaceDb, turn_id: &str, event: &Value) -> CmdResult<()> 
     Ok(())
 }
 
-fn emit(app: &AppHandle, thread_id: &str, turn_id: &str, event: &Value) {
-    let _ = app.emit(
+fn emit(state: &AppState, thread_id: &str, turn_id: &str, event: &Value) {
+    state.emit(
         "turn-event",
         json!({ "threadId": thread_id, "turnId": turn_id, "event": event }),
     );
@@ -206,12 +205,7 @@ fn load_thread(db: &WorkspaceDb, thread_id: &str) -> CmdResult<ThreadRow> {
 }
 
 /// Start a turn and return its id; events stream to the UI as `turn-event`.
-pub async fn start_turn(
-    app: AppHandle,
-    state: &AppState,
-    thread_id: String,
-    prompt: String,
-) -> CmdResult<String> {
+pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> CmdResult<String> {
     let ws = state.workspace()?;
     let db = WorkspaceDb::open(&ws)?;
     let thread = load_thread(&db, &thread_id)?;
@@ -241,7 +235,7 @@ pub async fn start_turn(
     )?;
     let prompt_event = json!({ "type": "UserPrompt", "text": prompt });
     persist(&db, &turn_id, &prompt_event)?;
-    emit(&app, &thread_id, &turn_id, &prompt_event);
+    emit(&state, &thread_id, &turn_id, &prompt_event);
 
     let project = thread
         .project
@@ -255,7 +249,7 @@ pub async fn start_turn(
     let plugin_dir = if is_claude {
         let dir = ws.cache_dir().join("plugins").join(&turn_id);
         match materialize_skills(
-            state,
+            &state,
             meta.as_ref().and_then(|m| m.kit.clone()),
             &modules,
             &dir,
@@ -263,7 +257,7 @@ pub async fn start_turn(
             Ok(()) => Some(dir),
             Err(e) => {
                 let note = json!({ "type": "Text", "text": format!("(Không nạp được skill của kit: {e})") });
-                emit(&app, &thread_id, &turn_id, &note);
+                emit(&state, &thread_id, &turn_id, &note);
                 None
             }
         }
@@ -331,7 +325,7 @@ pub async fn start_turn(
                 json!({ "type": "Done", "status": "error" }),
             ] {
                 let _ = persist(&db, &turn_id, &ev);
-                emit(&app, &thread_id, &turn_id, &ev);
+                emit(&state, &thread_id, &turn_id, &ev);
             }
             db.conn().execute(
                 "UPDATE turns SET status = 'error', completed_at = ?2 WHERE id = ?1",
@@ -354,7 +348,7 @@ pub async fn start_turn(
         );
     }
     let ctx = TurnTask {
-        app,
+        state: state.clone(),
         ws_root: ws.root().to_path_buf(),
         thread_id,
         turn_id: turn_id.clone(),
@@ -393,7 +387,7 @@ fn materialize_skills(
 }
 
 struct TurnTask {
-    app: AppHandle,
+    state: AppState,
     ws_root: PathBuf,
     thread_id: String,
     turn_id: String,
@@ -449,7 +443,7 @@ async fn run_turn(t: TurnTask, mut turn: Turn, cancel: Arc<Notify>) {
                     _ => {}
                 }
                 let Some(ui) = to_ui_event(&ev, &t.ws_root) else { continue };
-                emit(&t.app, &t.thread_id, &t.turn_id, &ui);
+                emit(&t.state, &t.thread_id, &t.turn_id, &ui);
                 if !matches!(ev, Event::TextDelta(_) | Event::Text(_) | Event::Session { .. }) {
                     save(&ui);
                 }
@@ -461,7 +455,7 @@ async fn run_turn(t: TurnTask, mut turn: Turn, cancel: Arc<Notify>) {
                     save(&json!({ "type": "Text", "text": text }));
                 }
                 let done = json!({ "type": "Done", "status": "cancelled" });
-                emit(&t.app, &t.thread_id, &t.turn_id, &done);
+                emit(&t.state, &t.thread_id, &t.turn_id, &done);
                 save(&done);
                 break;
             }
@@ -476,7 +470,7 @@ async fn run_turn(t: TurnTask, mut turn: Turn, cancel: Arc<Notify>) {
                 save(&json!({ "type": "Text", "text": text }));
             }
             let done = json!({ "type": "Done", "status": "error", "text": "Engine kết thúc mà không trả kết quả." });
-            emit(&t.app, &t.thread_id, &t.turn_id, &done);
+            emit(&t.state, &t.thread_id, &t.turn_id, &done);
             save(&done);
             "error"
         }
@@ -529,7 +523,7 @@ async fn run_turn(t: TurnTask, mut turn: Turn, cancel: Arc<Notify>) {
                         "UPDATE events SET payload_json = ?2 WHERE id = ?1",
                         params![id, payload.to_string()],
                     );
-                    emit(&t.app, &t.thread_id, &t.turn_id, &payload);
+                    emit(&t.state, &t.thread_id, &t.turn_id, &payload);
                 }
             } else {
                 let usage_ev = json!({
@@ -541,11 +535,11 @@ async fn run_turn(t: TurnTask, mut turn: Turn, cancel: Arc<Notify>) {
                     "estimatedCostUsd": cap_cost,
                 });
                 let _ = persist(db, &t.turn_id, &usage_ev);
-                emit(&t.app, &t.thread_id, &t.turn_id, &usage_ev);
+                emit(&t.state, &t.thread_id, &t.turn_id, &usage_ev);
             }
         }
     });
-    let state = t.app.state::<AppState>();
+    let state = &t.state;
     state.tokens.revoke(&t.token);
     state.broker.unregister_turn(&t.turn_id);
     if let Ok(mut turns) = state.turns.lock() {

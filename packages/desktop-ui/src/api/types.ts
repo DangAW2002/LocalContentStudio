@@ -745,10 +745,30 @@ export interface YoutubeClientStatus {
   configured: boolean;
   clientIdLast6?: string;
 }
-
 export interface YoutubeDisconnectResult {
   success: boolean;
   revokeUrl: string;
 }
 
+// ==========================================
+// Web Mode (Chế độ web cá nhân) Types
+// ==========================================
 
+export interface WebStatus {
+  enabled: boolean;
+  lan_allowed: boolean;
+  port: number;
+  has_password: boolean;
+  local_url?: string;
+  lan_url?: string;
+  lan_ip?: string;
+  qr_code_svg?: string;
+  active_sessions: number;
+}
+
+export interface WebConfigureRequest {
+  enabled?: boolean;
+  lan_allowed?: boolean;
+  port?: number;
+  password?: string;
+}

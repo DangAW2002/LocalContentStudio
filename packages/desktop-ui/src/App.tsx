@@ -11,6 +11,7 @@ import { ProjectView } from "./views/ProjectView";
 import { BrandView } from "./views/BrandView";
 import { LibraryView } from "./views/LibraryView";
 import { SettingsView } from "./views/SettingsView";
+import { WebAuthModal } from "./components/WebAuthModal";
 import { studioApi } from "./api/client";
 import type {
   WorkspaceSummary,
@@ -399,6 +400,9 @@ export const App: React.FC = () => {
         onOpenWorkspace={handleOpenWorkspace}
         onCreateWorkspace={handleCreateWorkspace}
       />
+
+      {/* Web Mode Auth & Sudo Dialogs */}
+      <WebAuthModal onLoginSuccess={loadWorkspaceAndCore} />
     </div>
   );
 };

@@ -10,6 +10,7 @@ mod error;
 mod publish;
 mod state;
 mod turns;
+pub mod web_dispatch;
 
 use std::sync::Arc;
 
@@ -27,6 +28,7 @@ fn main() {
         .setup(|app| {
             let handle = app.handle().clone();
             let state = app.state::<AppState>();
+            let _ = state.app_handle.set(handle.clone());
             state.broker.attach(handle.clone());
             if let Err(e) = defaults::install(&state.app_paths.shared_dir(), &state.catalog_path, &state.sources_dir) {
                 eprintln!("Không cài được dữ liệu mặc định: {e}");
@@ -71,12 +73,11 @@ fn main() {
                 let _ = commands::workspace_open(handle.clone(), app.state::<AppState>(), path);
             }
 
-            // Subscribe to scheduler events and emit "job-event" to the frontend.
+            // Subscribe to scheduler events and emit "job-event" to the frontend (Tauri + SSE).
             let mut job_rx = state.scheduler.subscribe();
-            let job_handle = handle.clone();
+            let state_events = (*state).clone();
             tauri::async_runtime::spawn(async move {
                 use serde_json::json;
-                use tauri::Emitter;
 
                 loop {
                     let evt = match job_rx.recv().await {
@@ -119,9 +120,32 @@ fn main() {
                             "error": if evt.state == studio_jobs::event::JobState::Failed { evt.message.clone() } else { None },
                         }
                     });
-                    let _ = job_handle.emit("job-event", payload);
+                    state_events.emit("job-event", payload);
                 }
             });
+
+            // Check if personal web mode is enabled and password is set. If so, start the web server.
+            let web_enabled = state
+                .app_paths
+                .open_app_db()
+                .ok()
+                .and_then(|db| db.get_setting("web:enabled").ok().flatten())
+                .map(|v| v == "true")
+                .unwrap_or(false);
+            let has_pw = state
+                .app_paths
+                .open_app_db()
+                .ok()
+                .and_then(|db| db.get_setting("web:password_hash").ok().flatten())
+                .is_some();
+            if web_enabled && has_pw {
+                let state_web = (*state).clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = web_dispatch::start_web_server(&state_web).await {
+                        eprintln!("Không thể tự động khởi động máy chủ web: {e}");
+                    }
+                });
+            }
 
             Ok(())
         })
@@ -179,6 +203,8 @@ fn main() {
             commands::tool_install_confirm,
             commands::tool_list_installed,
             commands::tool_uninstall,
+            commands::web_status,
+            commands::web_configure,
             publish::publish_prepare,
             publish::publish_list,
             publish::publish_get,

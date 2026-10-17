@@ -6,8 +6,39 @@
  * Fails safely with "Chưa kết nối Studio core" when core is absent.
  */
 
-import { invoke, listen } from "@tauri-apps/api";
+import {
+  invoke,
+  listen,
+  isTauri,
+  uploadFile,
+  checkAuthStatus,
+  login,
+  logout,
+  verifySudo,
+  registerSudoHandler,
+  type EventCallback,
+  type UnlistenFn,
+  type WebAuthStatus,
+} from "./tauri-bridge";
+
+export {
+  isTauri,
+  uploadFile,
+  checkAuthStatus,
+  login,
+  logout,
+  verifySudo,
+  registerSudoHandler,
+  type EventCallback,
+  type UnlistenFn,
+  type WebAuthStatus,
+};
+
+export type { WebStatus, WebConfigureRequest };
+
 import type {
+  WebStatus,
+  WebConfigureRequest,
   WorkspaceSummary,
   WorkspaceCreateRequest,
   WorkspaceOpenRequest,
@@ -153,7 +184,14 @@ export class StudioApiClient {
    * Command: `file_read`
    */
   async readFile(req: FileReadRequest): Promise<FileReadResult> {
-    return invoke<FileReadResult>("file_read", { ...req });
+    const res = await invoke<FileReadResult>("file_read", { ...req });
+    if (!isTauri() && res) {
+      const q = new URLSearchParams();
+      q.set("path", req.path);
+      if (req.project) q.set("project", req.project);
+      res.assetUrl = `/api/file?${q.toString()}`;
+    }
+    return res;
   }
 
   // ==========================================
@@ -305,7 +343,16 @@ export class StudioApiClient {
    * Command: `asset_list`
    */
   async getAssets(filter?: AssetListFilter): Promise<AssetItem[]> {
-    return invoke<AssetItem[]>("asset_list", { filter });
+    const items = await invoke<AssetItem[]>("asset_list", { filter });
+    if (!isTauri() && Array.isArray(items)) {
+      for (const item of items) {
+        if (item.previewUrl) {
+          const q = new URLSearchParams({ path: item.path });
+          item.previewUrl = `/api/file?${q.toString()}`;
+        }
+      }
+    }
+    return items;
   }
 
   // ==========================================
@@ -566,6 +613,26 @@ export class StudioApiClient {
    */
   async youtubeChannelDisconnect(channelId: string): Promise<YoutubeDisconnectResult> {
     return invoke<YoutubeDisconnectResult>("youtube_channel_disconnect", { channelId });
+  }
+
+  // ==========================================
+  // Personal Web Mode (Chế độ web cá nhân)
+  // ==========================================
+
+  /**
+   * Get web mode status (active port, LAN IP/URL, QR code SVG, active sessions).
+   * Command: `web_status`
+   */
+  async webStatus(): Promise<WebStatus> {
+    return invoke<WebStatus>("web_status");
+  }
+
+  /**
+   * Configure web mode (enable/disable, LAN toggle, port, password).
+   * Command: `web_configure`
+   */
+  async webConfigure(req: WebConfigureRequest): Promise<WebStatus> {
+    return invoke<WebStatus>("web_configure", { ...req });
   }
 }
 
