@@ -10,6 +10,7 @@ import type {
   ProjectFileEntry,
   ThreadSummary,
   ScopeItem,
+  ArtifactSummary,
 } from "../api/types";
 
 export interface ProjectViewProps {
@@ -29,9 +30,25 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   const [activeThreadId, setActiveThreadId] = React.useState<string>(initialThreadId || "");
   const [projectFiles, setProjectFiles] = React.useState<ProjectFileEntry[]>([]);
   const [playbooks, setPlaybooks] = React.useState<ScopeItem[]>([]);
+  const [artifacts, setArtifacts] = React.useState<ArtifactSummary[]>([]);
   const [selectedFilePath, setSelectedFilePath] = React.useState<string | null>(null);
   const [pendingInsert, setPendingInsert] = React.useState<string | null>(null);
   const [stageReloadNonce, setStageReloadNonce] = React.useState(0);
+
+  const refreshArtifacts = React.useCallback(async () => {
+    if (!currentSlug) return [];
+    try {
+      const [artList, fileList] = await Promise.all([
+        studioApi.listArtifacts(currentSlug).catch(() => []),
+        studioApi.getProjectFiles(currentSlug).catch(() => []),
+      ]);
+      setArtifacts(artList);
+      setProjectFiles(fileList);
+      return artList;
+    } catch {
+      return [];
+    }
+  }, [currentSlug]);
 
   // Layout states: resizable & narrow tab mode
   const [threadWidth, setThreadWidth] = React.useState(380);
@@ -86,16 +103,18 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
     let isMounted = true;
     const loadProjectData = async () => {
       try {
-        const [threadList, fileList, pbList] = await Promise.all([
+        const [threadList, fileList, pbList, artList] = await Promise.all([
           studioApi.getThreads(currentSlug).catch(() => []),
           studioApi.getProjectFiles(currentSlug).catch(() => []),
           studioApi.getScopeItems("playbooks").catch(() => []),
+          studioApi.listArtifacts(currentSlug).catch(() => []),
         ]);
 
         if (isMounted) {
           setThreads(threadList);
           setProjectFiles(fileList);
           setPlaybooks(pbList);
+          setArtifacts(artList);
 
           if (!activeThreadId && threadList.length > 0) {
             setActiveThreadId(threadList[0].id);
@@ -255,6 +274,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                   onAskAi={handleAskAi}
                   onSelectFile={setSelectedFilePath}
                   reloadNonce={stageReloadNonce}
+                  artifacts={artifacts}
+                  onRefreshArtifacts={refreshArtifacts}
                 />
               </PaneBoundary>
             )}
@@ -263,6 +284,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 <OutputsPane
                   projectSlug={currentSlug}
                   projectFiles={projectFiles}
+                  artifacts={artifacts}
+                  onRefreshArtifacts={refreshArtifacts}
                   onSelectFile={(path) => {
                     setSelectedFilePath(path);
                     setNarrowTab("stage");
@@ -301,6 +324,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                   onAskAi={handleAskAi}
                   onSelectFile={setSelectedFilePath}
                   reloadNonce={stageReloadNonce}
+                  artifacts={artifacts}
+                  onRefreshArtifacts={refreshArtifacts}
                 />
               </PaneBoundary>
             </div>
@@ -311,6 +336,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 <OutputsPane
                   projectSlug={currentSlug}
                   projectFiles={projectFiles}
+                  artifacts={artifacts}
+                  onRefreshArtifacts={refreshArtifacts}
                   onSelectFile={setSelectedFilePath}
                 />
               </PaneBoundary>

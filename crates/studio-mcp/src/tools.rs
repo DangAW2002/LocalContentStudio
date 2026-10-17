@@ -82,15 +82,92 @@ fn required<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
     arg(args, key).ok_or_else(|| format!("Thiếu tham số \"{key}\"."))
 }
 
+/// Strip Windows verbatim prefixes (`\\?\` or `\\?\UNC\`) and convert backslashes to forward slashes.
+pub fn clean_to_forward_slashes(s: &str) -> String {
+    let s_norm = s.replace('\\', "/");
+    if let Some(rest) = s_norm.strip_prefix("//?/") {
+        if let Some(unc_rest) = rest
+            .strip_prefix("UNC/")
+            .or_else(|| rest.strip_prefix("unc/"))
+        {
+            return format!("//{unc_rest}");
+        }
+        return rest.to_string();
+    }
+    s_norm
+}
+
+/// Clean workspace root path: strip verbatim prefix, convert slashes, trim trailing slash.
+pub fn clean_workspace_root(ws_root: &Path) -> String {
+    let clean = clean_to_forward_slashes(&ws_root.to_string_lossy());
+    clean.trim_end_matches('/').to_string()
+}
+
+/// If a string points inside the workspace root (with or without `\\?\`, either slash style,
+/// case-insensitive drive), return the workspace-relative forward-slash path.
+/// If the string is outside the workspace or not a path pointing inside, return None.
+pub fn normalise_path_str(ws_root: &Path, s: &str) -> Option<String> {
+    let ws_clean = clean_workspace_root(ws_root);
+    if ws_clean.is_empty() {
+        return None;
+    }
+    let s_clean = clean_to_forward_slashes(s);
+    if s_clean.len() < ws_clean.len() {
+        return None;
+    }
+
+    // `get` (not indexing): the cut may fall inside a multi-byte char (Vietnamese folder names).
+    let prefix = s_clean.get(..ws_clean.len())?;
+    if !prefix.eq_ignore_ascii_case(&ws_clean) {
+        return None;
+    }
+
+    if s_clean.len() == ws_clean.len() {
+        return Some(String::new());
+    }
+
+    if s_clean.as_bytes()[ws_clean.len()] == b'/' {
+        let rel = &s_clean[ws_clean.len() + 1..];
+        return Some(rel.trim_start_matches('/').to_string());
+    }
+
+    None
+}
+
+/// Recursively normalise every string value in a JSON Value that points inside the workspace
+/// to a workspace-relative forward-slash path. Leaves strings outside the workspace untouched.
+pub fn normalise_workspace_paths(ws_root: &Path, value: &mut Value) {
+    match value {
+        Value::String(s) => {
+            if let Some(rel) = normalise_path_str(ws_root, s) {
+                *s = rel;
+            }
+        }
+        Value::Array(arr) => {
+            for v in arr {
+                normalise_workspace_paths(ws_root, v);
+            }
+        }
+        Value::Object(map) => {
+            let old_map = std::mem::take(map);
+            for (k, mut v) in old_map {
+                normalise_workspace_paths(ws_root, &mut v);
+                let new_k = normalise_path_str(ws_root, &k).unwrap_or(k);
+                map.insert(new_k, v);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn rel(ws: &Workspace, p: &Path) -> String {
-    p.strip_prefix(ws.root())
-        .unwrap_or(p)
-        .to_string_lossy()
-        .replace('\\', "/")
+    normalise_path_str(ws.root(), &p.to_string_lossy())
+        .unwrap_or_else(|| p.to_string_lossy().replace('\\', "/"))
 }
 
 /// Write a large result to the cache and return a pointer value instead.
-fn inline_or_file(ws: &Workspace, value: Value) -> Value {
+fn inline_or_file(ws: &Workspace, mut value: Value) -> Value {
+    normalise_workspace_paths(ws.root(), &mut value);
     let text = value.to_string();
     if text.len() <= MAX_INLINE {
         return value;
@@ -901,4 +978,115 @@ fn resolve_artifact_target(
     }
 
     Ok((target_proj, art_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn test_normalise_path_str_verbatim() {
+        let ws = Path::new(r"\\?\D:\Studio\workspace");
+        let input = r"\\?\D:\Studio\workspace\projects\p1\artifact.yaml";
+        let norm = normalise_path_str(ws, input);
+        assert_eq!(norm, Some("projects/p1/artifact.yaml".to_string()));
+    }
+
+    #[test]
+    fn test_normalise_path_str_normal() {
+        let ws = Path::new(r"D:\Studio\workspace");
+        let input = "D:/Studio/workspace/projects/p1/artifact.yaml";
+        let norm = normalise_path_str(ws, input);
+        assert_eq!(norm, Some("projects/p1/artifact.yaml".to_string()));
+    }
+
+    #[test]
+    fn test_normalise_path_str_mixed_slashes() {
+        let ws = Path::new(r"D:/Studio/workspace");
+        let input = r"D:\Studio/workspace\projects/p1\artifacts\thumb.png";
+        let norm = normalise_path_str(ws, input);
+        assert_eq!(norm, Some("projects/p1/artifacts/thumb.png".to_string()));
+    }
+
+    #[test]
+    fn test_normalise_path_str_case_insensitive_drive() {
+        let ws = Path::new(r"D:\Studio\workspace");
+        let input = r"\\?\d:\Studio\workspace\projects\p1\file.txt";
+        let norm = normalise_path_str(ws, input);
+        assert_eq!(norm, Some("projects/p1/file.txt".to_string()));
+
+        let ws_lower = Path::new(r"d:\Studio\workspace");
+        let input_upper = r"D:\Studio\workspace\projects\p1\file.txt";
+        let norm2 = normalise_path_str(ws_lower, input_upper);
+        assert_eq!(norm2, Some("projects/p1/file.txt".to_string()));
+    }
+
+    #[test]
+    fn test_normalise_path_str_multibyte_no_panic() {
+        let ws = Path::new(r"D:\Studio\ws1");
+        assert_eq!(normalise_path_str(ws, "D:/Studio/wsđường dẫn/x.png"), None);
+        assert_eq!(
+            normalise_path_str(ws, "D:/Studio/ws1/dự án/ảnh.png").as_deref(),
+            Some("dự án/ảnh.png")
+        );
+    }
+
+    #[test]
+    fn test_normalise_path_str_outside_path() {
+        let ws = Path::new(r"D:\Studio\workspace");
+        let outside1 = r"\\?\C:\Windows\System32\cmd.exe";
+        assert_eq!(normalise_path_str(ws, outside1), None);
+
+        let outside2 = r"D:\Other\Folder\file.txt";
+        assert_eq!(normalise_path_str(ws, outside2), None);
+
+        let outside3 = r"D:\Studio\workspace_sibling\file.txt";
+        assert_eq!(normalise_path_str(ws, outside3), None);
+
+        let non_path = "hello world";
+        assert_eq!(normalise_path_str(ws, non_path), None);
+    }
+
+    #[test]
+    fn test_normalise_workspace_paths_nested() {
+        let ws = Path::new(r"\\?\D:\Studio\ws1");
+        let mut json = json!({
+            "status": "ok",
+            "artifact": {
+                "source": r"\\?\D:\Studio\ws1\projects\p1\timeline.json",
+                "renders": [
+                    r"\\?\d:\Studio\ws1\projects\p1\renders\out.mp4",
+                    "D:/Studio/ws1/projects/p1/renders/thumb.png",
+                    r"D:\Studio/ws1\projects\p1/renders\thumb.webp",
+                    r"C:\Windows\temp\outside.log"
+                ]
+            },
+            "unrelated": "text string",
+            "number": 42
+        });
+
+        normalise_workspace_paths(ws, &mut json);
+
+        assert_eq!(json["artifact"]["source"], "projects/p1/timeline.json");
+        assert_eq!(
+            json["artifact"]["renders"][0],
+            "projects/p1/renders/out.mp4"
+        );
+        assert_eq!(
+            json["artifact"]["renders"][1],
+            "projects/p1/renders/thumb.png"
+        );
+        assert_eq!(
+            json["artifact"]["renders"][2],
+            "projects/p1/renders/thumb.webp"
+        );
+        assert_eq!(
+            json["artifact"]["renders"][3],
+            r"C:\Windows\temp\outside.log"
+        );
+        assert_eq!(json["status"], "ok");
+        assert_eq!(json["unrelated"], "text string");
+        assert_eq!(json["number"], 42);
+    }
 }
