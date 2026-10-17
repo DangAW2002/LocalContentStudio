@@ -16,8 +16,18 @@ import type {
   ToolInstallScope,
 } from "../api/types";
 
-export const SettingsView: React.FC = () => {
-  const [activeTab, setActiveTab] = React.useState<"engines" | "tools" | "env" | "catalog" | "jobs" | "disk" | "api-keys">("engines");
+export interface SettingsViewProps {
+  initialTab?: "engines" | "tools" | "env" | "catalog" | "jobs" | "disk" | "api-keys";
+}
+
+export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engines" }) => {
+  const [activeTab, setActiveTab] = React.useState<"engines" | "tools" | "env" | "catalog" | "jobs" | "disk" | "api-keys">(initialTab);
+
+  React.useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
   const [engines, setEngines] = React.useState<EngineProbeResult[]>([]);
   const [installedTools, setInstalledTools] = React.useState<InstalledToolInfo[]>([]);
   const [installModalOpen, setInstallModalOpen] = React.useState<"folder" | "url" | null>(null);
@@ -501,9 +511,15 @@ export const SettingsView: React.FC = () => {
                                 <div style={{ fontWeight: 600, fontSize: "var(--cs-text-sm)", marginBottom: 4 }}>
                                   Tích hợp Antigravity (agy) MCP
                                 </div>
-                                <p style={{ margin: "0 0 10px 0", fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)", lineHeight: 1.5 }}>
-                                  Đăng ký MCP server <code>studio</code> toàn cục vào agy và thêm quy tắc cho phép <code>mcp(studio)</code> để agy tự động kết nối và điều khiển Studio MCP shim.
+                                <p style={{ margin: "0 0 8px 0", fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)", lineHeight: 1.5 }}>
+                                  Tự động kết nối Studio MCP với Antigravity (agy) và cấp quyền sử dụng các công cụ trong dự án.
                                 </p>
+                                <details style={{ margin: "0 0 10px 0", fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
+                                  <summary style={{ cursor: "pointer", userSelect: "none" }}>Chi tiết cấu hình agy</summary>
+                                  <div style={{ marginTop: 4, paddingLeft: 8, borderLeft: "2px solid var(--cs-border-subtle)" }}>
+                                    Đăng ký MCP server <code>studio</code> và thêm quy tắc cho phép <code>mcp(studio/*)</code> vào tệp <code>settings.json</code> của agy.
+                                  </div>
+                                </details>
                                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                                   <Button
                                     size="sm"
@@ -814,61 +830,101 @@ export const SettingsView: React.FC = () => {
                 />
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-3)" }}>
-                  {installedTools.map((tool) => (
-                    <div
-                      key={`${tool.id}@${tool.version}`}
-                      style={{
-                        padding: "var(--cs-space-4)",
-                        backgroundColor: "var(--cs-bg-panel)",
-                        border: "1px solid var(--cs-border-subtle)",
-                        borderRadius: "var(--cs-radius-control)",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 10,
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <Icon name="tool" size={16} color="var(--cs-accent)" />
-                          <span style={{ fontWeight: 700, fontSize: "var(--cs-text-sm)" }}>
-                            {tool.id}
-                          </span>
-                          <span style={{ fontSize: "var(--cs-text-xs)", fontFamily: "var(--cs-font-mono)", color: "var(--cs-fg-muted)" }}>
-                            v{tool.version}
-                          </span>
-                          <Badge variant={tool.scope.includes("Built-in") ? "neutral" : "info"}>
-                            {tool.scope}
-                          </Badge>
-                          <Badge variant={tool.probe.available ? "success" : "warning"}>
-                            {tool.probe.available ? "Sẵn sàng" : "Thiếu phụ thuộc"}
-                          </Badge>
+                  {installedTools.map((tool) => {
+                    const isBuiltin =
+                      !tool.version ||
+                      tool.version === "builtin" ||
+                      tool.scope?.toLowerCase().includes("builtin") ||
+                      tool.scope?.toLowerCase().includes("có sẵn");
+
+                    const isRealSemver =
+                      !!tool.version &&
+                      tool.version !== "builtin" &&
+                      /^\d+(\.\d+)*(-.+)?$/.test(tool.version.trim());
+
+                    const note = (tool.probe.noteVi || tool.probe.note_vi || "").trim();
+                    let probeText = "";
+                    if (note.length > 0) {
+                      probeText = note;
+                    } else if (tool.probe.missing && tool.probe.missing.length > 0) {
+                      probeText = `Thiếu: ${tool.probe.missing.join(", ")}`;
+                    } else if (tool.probe.available) {
+                      probeText = "Sẵn sàng";
+                    }
+
+                    return (
+                      <div
+                        key={`${tool.id}@${tool.version || "builtin"}`}
+                        style={{
+                          padding: "var(--cs-space-4)",
+                          backgroundColor: "var(--cs-bg-panel)",
+                          border: "1px solid var(--cs-border-subtle)",
+                          borderRadius: "var(--cs-radius-control)",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 10,
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <Icon name="tool" size={16} color="var(--cs-accent)" />
+                            <span style={{ fontWeight: 700, fontSize: "var(--cs-text-sm)" }}>
+                              {tool.id}
+                            </span>
+                            {isBuiltin ? (
+                              <Badge variant="neutral">Có sẵn</Badge>
+                            ) : (
+                              <>
+                                {tool.version && (
+                                  <span style={{ fontSize: "var(--cs-text-xs)", fontFamily: "var(--cs-font-mono)", color: "var(--cs-fg-muted)" }}>
+                                    {isRealSemver ? `v${tool.version}` : tool.version}
+                                  </span>
+                                )}
+                                <Badge variant="info">
+                                  {tool.scope}
+                                </Badge>
+                              </>
+                            )}
+                            <Badge variant={tool.probe.available ? "success" : "warning"}>
+                              {tool.probe.available ? "Sẵn sàng" : "Thiếu phụ thuộc"}
+                            </Badge>
+                          </div>
+
+                          {tool.canUninstall && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => handleUninstall(tool)}
+                              leftIcon={<Icon name="trash" size={12} />}
+                            >
+                              Gỡ bỏ
+                            </Button>
+                          )}
                         </div>
 
-                        {tool.canUninstall && (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => handleUninstall(tool)}
-                            leftIcon={<Icon name="trash" size={12} />}
-                          >
-                            Gỡ bỏ
-                          </Button>
-                        )}
-                      </div>
+                        <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)" }}>
+                          {tool.manifest.description || "Không có mô tả"}
+                        </div>
 
-                      <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)" }}>
-                        {tool.manifest.description || "Không có mô tả"}
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
+                          {tool.manifest.run?.command && (
+                            <span>Lệnh: <code style={{ color: "var(--cs-fg-primary)" }}>{tool.manifest.run?.command}</code></span>
+                          )}
+                          {tool.manifest.provides?.length > 0 && (
+                            <span>Cung cấp: {tool.manifest.provides.join(", ")}</span>
+                          )}
+                          {probeText.length > 0 && (
+                            <span>
+                              Trạng thái probe:{" "}
+                              <strong style={{ color: tool.probe.available ? "var(--cs-success)" : "var(--cs-warning)" }}>
+                                {probeText}
+                              </strong>
+                            </span>
+                          )}
+                        </div>
                       </div>
-
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
-                        <span>Lệnh: <code style={{ color: "var(--cs-fg-primary)" }}>{tool.manifest.run?.command}</code></span>
-                        {tool.manifest.provides?.length > 0 && (
-                          <span>Cung cấp: {tool.manifest.provides.join(", ")}</span>
-                        )}
-                        <span>Trạng thái probe: <strong style={{ color: tool.probe.available ? "var(--cs-success)" : "var(--cs-warning)" }}>{tool.probe.noteVi}</strong></span>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

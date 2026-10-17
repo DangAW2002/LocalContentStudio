@@ -261,13 +261,36 @@ export const App: React.FC = () => {
     await loadWorkspaceAndCore();
   };
 
+  const [settingsTab, setSettingsTab] = React.useState<"engines" | "tools" | "env" | "catalog" | "jobs" | "disk" | "api-keys">("engines");
+
+  const handleNavigateSettings = React.useCallback((tab?: string) => {
+    if (tab) {
+      setSettingsTab(tab as any);
+    }
+    setActiveArea("settings");
+  }, []);
+
+  React.useEffect(() => {
+    const handleNavEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{ area?: ShellArea; tab?: string }>;
+      if (customEvent.detail?.area) {
+        if (customEvent.detail.area === "settings" && customEvent.detail.tab) {
+          setSettingsTab(customEvent.detail.tab as any);
+        }
+        setActiveArea(customEvent.detail.area);
+      }
+    };
+    window.addEventListener("studio:navigate", handleNavEvent);
+    return () => window.removeEventListener("studio:navigate", handleNavEvent);
+  }, []);
+
   const renderActiveView = () => {
     switch (activeArea) {
       case "home":
         return (
           <HomeView
             onOpenProject={handleOpenProjectFromHome}
-            onNavigateSettings={() => setActiveArea("settings")}
+            onNavigateSettings={() => handleNavigateSettings("engines")}
           />
         );
       case "projects":
@@ -275,6 +298,7 @@ export const App: React.FC = () => {
           <ProjectView
             initialSlug={activeProjectSlug}
             initialThreadId={activeThreadId}
+            onNavigateSettings={handleNavigateSettings}
           />
         );
       case "brand":
@@ -282,7 +306,7 @@ export const App: React.FC = () => {
       case "library":
         return <LibraryView />;
       case "settings":
-        return <SettingsView />;
+        return <SettingsView initialTab={settingsTab} />;
     }
   };
 

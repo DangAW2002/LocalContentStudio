@@ -15,11 +15,13 @@ import type {
 export interface ProjectViewProps {
   initialSlug?: string;
   initialThreadId?: string;
+  onNavigateSettings?: (tab?: string) => void;
 }
 
 export const ProjectView: React.FC<ProjectViewProps> = ({
   initialSlug,
   initialThreadId,
+  onNavigateSettings,
 }) => {
   const [projects, setProjects] = React.useState<ProjectSummary[]>([]);
   const [currentSlug, setCurrentSlug] = React.useState<string>(initialSlug || "");
@@ -227,42 +229,43 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
           <div style={{ flex: 1, height: "100%", overflow: "hidden" }}>
             {narrowTab === "thread" && (
               <PaneBoundary name="Hội thoại">
-<ThreadPane
-                projectSlug={currentSlug}
-                activeThread={activeThread}
-                projectFiles={projectFiles}
-                playbooks={playbooks}
-                pendingInsert={pendingInsert}
-                onInsertConsumed={() => setPendingInsert(null)}
-                onSelectFile={(path) => {
-                  setSelectedFilePath(path);
-                  setNarrowTab("stage");
-                }}
-              />
-</PaneBoundary>
+                <ThreadPane
+                  projectSlug={currentSlug}
+                  activeThread={activeThread}
+                  projectFiles={projectFiles}
+                  playbooks={playbooks}
+                  pendingInsert={pendingInsert}
+                  onInsertConsumed={() => setPendingInsert(null)}
+                  onSelectFile={(path) => {
+                    setSelectedFilePath(path);
+                    setNarrowTab("stage");
+                  }}
+                  onNavigateSettings={onNavigateSettings}
+                />
+              </PaneBoundary>
             )}
             {narrowTab === "stage" && (
               <PaneBoundary name="Stage">
-<StagePane
-                projectSlug={currentSlug}
-                selectedFilePath={selectedFilePath}
-                onClearSelection={() => setSelectedFilePath(null)}
-                onAskAi={handleAskAi}
-                onSelectFile={setSelectedFilePath}
-              />
-</PaneBoundary>
+                <StagePane
+                  projectSlug={currentSlug}
+                  selectedFilePath={selectedFilePath}
+                  onClearSelection={() => setSelectedFilePath(null)}
+                  onAskAi={handleAskAi}
+                  onSelectFile={setSelectedFilePath}
+                />
+              </PaneBoundary>
             )}
             {narrowTab === "outputs" && (
               <PaneBoundary name="Outputs">
-<OutputsPane
-                projectSlug={currentSlug}
-                projectFiles={projectFiles}
-                onSelectFile={(path) => {
-                  setSelectedFilePath(path);
-                  setNarrowTab("stage");
-                }}
-              />
-</PaneBoundary>
+                <OutputsPane
+                  projectSlug={currentSlug}
+                  projectFiles={projectFiles}
+                  onSelectFile={(path) => {
+                    setSelectedFilePath(path);
+                    setNarrowTab("stage");
+                  }}
+                />
+              </PaneBoundary>
             )}
           </div>
         ) : (
@@ -271,16 +274,17 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
             {/* Thread Pane */}
             <div style={{ width: threadWidth, height: "100%", minWidth: 280, maxWidth: 600, flexShrink: 0 }}>
               <PaneBoundary name="Hội thoại">
-<ThreadPane
-                projectSlug={currentSlug}
-                activeThread={activeThread}
-                projectFiles={projectFiles}
-                playbooks={playbooks}
-                pendingInsert={pendingInsert}
-                onInsertConsumed={() => setPendingInsert(null)}
-                onSelectFile={setSelectedFilePath}
-              />
-</PaneBoundary>
+                <ThreadPane
+                  projectSlug={currentSlug}
+                  activeThread={activeThread}
+                  projectFiles={projectFiles}
+                  playbooks={playbooks}
+                  pendingInsert={pendingInsert}
+                  onInsertConsumed={() => setPendingInsert(null)}
+                  onSelectFile={setSelectedFilePath}
+                  onNavigateSettings={onNavigateSettings}
+                />
+              </PaneBoundary>
             </div>
 
             {/* Stage Center Pane */}

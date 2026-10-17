@@ -21,7 +21,7 @@ export const PlainHtmlPreview: React.FC<PlainHtmlPreviewProps> = ({ html }) => {
   const fit = React.useCallback(() => {
     const box = containerRef.current;
     if (!box) return;
-    const padding = 48;
+    const padding = 32;
     const availableW = Math.max(10, box.clientWidth - padding);
     const availableH = Math.max(10, box.clientHeight - padding);
     const s = Math.min(availableW / size.w, availableH / size.h, 1);
@@ -30,8 +30,15 @@ export const PlainHtmlPreview: React.FC<PlainHtmlPreviewProps> = ({ html }) => {
 
   React.useEffect(() => {
     fit();
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => fit());
+    ro.observe(el);
     window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", fit);
+    };
   }, [fit]);
 
   return (
@@ -43,7 +50,8 @@ export const PlainHtmlPreview: React.FC<PlainHtmlPreviewProps> = ({ html }) => {
         minHeight: 0,
         width: "100%",
         height: "100%",
-        overflow: "auto",
+        overflowX: "hidden",
+        overflowY: "auto",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -60,6 +68,7 @@ export const PlainHtmlPreview: React.FC<PlainHtmlPreviewProps> = ({ html }) => {
           flexShrink: 0,
           boxShadow: "var(--cs-shadow-artboard)",
           backgroundColor: "#ffffff",
+          overflow: "hidden",
         }}
       >
         <iframe

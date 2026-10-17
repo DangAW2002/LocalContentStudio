@@ -575,11 +575,13 @@ export const StagePane: React.FC<StagePaneProps> = ({
                   flex: 1,
                   padding: "var(--cs-space-4) var(--cs-space-6)",
                   overflowY: "auto",
+                  overflowX: "hidden",
                   maxWidth: 820,
                   margin: "0 auto",
                   width: "100%",
                   fontSize: "var(--cs-text-sm)",
                   fontFamily: "var(--cs-font-ui)",
+                  boxSizing: "border-box",
                 }}
               >
                 {renderSimpleMarkdown(textValue)}
@@ -624,6 +626,8 @@ export const StagePane: React.FC<StagePaneProps> = ({
             flex: 1,
             width: "100%",
             height: "100%",
+            minWidth: 0,
+            minHeight: 0,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -631,14 +635,15 @@ export const StagePane: React.FC<StagePaneProps> = ({
             overflow: "auto",
             position: "relative",
             padding: "var(--cs-space-4)",
+            boxSizing: "border-box",
           }}
         >
           <img
             src={fileData.assetUrl || (fileData.text ? `data:${fileData.mime};base64,${fileData.text}` : "")}
             alt={selectedFilePath || "Image preview"}
             style={{
-              maxWidth: `${zoom}%`,
-              maxHeight: `${zoom}%`,
+              maxWidth: zoom === 100 ? "100%" : `${zoom}%`,
+              maxHeight: zoom === 100 ? "100%" : `${zoom}%`,
               objectFit: "contain",
               boxShadow: "var(--cs-shadow-artboard)",
               backgroundColor: "var(--cs-canvas-artboard)",
@@ -656,11 +661,15 @@ export const StagePane: React.FC<StagePaneProps> = ({
             flex: 1,
             width: "100%",
             height: "100%",
+            minWidth: 0,
+            minHeight: 0,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             backgroundColor: "var(--cs-bg-canvas)",
             padding: "var(--cs-space-4)",
+            boxSizing: "border-box",
+            overflow: "hidden",
           }}
         >
           <video
@@ -685,6 +694,8 @@ export const StagePane: React.FC<StagePaneProps> = ({
             flex: 1,
             width: "100%",
             height: "100%",
+            minWidth: 0,
+            minHeight: 0,
             display: "flex",
             flexDirection: "column",
             alignItems: "center",
@@ -692,6 +703,8 @@ export const StagePane: React.FC<StagePaneProps> = ({
             backgroundColor: "var(--cs-bg-app)",
             gap: "var(--cs-space-4)",
             padding: "var(--cs-space-4)",
+            boxSizing: "border-box",
+            overflow: "hidden",
           }}
         >
           <Icon name="audio" size={48} color="var(--cs-accent)" />
@@ -958,6 +971,7 @@ export const StagePane: React.FC<StagePaneProps> = ({
           display: "flex",
           flexDirection: "column",
           minHeight: 0,
+          minWidth: 0,
           position: "relative",
           overflow: "hidden",
         }}
