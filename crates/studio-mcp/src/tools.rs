@@ -466,7 +466,13 @@ fn relocate_and_index_generated_files(
     if let Some(files_arr) = output.get("files").and_then(Value::as_array) {
         for f_val in files_arr {
             if let Some(f_str) = f_val.as_str() {
-                if let Ok(src_path) = ws.scoped_path(f_str) {
+                // Providers may return absolute paths (e.g. the importer); make them workspace-relative
+                // first so the same scoping + turn-cache check applies.
+                let rel_str = Path::new(f_str)
+                    .strip_prefix(ws.root())
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_else(|_| f_str.to_string());
+                if let Ok(src_path) = ws.scoped_path(&rel_str) {
                     if src_path.is_file() && src_path.starts_with(&turn_cache) {
                         let filename = src_path
                             .file_name()
