@@ -343,11 +343,191 @@ async fn capability_run(
     let mut errors = Vec::new();
     for provider in &providers {
         match run_tool(&reg, provider, input.clone(), &run_ctx).await {
-            Ok(run) => return Ok(json!({ "provider": provider, "result": run.to_json_output() })),
+            Ok(run) => {
+                let mut output = run.to_json_output();
+                relocate_and_index_generated_files(ws, ctx, provider, &input, &mut output);
+                return Ok(json!({ "provider": provider, "result": output }));
+            }
             Err(e) => errors.push(format!("{provider}: {e}")),
         }
     }
     Err(format!("Mọi provider đều lỗi: {}", errors.join("; ")))
+}
+
+fn relocate_and_index_generated_files(
+    ws: &Workspace,
+    ctx: &TurnContext,
+    provider: &str,
+    input: &Value,
+    output: &mut Value,
+) {
+    // Only files the generator wrote into this turn's cache are moved; paths the agent passed in
+    // (or anything else in the workspace) are never touched.
+    let turn_cache = ws.cache_dir().join("turns").join(&ctx.turn_id);
+    let date_str = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let target_dir = match &ctx.project {
+        Some(proj) => ws
+            .root()
+            .join("projects")
+            .join(proj)
+            .join("assets")
+            .join("generated")
+            .join(&date_str),
+        None => ws.root().join("library").join("generated").join(&date_str),
+    };
+
+    if std::fs::create_dir_all(&target_dir).is_err() {
+        return;
+    }
+
+    let model = output
+        .get("provider_metadata")
+        .and_then(|m| m.get("model"))
+        .and_then(Value::as_str)
+        .map(String::from);
+    let prompt = input
+        .get("prompt")
+        .and_then(Value::as_str)
+        .map(String::from);
+    let cost = output
+        .get("provider_metadata")
+        .and_then(|m| m.get("estimated_cost_usd"))
+        .and_then(Value::as_f64);
+
+    let mut path_map = std::collections::HashMap::new();
+
+    // Check files array
+    if let Some(files_arr) = output.get("files").and_then(Value::as_array) {
+        for f_val in files_arr {
+            if let Some(f_str) = f_val.as_str() {
+                if let Ok(src_path) = ws.scoped_path(f_str) {
+                    if src_path.is_file() && src_path.starts_with(&turn_cache) {
+                        let filename = src_path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "generated_asset".into());
+                        let file_stem = Path::new(&filename)
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("asset");
+                        let file_ext = Path::new(&filename)
+                            .extension()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("");
+
+                        // Unique destination filename
+                        let dest_filename = if target_dir.join(&filename).exists() {
+                            let uid = &uuid::Uuid::new_v4().to_string()[..8];
+                            if file_ext.is_empty() {
+                                format!("{file_stem}-{uid}")
+                            } else {
+                                format!("{file_stem}-{uid}.{file_ext}")
+                            }
+                        } else {
+                            filename
+                        };
+
+                        let dest_path = target_dir.join(&dest_filename);
+
+                        // Move (or copy then delete)
+                        let moved = std::fs::rename(&src_path, &dest_path).is_ok()
+                            || (std::fs::copy(&src_path, &dest_path).is_ok()
+                                && std::fs::remove_file(&src_path).is_ok());
+
+                        if moved {
+                            let new_rel = rel(ws, &dest_path);
+                            path_map.insert(f_str.to_string(), new_rel.clone());
+
+                            // Record in assets_index & create .meta.yaml sidecar
+                            let sidecar = studio_workspace::AssetSidecarMeta {
+                                title: Some(dest_filename.clone()),
+                                description: prompt.clone(),
+                                mime: None,
+                                provider: Some(provider.to_string()),
+                                model: model.clone(),
+                                prompt: prompt.clone(),
+                                cost_usd: cost,
+                                turn_id: Some(ctx.turn_id.clone()),
+                            };
+
+                            let sidecar_file = dest_path.with_extension(format!(
+                                "{}.meta.yaml",
+                                dest_path.extension().and_then(|s| s.to_str()).unwrap_or("")
+                            ));
+                            if let Ok(sidecar_yaml) = serde_yaml::to_string(&sidecar) {
+                                let _ = std::fs::write(sidecar_file, sidecar_yaml);
+                            }
+
+                            // Insert into assets_index table
+                            if let Ok(db) = studio_workspace::WorkspaceDb::open(ws) {
+                                let size_bytes = std::fs::metadata(&dest_path)
+                                    .map(|m| m.len() as i64)
+                                    .unwrap_or(0);
+                                let ext = dest_path
+                                    .extension()
+                                    .and_then(|s| s.to_str())
+                                    .unwrap_or("")
+                                    .to_lowercase();
+                                let mime = match ext.as_str() {
+                                    "png" => "image/png",
+                                    "jpg" | "jpeg" => "image/jpeg",
+                                    "webp" => "image/webp",
+                                    "mp4" => "video/mp4",
+                                    "webm" => "video/webm",
+                                    _ => "application/octet-stream",
+                                };
+                                let sha256 = hash_file_sha256(&dest_path).unwrap_or_default();
+                                let now = chrono::Utc::now().to_rfc3339();
+                                let meta_json =
+                                    serde_json::to_string(&sidecar).unwrap_or_else(|_| "{}".into());
+
+                                let _ = db.conn().execute(
+                                    "INSERT OR REPLACE INTO assets_index (id, path, name, mime_type, size_bytes, sha256, metadata_json, updated_at)
+                                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                                    rusqlite::params![
+                                        new_rel,
+                                        new_rel,
+                                        dest_filename,
+                                        mime,
+                                        size_bytes,
+                                        sha256,
+                                        meta_json,
+                                        now,
+                                    ],
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Rewrite returned paths in output
+    if let Some(files_arr) = output.get_mut("files").and_then(Value::as_array_mut) {
+        for item in files_arr {
+            if let Some(old_str) = item.as_str() {
+                if let Some(new_p) = path_map.get(old_str) {
+                    *item = json!(new_p);
+                }
+            }
+        }
+    }
+    if let Some(video_p) = output.get_mut("video_path") {
+        if let Some(old_str) = video_p.as_str() {
+            if let Some(new_p) = path_map.get(old_str) {
+                *video_p = json!(new_p);
+            }
+        }
+    }
+}
+
+fn hash_file_sha256(path: &Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher).ok()?;
+    Some(hex::encode(hasher.finalize()))
 }
 
 /// Run brand/channel checkers on an artifact (shared by the MCP tool and the desktop app).
@@ -365,7 +545,7 @@ pub fn check_run(ws: &Workspace, args: &Value) -> Result<Value, String> {
                 .collect()
         })
         .unwrap_or_default();
-    let renders: Vec<PathBuf> = args
+    let mut renders: Vec<PathBuf> = args
         .get("renders")
         .and_then(Value::as_array)
         .map(|a| {
@@ -375,10 +555,20 @@ pub fn check_run(ws: &Workspace, args: &Value) -> Result<Value, String> {
                 .collect()
         })
         .unwrap_or_default();
+
     let meta: Value = std::fs::read_to_string(dir.join("artifact.yaml"))
         .ok()
         .and_then(|t| serde_yaml::from_str(&t).ok())
         .unwrap_or(Value::Null);
+
+    // No explicit renders → use the newest render of this artifact (one input hash only, so stale
+    // renders of an older version never mask a failing check).
+    if renders.is_empty() {
+        if let Some(artifact_id) = meta.get("id").and_then(Value::as_str) {
+            renders = latest_renders(ws, &dir, artifact_id);
+        }
+    }
+
     let source_file = meta
         .get("source")
         .and_then(Value::as_str)
@@ -410,6 +600,77 @@ pub fn check_run(ws: &Workspace, args: &Value) -> Result<Value, String> {
     )
     .ok_or_else(|| format!("Không có brand \"{brand}\"."))?;
     serde_json::to_value(report).map_err(|e| e.to_string())
+}
+
+/// Output files of the newest render of an artifact at `projects/<p>/artifacts/<id>`.
+///
+/// Prefers the `renders` table (newest `created_at`, a single input hash, restricted to this
+/// project's renders folder); falls back to the newest `renders/<id>/<hash>/` folder on disk.
+fn latest_renders(ws: &Workspace, artifact_dir: &Path, artifact_id: &str) -> Vec<PathBuf> {
+    let Some(proj_dir) = artifact_dir
+        .parent()
+        .filter(|p| p.file_name().and_then(|n| n.to_str()) == Some("artifacts"))
+        .and_then(Path::parent)
+    else {
+        return Vec::new();
+    };
+    let renders_dir = proj_dir.join("renders").join(artifact_id);
+    let prefix = format!("{}/", rel(ws, &renders_dir));
+
+    let mut out = Vec::new();
+    if let Ok(db) = studio_workspace::WorkspaceDb::open(ws) {
+        if let Ok(mut stmt) = db.conn().prepare(
+            "SELECT output_path, hash FROM renders WHERE artifact_id = ?1 ORDER BY created_at DESC",
+        ) {
+            let rows: Vec<(String, String)> = stmt
+                .query_map([artifact_id], |row| Ok((row.get(0)?, row.get(1)?)))
+                .map(|iter| iter.flatten().collect())
+                .unwrap_or_default();
+            let mut newest_hash: Option<String> = None;
+            for (rel_p, hash) in rows {
+                if !rel_p.starts_with(&prefix) {
+                    continue;
+                }
+                match &newest_hash {
+                    None => newest_hash = Some(hash),
+                    Some(h) if *h != hash => continue,
+                    Some(_) => {}
+                }
+                if let Ok(p) = ws.scoped_path(&rel_p) {
+                    if p.is_file() && !out.contains(&p) {
+                        out.push(p);
+                    }
+                }
+            }
+        }
+    }
+    if !out.is_empty() {
+        return out;
+    }
+
+    let mut hash_dirs: Vec<PathBuf> = std::fs::read_dir(&renders_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    hash_dirs.sort_by_key(|p| {
+        std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+    });
+    if let Some(latest) = hash_dirs.last() {
+        out.extend(
+            std::fs::read_dir(latest)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_file()),
+        );
+    }
+    out
 }
 
 fn ffprobe_json(path: &Path) -> Option<Value> {
