@@ -134,6 +134,7 @@ fn build_context(
     project: Option<&Project>,
     modules: &[String],
     note: Option<String>,
+    is_claude: bool,
 ) -> String {
     let mut lines = vec![format!(
         "Bạn đang làm việc trong Local Content Studio, workspace \"{}\" (thư mục hiện tại).",
@@ -162,10 +163,17 @@ fn build_context(
     if !modules.is_empty() {
         lines.push(format!("Module catalog đang bật: {}.", modules.join(", ")));
     }
-    lines.push(
-        "Dùng các tool MCP của server \"studio\" (brand_get, channel_get, playbook_get, capability_search, capability_run, check_run) để lấy Brand/spec kênh, chạy năng lực và tự kiểm tra sản phẩm trước khi báo xong. Không cài skill bằng npx skills."
-            .into(),
-    );
+    if !is_claude {
+        lines.push(
+            "Các công cụ Studio nằm trên MCP server \"studio\" (gọi qua call_mcp_tool với ServerName \"studio\"): brand_get, channel_get, playbook_get, capability_search, capability_run, check_run, artifact_render. Chỉ thao tác bên trong thư mục workspace hiện tại. Nếu MCP server \"studio\" không tải được hoặc báo lỗi, phải dừng lại và báo lỗi ngay, không đọc tệp ở nơi khác."
+                .into(),
+        );
+    } else {
+        lines.push(
+            "Dùng các tool MCP của server \"studio\" (brand_get, channel_get, playbook_get, capability_search, capability_run, check_run, artifact_render) để lấy Brand/spec kênh, chạy năng lực và tự kiểm tra sản phẩm trước khi báo xong. Không cài skill bằng npx skills. Chỉ thao tác bên trong thư mục workspace hiện tại."
+                .into(),
+        );
+    }
     lines.push("Trả lời bằng tiếng Việt, ngắn gọn.".into());
     if let Some(n) = note {
         lines.push(n);
@@ -266,7 +274,7 @@ pub async fn start_turn(
     let note_key = format!("thread.note.{thread_id}");
     let note = get_setting(&db, &note_key)?;
     del_setting(&db, &note_key)?;
-    let context = build_context(&ws, project.as_ref(), &modules, note);
+    let context = build_context(&ws, project.as_ref(), &modules, note, is_claude);
 
     let token = state.tokens.issue(TurnContext {
         workspace_dir: ws.root().to_path_buf(),
@@ -589,4 +597,27 @@ pub fn undo_turn(state: &AppState, turn_id: &str) -> CmdResult<bool> {
         )?;
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_context_for_agy_and_claude() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(tmp.path().join("ws"), "Test Workspace").unwrap();
+
+        let agy_ctx = build_context(&ws, None, &[], None, false);
+        assert!(agy_ctx.contains("MCP server \"studio\""));
+        assert!(agy_ctx.contains("call_mcp_tool"));
+        assert!(agy_ctx.contains("ServerName \"studio\""));
+        assert!(agy_ctx.contains("Chỉ thao tác bên trong thư mục workspace hiện tại."));
+        assert!(agy_ctx.contains("Nếu MCP server \"studio\" không tải được hoặc báo lỗi, phải dừng lại và báo lỗi ngay, không đọc tệp ở nơi khác."));
+        assert!(agy_ctx.contains("artifact_render"));
+
+        let claude_ctx = build_context(&ws, None, &[], None, true);
+        assert!(claude_ctx.contains("Dùng các tool MCP của server \"studio\""));
+        assert!(!claude_ctx.contains("call_mcp_tool"));
+    }
 }

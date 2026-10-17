@@ -36,3 +36,9 @@ tracing = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+] }

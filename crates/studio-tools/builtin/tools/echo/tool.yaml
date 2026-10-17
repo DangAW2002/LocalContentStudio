@@ -1,4 +1,5 @@
 id: echo
+internal: true
 kind: generator
 description: "Echo tool for pipeline testing and verification"
 provides:

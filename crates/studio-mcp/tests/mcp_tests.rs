@@ -214,6 +214,7 @@ async fn approve_policy() {
 
 #[tokio::test]
 async fn capability_run_echo_and_search() {
+    std::env::set_var("STUDIO_DEV", "1");
     let tmp = tempdir().unwrap();
     let ws = Workspace::create(tmp.path().join("a"), "A").unwrap();
     let st = state();
@@ -256,6 +257,7 @@ async fn shim_obtains_agy_token_and_forwards() {
         port: srv.addr.port(),
         shim_secret: "shim-secret".into(),
         pid: std::process::id(),
+        runtime_path: None,
     };
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
     let nested = ws.root().join("projects");
@@ -528,4 +530,190 @@ async fn artifact_render_validation_and_scope_refusal() {
     let (text, is_err) = text_of(&resp);
     assert!(is_err);
     assert!(text.contains("Lượt này bị giới hạn trong project \"proj-a\""));
+}
+
+#[tokio::test]
+async fn test_discovery_order_and_fallback() {
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("a"), "A").unwrap();
+    let nested = ws.root().join("projects");
+
+    let st1 = state();
+    let srv1 = server::start(st1.clone(), 0).await.unwrap();
+    let port1 = srv1.addr.port();
+
+    let st2 = state();
+    let srv2 = server::start(st2.clone(), 0).await.unwrap();
+    let port2 = srv2.addr.port();
+
+    let st3 = state();
+    let srv3 = server::start(st3.clone(), 0).await.unwrap();
+    let port3 = srv3.addr.port();
+
+    let app_dir = tmp.path().join("app_dir");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let app_runtime = app_dir.join("runtime.json");
+    studio_mcp::runtime::write(
+        &app_runtime,
+        &RuntimeInfo {
+            port: port1,
+            shim_secret: "shim-secret".into(),
+            pid: 1001,
+            runtime_path: Some(app_runtime.clone()),
+        },
+    )
+    .unwrap();
+
+    let def_dir = tmp.path().join("def_dir");
+    std::fs::create_dir_all(&def_dir).unwrap();
+    let def_runtime = def_dir.join("runtime.json");
+    studio_mcp::runtime::write(
+        &def_runtime,
+        &RuntimeInfo {
+            port: port2,
+            shim_secret: "shim-secret".into(),
+            pid: 1002,
+            runtime_path: Some(def_runtime.clone()),
+        },
+    )
+    .unwrap();
+
+    let d_dir = tmp.path().join("runtime.d");
+    std::fs::create_dir_all(&d_dir).unwrap();
+    let entry3 = d_dir.join("1003.json");
+    studio_mcp::runtime::write(
+        &entry3,
+        &RuntimeInfo {
+            port: port3,
+            shim_secret: "shim-secret".into(),
+            pid: 1003,
+            runtime_path: None,
+        },
+    )
+    .unwrap();
+
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let is_alive = |_pid: u32| true;
+
+    // Phase 1: All 3 have active agy tokens. Precedence must choose STUDIO_APP_DIR (port1).
+    let tok1 = st1.tokens.issue(ctx(ws.root(), EngineKind::Agy));
+    let tok2 = st2.tokens.issue(ctx(ws.root(), EngineKind::Agy));
+    let _tok3 = st3.tokens.issue(ctx(ws.root(), EngineKind::Agy));
+
+    let (chosen1, _) = shim::discover_and_fetch_token_in(
+        &client,
+        None,
+        Some(&app_dir),
+        Some(&def_runtime),
+        Some(&d_dir),
+        std::slice::from_ref(&nested),
+        is_alive,
+    )
+    .await
+    .unwrap();
+    assert_eq!(chosen1, port1);
+
+    // Phase 2: Revoke tok1 on srv1. Candidate 1 fails to return a token; must fall back to candidate 2 (def_runtime, port2).
+    st1.tokens.revoke(&tok1);
+    let (chosen2, _) = shim::discover_and_fetch_token_in(
+        &client,
+        None,
+        Some(&app_dir),
+        Some(&def_runtime),
+        Some(&d_dir),
+        std::slice::from_ref(&nested),
+        is_alive,
+    )
+    .await
+    .unwrap();
+    assert_eq!(chosen2, port2);
+
+    // Phase 3: Revoke tok2 on srv2. Candidate 1 and 2 fail; must fall back to candidate 3 in runtime.d (port3).
+    st2.tokens.revoke(&tok2);
+    let (chosen3, _) = shim::discover_and_fetch_token_in(
+        &client,
+        None,
+        Some(&app_dir),
+        Some(&def_runtime),
+        Some(&d_dir),
+        std::slice::from_ref(&nested),
+        is_alive,
+    )
+    .await
+    .unwrap();
+    assert_eq!(chosen3, port3);
+}
+
+#[tokio::test]
+async fn test_stale_runtime_d_entries_cleaned_up() {
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("a"), "A").unwrap();
+    let nested = ws.root().join("projects");
+
+    let st = state();
+    let srv = server::start(st.clone(), 0).await.unwrap();
+    let port = srv.addr.port();
+    st.tokens.issue(ctx(ws.root(), EngineKind::Agy));
+
+    let d_dir = tmp.path().join("runtime.d");
+    std::fs::create_dir_all(&d_dir).unwrap();
+
+    // 1. Stale entry for dead process 9999
+    let stale_file = d_dir.join("9999.json");
+    studio_mcp::runtime::write(
+        &stale_file,
+        &RuntimeInfo {
+            port: 9999,
+            shim_secret: "shim-secret".into(),
+            pid: 9999,
+            runtime_path: None,
+        },
+    )
+    .unwrap();
+
+    // 2. Corrupted file for dead process 8888
+    let corrupt_file = d_dir.join("8888.json");
+    std::fs::write(&corrupt_file, "invalid-json-content").unwrap();
+
+    // 3. Alive entry for process 1003 pointing to our running server
+    let alive_file = d_dir.join("1003.json");
+    studio_mcp::runtime::write(
+        &alive_file,
+        &RuntimeInfo {
+            port,
+            shim_secret: "shim-secret".into(),
+            pid: 1003,
+            runtime_path: None,
+        },
+    )
+    .unwrap();
+
+    assert!(stale_file.exists());
+    assert!(corrupt_file.exists());
+    assert!(alive_file.exists());
+
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let is_alive = |pid: u32| pid == 1003;
+
+    let (chosen_port, _) = shim::discover_and_fetch_token_in(
+        &client,
+        None,
+        None,
+        None,
+        Some(&d_dir),
+        &[nested],
+        is_alive,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(chosen_port, port);
+    // Stale and corrupt entries for dead processes must be cleaned up from disk
+    assert!(!stale_file.exists(), "stale entry should be deleted");
+    assert!(
+        !corrupt_file.exists(),
+        "corrupt entry of dead process should be deleted"
+    );
+    // Alive file must still exist
+    assert!(alive_file.exists(), "alive entry should be preserved");
 }

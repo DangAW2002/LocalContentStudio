@@ -1,6 +1,6 @@
 id: tts.windows-sapi
 kind: generator
-description: "Windows SAPI text-to-speech synthesizer using PowerShell System.Speech"
+description: "Tổng hợp giọng nói (text-to-speech) qua Windows SAPI sử dụng PowerShell System.Speech"
 provides:
   - "tts.synthesize@1"
 run:

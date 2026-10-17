@@ -50,7 +50,7 @@ pub fn probe_chromium() -> ProbeReport {
                 available: true,
                 path: Some(path),
                 version: Some(ver),
-                note: "Tìm thấy chrome-headless-shell trên PATH".into(),
+                note: "Tìm thấy chrome-headless-shell trong PATH".into(),
             };
         }
     }
@@ -105,9 +105,7 @@ pub fn probe_chromium() -> ProbeReport {
         available: false,
         path: None,
         version: None,
-        note:
-            "Không tìm thấy Chrome/Edge/chrome-headless-shell. Cài Chrome hoặc đặt STUDIO_CHROME."
-                .into(),
+        note: "Không tìm thấy Chrome/Edge/chrome-headless-shell — hãy cài đặt Google Chrome hoặc đặt biến môi trường STUDIO_CHROME.".into(),
     }
 }
 
@@ -141,7 +139,7 @@ pub fn probe_ffmpeg() -> ProbeReport {
                 available: true,
                 path: Some(path),
                 version: Some(ver),
-                note: "Found ffmpeg on PATH".into(),
+                note: "Tìm thấy ffmpeg trong PATH".into(),
             };
         }
     }
@@ -151,7 +149,7 @@ pub fn probe_ffmpeg() -> ProbeReport {
         available: false,
         path: None,
         version: None,
-        note: "FFmpeg not found on system PATH".into(),
+        note: "Không tìm thấy FFmpeg trong PATH — hãy cài đặt qua winget: 'winget install Gyan.FFmpeg' hoặc tải từ https://ffmpeg.org".into(),
     }
 }
 
@@ -164,7 +162,7 @@ pub fn probe_ffprobe() -> ProbeReport {
                 available: true,
                 path: Some(path),
                 version: Some(ver),
-                note: "Found ffprobe on PATH".into(),
+                note: "Tìm thấy ffprobe trong PATH".into(),
             };
         }
     }
@@ -174,7 +172,7 @@ pub fn probe_ffprobe() -> ProbeReport {
         available: false,
         path: None,
         version: None,
-        note: "FFprobe not found on system PATH".into(),
+        note: "Không tìm thấy ffprobe trong PATH — đi kèm FFmpeg, hãy cài đặt qua winget: 'winget install Gyan.FFmpeg'".into(),
     }
 }
 
@@ -190,7 +188,7 @@ pub fn probe_node_npx() -> (ProbeReport, ProbeReport) {
             available: true,
             path: Some(path),
             version: ver,
-            note: "Found node on PATH".into(),
+            note: "Tìm thấy node trong PATH".into(),
         }
     } else {
         ProbeReport {
@@ -198,7 +196,7 @@ pub fn probe_node_npx() -> (ProbeReport, ProbeReport) {
             available: false,
             path: None,
             version: None,
-            note: "Node not found on system PATH".into(),
+            note: "Không tìm thấy Node.js trong PATH — hãy cài đặt qua winget: 'winget install OpenJS.NodeJS' hoặc tải từ https://nodejs.org".into(),
         }
     };
 
@@ -212,7 +210,7 @@ pub fn probe_node_npx() -> (ProbeReport, ProbeReport) {
             available: true,
             path: Some(path),
             version: ver,
-            note: format!("Found {} on PATH", npx_name),
+            note: format!("Tìm thấy {} trong PATH", npx_name),
         }
     } else if let Ok(path) = which::which("npx") {
         // Fallback: plain 'npx' (non-Windows or npx.cmd not found under that name)
@@ -222,7 +220,7 @@ pub fn probe_node_npx() -> (ProbeReport, ProbeReport) {
             available: true,
             path: Some(path),
             version: ver,
-            note: "Found npx on PATH".into(),
+            note: "Tìm thấy npx trong PATH".into(),
         }
     } else {
         ProbeReport {
@@ -230,7 +228,7 @@ pub fn probe_node_npx() -> (ProbeReport, ProbeReport) {
             available: false,
             path: None,
             version: None,
-            note: "npx not found on system PATH".into(),
+            note: "Không tìm thấy npx trong PATH — đi kèm Node.js, hãy cài đặt Node.js từ https://nodejs.org".into(),
         }
     };
 
