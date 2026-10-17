@@ -246,7 +246,16 @@ pub fn build_html_render_job(
     })
 }
 
-/// Build a `JobSpec` for rendering HyperFrames motion composition via `npx hyperframes render`.
+/// npm package spec used for HyperFrames renders (verified on Windows 2026-10-17).
+pub const HYPERFRAMES_PACKAGE: &str = "hyperframes@0.8.167";
+
+/// Build a `JobSpec` for rendering a HyperFrames composition (`npx --yes hyperframes@<pinned> render`).
+///
+/// On Windows `npx.cmd` is a batch script: npm's `node.exe npx-cli.js` is run directly when it sits next to
+/// `npx.cmd` (no cmd.exe quoting pitfalls); otherwise `cmd.exe /C` is used and paths containing cmd
+/// metacharacters are refused. Paths are stripped of the verbatim prefix (`\\?\`), which Node.js does not
+/// understand.
+
 pub fn build_hyperframes_render_job(
     job_id: &str,
     workspace_id: &str,
@@ -262,22 +271,89 @@ pub fn build_hyperframes_render_job(
         )
     })?;
 
-    let args = vec![
-        "hyperframes".into(),
+    // Strip verbatim prefix so Node.js / HyperFrames receives a plain Win32 path.
+    let out_plain = strip_verbatim(output_file);
+
+    // Strip verbatim prefix from composition_dir and npx_path too.
+    let cwd_plain = PathBuf::from(strip_verbatim(composition_dir));
+    let npx_plain = strip_verbatim(npx_path);
+
+    // Pinned: renders must be reproducible and must not pull whatever npm publishes next.
+    let mut hf_args: Vec<String> = vec![
+        "--yes".into(),
+        HYPERFRAMES_PACKAGE.into(),
         "render".into(),
         "--output".into(),
-        output_file.to_string_lossy().to_string(),
-        "--format".into(),
-        format.into(),
-        "--fps".into(),
-        fps.to_string(),
+        out_plain.clone(),
     ];
+    if !format.is_empty() {
+        hf_args.push("--format".into());
+        hf_args.push(format.to_string());
+    }
+    if fps > 0 {
+        hf_args.push("--fps".into());
+        hf_args.push(fps.to_string());
+    }
 
-    let command = CommandSpec::new(
-        npx_path.to_string_lossy().to_string(),
-        args,
-        composition_dir.to_path_buf(),
-    );
+    // On Windows `npx.cmd` is a batch file. Prefer running npm's own `node npx-cli.js` (no cmd.exe, so no
+    // cmd quoting/metacharacter pitfalls); fall back to `cmd.exe /C` only for paths cmd can parse safely.
+    #[cfg(windows)]
+    let (exe, args) = {
+        let npx_dir = Path::new(&npx_plain).parent().map(Path::to_path_buf);
+        let direct = npx_dir.as_ref().and_then(|d| {
+            let node = d.join("node.exe");
+            let cli = d
+                .join("node_modules")
+                .join("npm")
+                .join("bin")
+                .join("npx-cli.js");
+            (node.is_file() && cli.is_file()).then_some((node, cli))
+        });
+        match direct {
+            Some((node, cli)) => {
+                let mut a = vec![cli.to_string_lossy().into_owned()];
+                a.extend(hf_args.iter().cloned());
+                (node.to_string_lossy().into_owned(), a)
+            }
+            None => {
+                for part in [
+                    &npx_plain,
+                    &out_plain,
+                    &cwd_plain.to_string_lossy().into_owned(),
+                ] {
+                    if part.contains(['&', '|', '<', '>', '^', '%', '!', '"']) {
+                        return Err(ArtifactError::ToolNotFound(format!(
+                            "Đường dẫn có ký tự cmd.exe không xử lý an toàn được: {part}"
+                        )));
+                    }
+                }
+                let mut a = vec!["/C".to_string(), npx_plain.clone()];
+                a.extend(hf_args.iter().cloned());
+                ("cmd.exe".to_string(), a)
+            }
+        }
+    };
+
+    #[cfg(not(windows))]
+    let (exe, args) = (npx_plain.clone(), hf_args);
+
+    let mut command = CommandSpec::new(exe, args, cwd_plain);
+
+    // Pass essential system paths to ensure Node, Chrome, and Puppeteer operate correctly
+    // within the sanitized process environment.
+    for var in [
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "CommonProgramFiles",
+        "CommonProgramFiles(x86)",
+        "CHROME_PATH",
+        "PUPPETEER_EXECUTABLE_PATH",
+        "STUDIO_CHROME",
+    ] {
+        if let Ok(val) = std::env::var(var) {
+            command.env.insert(var.into(), val);
+        }
+    }
 
     let resources = ResourceSpec {
         ram_mb: 2048,
@@ -294,10 +370,58 @@ pub fn build_hyperframes_render_job(
         command,
         resources,
         priority: Priority::TurnBlocking,
-        timeout: Duration::from_secs(300),
+        // HyperFrames spawns Chrome and encodes with FFmpeg — give it plenty of time.
+        timeout: Duration::from_secs(600),
         memory_limit_mb: Some(3072),
         lifecycle: Lifecycle::PerCall,
     })
+}
+
+/// Strip the Windows verbatim prefix (`\\?\` or `\\?\UNC\`) from a path and return the
+/// plain string. On non-Windows this is a no-op.
+pub fn strip_verbatim(path: &Path) -> String {
+    let raw = path.to_string_lossy();
+    if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        raw.into_owned()
+    }
+}
+
+/// Helper to determine if a source path references a static image format.
+pub fn is_image_source(src: &str) -> bool {
+    let lower = src.to_ascii_lowercase();
+    lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".bmp")
+}
+
+/// Helper to determine if a source path references a subtitle file (SRT, VTT, ASS).
+pub fn is_subtitle_file(src: &str) -> bool {
+    let lower = src.to_ascii_lowercase();
+    lower.ends_with(".srt") || lower.ends_with(".vtt") || lower.ends_with(".ass")
+}
+
+/// Escape a path for use in FFmpeg `subtitles='...'` filter on Windows and Unix.
+///
+/// Strips verbatim prefix `\\?\`, replaces Windows backslashes with forward slashes `/`,
+/// escapes the Windows drive colon (`C:` -> `C\:`), and escapes single quotes and backslashes.
+pub fn escape_ffmpeg_subtitles_path(path: &Path) -> String {
+    let plain = strip_verbatim(path);
+    let normalized = plain.replace('\\', "/");
+    let escaped_colon = if normalized.len() >= 2
+        && normalized.as_bytes()[1] == b':'
+        && normalized.as_bytes()[0].is_ascii_alphabetic()
+    {
+        format!("{}\\{}", &normalized[..1], &normalized[1..])
+    } else {
+        normalized
+    };
+    escaped_colon.replace('\'', "'\\''")
 }
 
 /// Build an FFmpeg filtergraph and arguments for rendering a `timeline.json` document to MP4 H.264/AAC.
@@ -308,9 +432,10 @@ pub fn build_timeline_ffmpeg_args(
     let mut args = vec!["-y".into()];
     let mut filter_graph = String::new();
 
-    // Collect all video and audio clips
+    // Collect all video, audio, and caption clips
     let mut video_clips = Vec::new();
     let mut audio_clips = Vec::new();
+    let mut caption_clips = Vec::new();
 
     for track in &timeline_doc.tracks {
         match track.kind {
@@ -324,11 +449,15 @@ pub fn build_timeline_ffmpeg_args(
                     audio_clips.push(clip);
                 }
             }
-            crate::timeline::TrackKind::Captions => {}
+            crate::timeline::TrackKind::Captions | crate::timeline::TrackKind::Caption => {
+                for clip in &track.clips {
+                    caption_clips.push(clip);
+                }
+            }
         }
     }
 
-    // If no video clips, generate synthetic color background
+    // 1. Build video pipeline
     if video_clips.is_empty() {
         args.extend_from_slice(&[
             "-f".into(),
@@ -346,14 +475,20 @@ pub fn build_timeline_ffmpeg_args(
     } else {
         // Register each video clip input
         for clip in &video_clips {
-            args.extend_from_slice(&["-i".into(), clip.source.clone()]);
+            args.extend_from_slice(&["-i".into(), strip_verbatim(Path::new(&clip.source))]);
         }
 
         let mut v_filter_parts = Vec::new();
         for (i, clip) in video_clips.iter().enumerate() {
+            let loop_prefix = if is_image_source(&clip.source) {
+                "loop=loop=-1:size=1:start=0,"
+            } else {
+                ""
+            };
             let mut filter = format!(
-                "[{}:v]trim=start={}:duration={},setpts=PTS-STARTPTS,fps={},scale={}:{},setsar=1",
+                "[{}:v]{}trim=start={}:duration={},setpts=PTS-STARTPTS,fps={},scale={}:{},setsar=1",
                 i,
+                loop_prefix,
                 clip.in_point,
                 clip.duration,
                 timeline_doc.fps,
@@ -378,26 +513,75 @@ pub fn build_timeline_ffmpeg_args(
         filter_graph = v_filter_parts.join(";");
     }
 
-    // Check for captions in timeline to burn in
-    let mut caption_clips = Vec::new();
-    for track in &timeline_doc.tracks {
-        if track.kind == crate::timeline::TrackKind::Captions {
-            for clip in &track.clips {
-                caption_clips.push(clip);
+    // 2. Check for captions in timeline to burn in
+    if !caption_clips.is_empty() {
+        for c in &caption_clips {
+            if is_subtitle_file(&c.source) {
+                let escaped_path = escape_ffmpeg_subtitles_path(Path::new(&c.source));
+                let sub_filter = format!(";[v]subtitles='{}'[v]", escaped_path);
+                filter_graph.push_str(&sub_filter);
+            } else {
+                let escaped_text = c.source.replace(':', "\\:").replace('\'', "");
+                let text_filter = format!(
+                    ";[v]drawtext=text='{}':enable='between(t,{},{})':fontsize=36:fontcolor=white:x=(w-text_w)/2:y=h-100:box=1:boxcolor=black@0.6[v]",
+                    escaped_text, c.start, c.start + c.duration
+                );
+                filter_graph.push_str(&text_filter);
             }
         }
     }
 
-    if !caption_clips.is_empty() {
-        // Append drawtext filter for caption clips
-        for c in caption_clips {
-            let escaped_text = c.source.replace(':', "\\:").replace('\'', "");
-            let text_filter = format!(
-                ";[v]drawtext=text='{}':enable='between(t,{},{})':fontsize=36:fontcolor=white:x=(w-text_w)/2:y=h-100:box=1:boxcolor=black@0.6[v]",
-                escaped_text, c.start, c.start + c.duration
-            );
-            filter_graph.push_str(&text_filter);
+    // 3. Build audio pipeline
+    if !audio_clips.is_empty() {
+        let audio_input_start = if video_clips.is_empty() {
+            1
+        } else {
+            video_clips.len()
+        };
+        for clip in &audio_clips {
+            args.extend_from_slice(&["-i".into(), strip_verbatim(Path::new(&clip.source))]);
         }
+
+        let mut a_filter_parts = Vec::new();
+        for (j, clip) in audio_clips.iter().enumerate() {
+            let in_idx = audio_input_start + j;
+            let atrim = format!(
+                "[{}:a]atrim=start={}:duration={},asetpts=PTS-STARTPTS",
+                in_idx, clip.in_point, clip.duration
+            );
+            let start_ms = (clip.start * 1000.0).round() as u64;
+            if audio_clips.len() == 1 {
+                if start_ms > 0 {
+                    a_filter_parts.push(format!("{},adelay={}|{}[a]", atrim, start_ms, start_ms));
+                } else {
+                    a_filter_parts.push(format!("{}[a]", atrim));
+                }
+            } else {
+                if start_ms > 0 {
+                    a_filter_parts.push(format!(
+                        "{},adelay={}|{}[a{}]",
+                        atrim, start_ms, start_ms, j
+                    ));
+                } else {
+                    a_filter_parts.push(format!("{}[a{}]", atrim, j));
+                }
+            }
+        }
+
+        if audio_clips.len() > 1 {
+            let mut mix_inputs = String::new();
+            for j in 0..audio_clips.len() {
+                mix_inputs.push_str(&format!("[a{}]", j));
+            }
+            a_filter_parts.push(format!(
+                "{}amix=inputs={}:duration=longest:dropout_transition=0[a]",
+                mix_inputs,
+                audio_clips.len()
+            ));
+        }
+
+        filter_graph.push(';');
+        filter_graph.push_str(&a_filter_parts.join(";"));
     }
 
     args.extend_from_slice(&["-filter_complex".into(), filter_graph.clone()]);
@@ -408,8 +592,20 @@ pub fn build_timeline_ffmpeg_args(
         "libx264".into(),
         "-pix_fmt".into(),
         "yuv420p".into(),
-        output_file.to_string_lossy().to_string(),
     ]);
+
+    if !audio_clips.is_empty() {
+        args.extend_from_slice(&[
+            "-map".into(),
+            "[a]".into(),
+            "-c:a".into(),
+            "aac".into(),
+            "-b:a".into(),
+            "192k".into(),
+        ]);
+    }
+
+    args.push(strip_verbatim(output_file));
 
     (args, filter_graph)
 }

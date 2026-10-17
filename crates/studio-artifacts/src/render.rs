@@ -189,23 +189,44 @@ pub async fn render(
     let mut job_success = false;
     let mut failure_reason = None;
 
+    let mut stdout_lines = Vec::new();
+    let mut stderr_lines = Vec::new();
+
     while let Some(event) = handle.next_event().await {
         match event {
+            TaskEvent::Stdout(line) => stdout_lines.push(line),
+            TaskEvent::Stderr(line) => stderr_lines.push(line),
             TaskEvent::Finished { exit_code, .. } => {
                 if exit_code == 0 {
                     job_success = true;
                 } else {
-                    failure_reason = Some(format!("Exit code {}", exit_code));
+                    let details = if !stderr_lines.is_empty() {
+                        stderr_lines.join("\n")
+                    } else {
+                        stdout_lines.join("\n")
+                    };
+                    failure_reason = Some(format!("Exit code {}: {}", exit_code, details));
                 }
                 break;
             }
             TaskEvent::Failed { reason } => {
+                let details = if !stderr_lines.is_empty() {
+                    stderr_lines.join("\n")
+                } else {
+                    stdout_lines.join("\n")
+                };
                 let reason_str = match reason {
-                    FailedReason::OutOfMemory => "Vượt bộ nhớ (Out of Memory)".to_string(),
-                    FailedReason::Timeout => "Hết thời gian thực thi (Timeout)".to_string(),
+                    FailedReason::OutOfMemory => {
+                        format!("Vượt bộ nhớ (Out of Memory): {}", details)
+                    }
+                    FailedReason::Timeout => {
+                        format!("Hết thời gian thực thi (Timeout): {}", details)
+                    }
                     FailedReason::Cancelled => "Đã bị hủy (Cancelled)".to_string(),
                     FailedReason::SpawnError(msg) => format!("Lỗi khởi tạo process: {}", msg),
-                    FailedReason::Exit(code) => format!("Process kết thúc với mã lỗi {}", code),
+                    FailedReason::Exit(code) => {
+                        format!("Process kết thúc với mã lỗi {}: {}", code, details)
+                    }
                 };
                 failure_reason = Some(reason_str);
                 break;

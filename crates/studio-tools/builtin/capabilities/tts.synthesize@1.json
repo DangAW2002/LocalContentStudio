@@ -26,6 +26,18 @@
     "properties": {
       "audio_path": {
         "type": "string"
+      },
+      "voice": {
+        "type": "string"
+      },
+      "available_voices": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "note": {
+        "type": "string"
       }
     },
     "required": ["audio_path"]

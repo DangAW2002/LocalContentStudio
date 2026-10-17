@@ -429,3 +429,131 @@ fn test_builtins_parse_without_problems() {
         .collect();
     assert!(builtin_problems.is_empty(), "{builtin_problems:?}");
 }
+
+#[tokio::test]
+#[ignore = "real Windows SAPI speech synthesis"]
+async fn real_sapi_tts_synthesizes_vietnamese_wav() {
+    if !cfg!(windows) {
+        println!("SKIP: Windows SAPI is only supported on Windows");
+        return;
+    }
+
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("ws"), "test-ws").unwrap();
+    let reg = Registry::load(&ws);
+    let scheduler = test_scheduler();
+    let secret_store = MemoryStore::new();
+
+    let ctx = ToolRunContext {
+        workspace: &ws,
+        turn_id: None,
+        budget: Some(10.0),
+        approved: true,
+        scheduler: &scheduler,
+        secret_store: &secret_store,
+        endpoints: std::collections::HashMap::new(),
+    };
+
+    let input = serde_json::json!({
+        "text": "Xin chào! Đây là bản ghi âm giọng nói tiếng Việt thử nghiệm từ Local Content Studio.",
+        "output_path": "vietnamese_sample.wav"
+    });
+
+    let run_res = run_tool(&reg, "tts.windows-sapi", input, &ctx)
+        .await
+        .expect("tts.windows-sapi failed to run");
+
+    let output = match run_res {
+        ToolRun::Success { output, .. } => output,
+        other => panic!("Expected ToolRun::Success, got {:?}", other),
+    };
+
+    println!(
+        "SAPI output: {}",
+        serde_json::to_string_pretty(&output).unwrap()
+    );
+
+    let audio_path_str = output["audio_path"]
+        .as_str()
+        .expect("audio_path missing in output");
+    let audio_path = std::path::PathBuf::from(audio_path_str);
+    assert!(
+        audio_path.exists(),
+        "Synthesized WAV file does not exist: {}",
+        audio_path.display()
+    );
+
+    // Check voice reporting
+    let voice_used = output["voice"].as_str().expect("voice missing in output");
+    assert!(!voice_used.is_empty(), "voice used should not be empty");
+
+    let available = output["available_voices"]
+        .as_array()
+        .expect("available_voices missing");
+    assert!(
+        !available.is_empty(),
+        "available_voices should not be empty on Windows"
+    );
+    println!("Available voices: {:?}", available);
+    println!("Voice used: {}", voice_used);
+    if let Some(note) = output["note"].as_str() {
+        println!("Voice note: {}", note);
+    }
+
+    // Validate WAV header and duration
+    let wav_bytes = fs::read(&audio_path).expect("Failed to read WAV file");
+    assert!(
+        wav_bytes.len() > 44,
+        "WAV file too short: {} bytes",
+        wav_bytes.len()
+    );
+    assert_eq!(&wav_bytes[0..4], b"RIFF", "Missing RIFF header");
+    assert_eq!(&wav_bytes[8..12], b"WAVE", "Missing WAVE identifier");
+    assert_eq!(&wav_bytes[12..16], b"fmt ", "Missing fmt chunk");
+
+    // Channels (offset 22, 2 bytes LE)
+    let channels = u16::from_le_bytes([wav_bytes[22], wav_bytes[23]]);
+    // Sample rate (offset 24, 4 bytes LE)
+    let sample_rate =
+        u32::from_le_bytes([wav_bytes[24], wav_bytes[25], wav_bytes[26], wav_bytes[27]]);
+    // Byte rate (offset 28, 4 bytes LE)
+    let byte_rate =
+        u32::from_le_bytes([wav_bytes[28], wav_bytes[29], wav_bytes[30], wav_bytes[31]]);
+
+    assert!(channels >= 1, "Invalid channels: {}", channels);
+    assert!(sample_rate >= 8000, "Invalid sample rate: {}", sample_rate);
+    assert!(byte_rate > 0, "Invalid byte rate: {}", byte_rate);
+
+    // Find "data" chunk
+    let mut data_size = 0u32;
+    let mut cursor = 12;
+    while cursor + 8 <= wav_bytes.len() {
+        let chunk_id = &wav_bytes[cursor..cursor + 4];
+        let chunk_len = u32::from_le_bytes([
+            wav_bytes[cursor + 4],
+            wav_bytes[cursor + 5],
+            wav_bytes[cursor + 6],
+            wav_bytes[cursor + 7],
+        ]);
+        if chunk_id == b"data" {
+            data_size = chunk_len;
+            break;
+        }
+        cursor += 8 + (chunk_len as usize);
+    }
+    assert!(data_size > 0, "data chunk not found or empty in WAV");
+
+    let duration_secs = (data_size as f64) / (byte_rate as f64);
+    println!(
+        "WAV Duration: {:.2}s, Size: {} bytes, Channels: {}, SampleRate: {} Hz",
+        duration_secs,
+        wav_bytes.len(),
+        channels,
+        sample_rate
+    );
+    assert!(
+        duration_secs > 0.5,
+        "Duration should be > 0.5s for spoken sentence, got {:.2}s",
+        duration_secs
+    );
+}

@@ -509,9 +509,8 @@ async fn test_windows_integration_proxy_generation() {
     );
 }
 
-#[tokio::test]
-#[ignore = "needs network/npm for HyperFrames CLI render"]
-async fn test_hyperframes_render_integration() {
+async fn do_real_hyperframes_renders_mp4() {
+    let ffprobe_report = probe_ffprobe();
     let (_tmp, ws, proj) = create_test_env();
     let scheduler = create_test_scheduler();
 
@@ -531,7 +530,39 @@ async fn test_hyperframes_render_integration() {
         .expect("HyperFrames render failed");
     assert!(!outcome.cached);
     assert_eq!(outcome.outputs.len(), 1);
-    assert!(outcome.outputs[0].exists());
+
+    let mp4_path = &outcome.outputs[0];
+    assert!(mp4_path.exists());
+    let file_size = fs::metadata(mp4_path).unwrap().len();
+    assert!(file_size > 0, "Rendered MP4 file is empty");
+
+    // Validate with ffprobe
+    let meta = validate_video(mp4_path, ffprobe_report.path.as_deref(), Some(4.5))
+        .expect("HyperFrames video validation failed");
+    assert_eq!(meta.width, 1920);
+    assert_eq!(meta.height, 1080);
+    assert!(meta.duration_seconds > 0.0, "Video duration must be > 0");
+
+    println!(
+        "SUCCESS: HyperFrames rendered MOTION_STARTER_HTML to {} (size: {} bytes, duration: {:.2}s, resolution: {}x{})",
+        mp4_path.display(),
+        file_size,
+        meta.duration_seconds,
+        meta.width,
+        meta.height
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs network/npm for HyperFrames CLI render"]
+async fn real_hyperframes_renders_mp4() {
+    do_real_hyperframes_renders_mp4().await;
+}
+
+#[tokio::test]
+#[ignore = "alias to real_hyperframes_renders_mp4"]
+async fn test_hyperframes_render_integration() {
+    do_real_hyperframes_renders_mp4().await;
 }
 
 #[tokio::test]
@@ -598,5 +629,234 @@ logos:
     assert_ne!(
         hash2, hash3,
         "Editing brand.yaml must change input hash and invalidate cache"
+    );
+}
+
+#[test]
+fn test_timeline_ffmpeg_args_with_image_audio_and_srt() {
+    let doc = TimelineDoc {
+        version: 1,
+        width: 1920,
+        height: 1080,
+        fps: 30.0,
+        tracks: vec![
+            Track {
+                id: "video-track".into(),
+                kind: TrackKind::Video,
+                clips: vec![Clip {
+                    id: "img1".into(),
+                    source: "slide.png".into(),
+                    in_point: 0.0,
+                    out_point: Some(5.0),
+                    start: 0.0,
+                    duration: 5.0,
+                    transition: Transition::None,
+                    transition_duration: None,
+                }],
+            },
+            Track {
+                id: "audio-track".into(),
+                kind: TrackKind::Audio,
+                clips: vec![Clip {
+                    id: "aud1".into(),
+                    source: "voice.wav".into(),
+                    in_point: 0.0,
+                    out_point: None,
+                    start: 0.5,
+                    duration: 4.5,
+                    transition: Transition::None,
+                    transition_duration: None,
+                }],
+            },
+            Track {
+                id: "caption-track".into(),
+                kind: TrackKind::Caption,
+                clips: vec![Clip {
+                    id: "srt1".into(),
+                    source: "C:\\projects\\demo\\captions.srt".into(),
+                    in_point: 0.0,
+                    out_point: None,
+                    start: 0.0,
+                    duration: 5.0,
+                    transition: Transition::None,
+                    transition_duration: None,
+                }],
+            },
+        ],
+    };
+
+    let out_path = PathBuf::from("output.mp4");
+    let (args, filter_graph) = build_timeline_ffmpeg_args(&doc, &out_path);
+
+    // Verify image looping in filter graph
+    assert!(filter_graph.contains("loop=loop=-1:size=1:start=0,trim=start=0:duration=5"));
+
+    // Verify audio atrim and delay
+    assert!(
+        filter_graph.contains("atrim=start=0:duration=4.5,asetpts=PTS-STARTPTS,adelay=500|500[a]")
+    );
+
+    // Verify subtitle path escaping for Windows (C\: and forward slashes)
+    assert!(filter_graph.contains("subtitles='C\\:/projects/demo/captions.srt'"));
+
+    // Verify FFmpeg argument structure
+    assert!(args.contains(&"-i".to_string()));
+    assert!(args.contains(&"slide.png".to_string()));
+    assert!(args.contains(&"voice.wav".to_string()));
+    assert!(args.contains(&"-map".to_string()));
+    assert!(args.contains(&"[v]".to_string()));
+    assert!(args.contains(&"[a]".to_string()));
+    assert!(args.contains(&"aac".to_string()));
+}
+
+#[tokio::test]
+#[ignore = "real timeline render assembling image + wav + srt"]
+async fn real_timeline_assembles_image_wav_srt_to_mp4() {
+    let ffmpeg_report = probe_ffmpeg();
+    let ffprobe_report = probe_ffprobe();
+    if !ffmpeg_report.available || !ffprobe_report.available {
+        println!("SKIP: real_timeline_assembles_image_wav_srt_to_mp4 — FFmpeg or FFprobe missing");
+        return;
+    }
+
+    let (_tmp, ws, proj) = create_test_env();
+    let scheduler = create_test_scheduler();
+    let ffmpeg_bin = ffmpeg_report.path.clone().unwrap();
+
+    // 1. Generate test image (1920x1080 PNG)
+    let img_path = proj.root().join("test_card.png");
+    let status = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=navy:s=1920x1080:d=1:r=30",
+            "-vframes",
+            "1",
+            img_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to create test image");
+    assert!(status.status.success(), "Failed to create PNG via FFmpeg");
+
+    // 2. Generate test WAV audio (4 seconds 22050Hz sine tone / speech proxy)
+    let wav_path = proj.root().join("test_voice.wav");
+    let status = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=4",
+            "-ar",
+            "22050",
+            "-ac",
+            "1",
+            wav_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to create test WAV");
+    assert!(status.status.success(), "Failed to create WAV via FFmpeg");
+
+    // 3. Create test SRT captions file with Vietnamese text
+    let srt_path = proj.root().join("test_captions.srt");
+    let srt_content = "1\n00:00:00,000 --> 00:00:02,000\nXin chào! Đây là phụ đề thử nghiệm.\n\n2\n00:00:02,000 --> 00:00:04,000\nLocal Content Studio - Render Timeline thành công.\n";
+    fs::write(&srt_path, srt_content).expect("Failed to write test SRT");
+
+    // 4. Construct TimelineDoc
+    let timeline_doc = TimelineDoc {
+        version: 1,
+        width: 1920,
+        height: 1080,
+        fps: 30.0,
+        tracks: vec![
+            Track {
+                id: "video-track-1".into(),
+                kind: TrackKind::Video,
+                clips: vec![Clip {
+                    id: "img-clip".into(),
+                    source: img_path.to_string_lossy().to_string(),
+                    in_point: 0.0,
+                    out_point: Some(4.0),
+                    start: 0.0,
+                    duration: 4.0,
+                    transition: Transition::None,
+                    transition_duration: None,
+                }],
+            },
+            Track {
+                id: "audio-track-1".into(),
+                kind: TrackKind::Audio,
+                clips: vec![Clip {
+                    id: "wav-clip".into(),
+                    source: wav_path.to_string_lossy().to_string(),
+                    in_point: 0.0,
+                    out_point: Some(4.0),
+                    start: 0.0,
+                    duration: 4.0,
+                    transition: Transition::None,
+                    transition_duration: None,
+                }],
+            },
+            Track {
+                id: "caption-track-1".into(),
+                kind: TrackKind::Caption,
+                clips: vec![Clip {
+                    id: "srt-clip".into(),
+                    source: srt_path.to_string_lossy().to_string(),
+                    in_point: 0.0,
+                    out_point: None,
+                    start: 0.0,
+                    duration: 4.0,
+                    transition: Transition::None,
+                    transition_duration: None,
+                }],
+            },
+        ],
+    };
+
+    let art = Artifact::create(
+        &proj,
+        "timeline-image-audio-srt",
+        "timeline",
+        "Timeline Image + Audio + SRT",
+        None,
+        vec![],
+        None,
+    )
+    .unwrap();
+
+    fs::write(
+        art.source_path(&proj),
+        serde_json::to_string_pretty(&timeline_doc).unwrap(),
+    )
+    .unwrap();
+
+    let outcome = render(&ws, &proj, &art, &scheduler)
+        .await
+        .expect("Timeline render of image + wav + srt failed");
+    assert!(!outcome.cached);
+    assert_eq!(outcome.outputs.len(), 1);
+
+    let mp4_path = &outcome.outputs[0];
+    assert!(mp4_path.exists());
+    let file_size = fs::metadata(mp4_path).unwrap().len();
+    assert!(file_size > 0);
+
+    // Validate video + audio streams with ffprobe
+    let meta = validate_video(mp4_path, ffprobe_report.path.as_deref(), Some(3.8))
+        .expect("Video validation failed");
+    assert_eq!(meta.width, 1920);
+    assert_eq!(meta.height, 1080);
+    assert!(meta.duration_seconds >= 3.8 && meta.duration_seconds <= 4.2);
+
+    println!(
+        "SUCCESS: Assembled image + wav + srt to MP4: {} (size: {} bytes, duration: {:.2}s, resolution: {}x{})",
+        mp4_path.display(),
+        file_size,
+        meta.duration_seconds,
+        meta.width,
+        meta.height
     );
 }

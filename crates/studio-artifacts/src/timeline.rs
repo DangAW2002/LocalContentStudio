@@ -52,6 +52,15 @@ pub enum TrackKind {
     Video,
     Audio,
     Captions,
+    #[serde(rename = "caption")]
+    Caption,
+}
+
+impl TrackKind {
+    /// Returns true if this track is for captions/subtitles.
+    pub fn is_caption(&self) -> bool {
+        matches!(self, Self::Captions | Self::Caption)
+    }
 }
 
 /// Transition specification between clips.
