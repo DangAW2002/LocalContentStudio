@@ -154,9 +154,17 @@ impl Registry {
         self.tools.values().collect()
     }
 
-    /// List all secret keys referenced in tool manifests across `needs`.
+    /// List all secret keys the user may set: those referenced in tool manifests across `needs`, plus the
+    /// publisher OAuth client keys (publishing is host-only, not a tool, so no manifest declares them).
+    /// The YouTube refresh token is written by the OAuth flow itself and is deliberately not listed.
     pub fn referenced_secrets(&self) -> std::collections::BTreeSet<String> {
-        let mut set = std::collections::BTreeSet::new();
+        let mut set: std::collections::BTreeSet<String> = [
+            crate::publish::KEY_YOUTUBE_CLIENT_ID,
+            crate::publish::KEY_YOUTUBE_CLIENT_SECRET,
+        ]
+        .iter()
+        .map(|k| k.to_string())
+        .collect();
         for tool in self.tools.values() {
             for need in &tool.needs {
                 if let Some(key) = need.strip_prefix("secret:") {
