@@ -2,6 +2,7 @@
 
 pub mod http;
 pub mod imagen;
+pub mod import;
 pub mod openai;
 pub mod openai_videos;
 pub mod veo;
@@ -21,6 +22,7 @@ pub async fn run_builtin(
     base_override: Option<&str>,
 ) -> Result<Value> {
     match tool_id {
+        "media.import.yt-dlp" => import::run_media_import(ws, out_dir, input).await,
         "google.imagen" => {
             imagen::run_google_imagen(ws, out_dir, input, api_key, base_override).await
         }

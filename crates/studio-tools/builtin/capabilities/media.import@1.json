@@ -1,0 +1,54 @@
+{
+  "id": "media.import",
+  "version": 1,
+  "title": "Nhập tệp & tải media",
+  "description": "Nhập media từ URL công khai (qua yt-dlp hoặc tải trực tiếp) hoặc sao chép từ đường dẫn cục bộ vào thư mục lượt",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "description": "Địa chỉ HTTP/HTTPS của video hoặc âm thanh từ web"
+      },
+      "path": {
+        "type": "string",
+        "description": "Đường dẫn tương đối trong workspace (vd. library/clip.mp4); tệp ngoài workspace bị từ chối"
+      },
+      "project": {
+        "type": "string",
+        "description": "Tên định danh dự án (tuỳ chọn)"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "files": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Danh sách các tệp media đã tải hoặc sao chép vào thư mục lượt"
+      },
+      "title": {
+        "type": "string",
+        "description": "Tiêu đề của media"
+      },
+      "duration": {
+        "type": "number",
+        "description": "Thời lượng tính bằng giây"
+      },
+      "source_url": {
+        "type": "string",
+        "description": "URL gốc hoặc đường dẫn nguồn"
+      },
+      "uploader": {
+        "type": "string",
+        "description": "Tác giả hoặc kênh đăng tải"
+      },
+      "license": {
+        "type": "string",
+        "description": "Giấy phép bản quyền nếu có"
+      }
+    },
+    "required": ["files"]
+  }
+}

@@ -1,0 +1,20 @@
+id: media.import.yt-dlp
+kind: importer
+description: "Tải video, âm thanh từ URL hoặc nhập tệp cục bộ sử dụng yt-dlp"
+provides:
+  - "media.import@1"
+run:
+  type: builtin
+  command: "media.import.yt-dlp"
+needs:
+  - "bin:yt-dlp"
+cost:
+  unit: "call"
+  estimate: 0.0
+side_effect: none
+resources:
+  ram_mb: 512
+  cpu: light
+  gpu_vram_mb: 0
+  exclusive: []
+lifecycle: per_call

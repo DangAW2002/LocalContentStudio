@@ -184,7 +184,7 @@ modules:
   playbooks.studio:
     requires: [render.hyperframes, craft.shotcraft]
     skills:
-      studio/local: [promo-pipeline]
+      studio/local: [promo-pipeline, youtube-pipeline]
   dev.authoring:
     optional: true
     description: Tự viết skill/MCP mới cho Studio
@@ -241,6 +241,22 @@ kits:
       playbooks.hyperframes: [embedded-captions, talking-head-recut]
       playbooks.charlie: [reel-export]
       voice.elevenlabs: [text-to-speech, speech-to-text, sound-effects]
+  youtube-video:
+    title: Video YouTube hoàn chỉnh
+    keywords:
+      - youtube
+      - video
+      - pipeline
+      - playbook
+      - b-roll
+      - timeline
+      - voiceover
+      - thumbnail
+      - metadata
+    use:
+      playbooks.studio: [youtube-pipeline]
+      design.visual: [canvas-design]
+      craft.shotcraft: all
   youtube-explainer:
     title: Video YouTube giải thích
     keywords:
