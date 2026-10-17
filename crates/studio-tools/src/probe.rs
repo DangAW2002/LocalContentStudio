@@ -59,7 +59,29 @@ pub fn probe(
             note_vi: "Sẵn sàng".to_string(),
         }
     } else {
-        let note = format!("Thiếu phụ thuộc: {}", missing.join(", "));
+        let note = if missing.iter().all(|m| m.starts_with("secret:")) {
+            let keys: Vec<&str> = missing
+                .iter()
+                .filter_map(|m| m.strip_prefix("secret:"))
+                .collect();
+            format!(
+                "Chưa có khoá API {} — thêm trong Cài đặt → Khoá API",
+                keys.join(", ")
+            )
+        } else if let Some(first_secret) = missing.iter().find_map(|m| m.strip_prefix("secret:")) {
+            format!(
+                "Chưa có khoá API {} — thêm trong Cài đặt → Khoá API (thiếu thêm: {})",
+                first_secret,
+                missing
+                    .iter()
+                    .filter(|m| !m.starts_with("secret:"))
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else {
+            format!("Thiếu phụ thuộc: {}", missing.join(", "))
+        };
         ProbeResult {
             available: false,
             missing,

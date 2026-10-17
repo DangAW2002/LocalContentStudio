@@ -1,7 +1,7 @@
 //! Execution pipeline for running tools via `studio-jobs` scheduler.
 
 use crate::error::{Result, ToolError};
-use crate::manifest::SideEffect;
+use crate::manifest::{SideEffect, ToolRunType};
 use crate::registry::Registry;
 use crate::secret::SecretStore;
 use chrono::Utc;
@@ -33,6 +33,8 @@ pub struct ToolRunContext<'a> {
     pub scheduler: &'a Arc<Scheduler>,
     /// Secrets store.
     pub secret_store: &'a dyn SecretStore,
+    /// Host-set API base URL override (tests, local proxies). Never taken from tool input.
+    pub api_base_override: Option<String>,
 }
 
 /// Outcome of invoking a tool.
@@ -140,9 +142,81 @@ pub async fn run_tool(
         }
     }
 
-    // 3. Collect declared secrets ONLY from needs
     let org_name = ctx.workspace.org().name();
     let ws_name = ctx.workspace.name();
+
+    // 3. Builtin in-process tools
+    if tool.run.run_type == ToolRunType::Builtin {
+        let mut api_key = String::new();
+        for need in &tool.needs {
+            if let Some(key) = need.strip_prefix("secret:") {
+                if let Some(val) = ctx.secret_store.get(org_name, Some(ws_name), key) {
+                    api_key = val;
+                    break;
+                } else {
+                    return Err(ToolError::ExecutionFailed {
+                        tool_id: tool.id.clone(),
+                        reason: format!("Chưa có khoá API {key} — thêm trong Cài đặt → Khoá API"),
+                    });
+                }
+            }
+        }
+
+        let job_uuid = Uuid::new_v4().to_string();
+        let turn_out_dir = match &ctx.turn_id {
+            Some(tid) => ctx.workspace.cache_dir().join("turns").join(tid),
+            None => ctx.workspace.cache_dir().join("tool-out"),
+        };
+        fs::create_dir_all(&turn_out_dir).map_err(|e| ToolError::Io {
+            path: turn_out_dir.clone(),
+            source: e,
+        })?;
+
+        let output_json = crate::providers::run_builtin(
+            &tool.id,
+            ctx.workspace,
+            &turn_out_dir,
+            &input,
+            &api_key,
+            ctx.api_base_override.as_deref(),
+        )
+        .await?;
+
+        let job_id: JobId = format!("tool-{}", job_uuid);
+        let final_cost = estimated_cost;
+        record_cost_ledger(
+            ctx.workspace,
+            ctx.turn_id.as_deref(),
+            &job_id,
+            &tool.id,
+            final_cost,
+        )?;
+
+        let output_bytes =
+            serde_json::to_vec(&output_json).map_err(|e| ToolError::ParseError(e.to_string()))?;
+        let output_bytes_len = output_bytes.len();
+
+        if output_bytes_len > MAX_INLINE_RESULT_BYTES {
+            let out_file_path = turn_out_dir.join(format!("{}.json", job_uuid));
+            fs::write(&out_file_path, output_bytes).map_err(|e| ToolError::Io {
+                path: out_file_path.clone(),
+                source: e,
+            })?;
+
+            return Ok(ToolRun::LargeOutput {
+                path: out_file_path,
+                size_bytes: output_bytes_len,
+                cost_usd: final_cost,
+            });
+        } else {
+            return Ok(ToolRun::Success {
+                output: output_json,
+                cost_usd: final_cost,
+            });
+        }
+    }
+
+    // 4. Collect declared secrets ONLY from needs
     let mut job_env = BTreeMap::new();
 
     for need in &tool.needs {
