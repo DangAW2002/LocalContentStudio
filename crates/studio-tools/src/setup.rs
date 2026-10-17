@@ -6,6 +6,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// agy permission rule allowing every Studio MCP tool (agy ≥ 1.4 matches `mcp(<server>/<tool>)`).
+pub const AGY_ALLOW_RULE: &str = "mcp(studio/*)";
+/// Rule written by earlier Studio versions; no longer matches tool calls in agy 1.4.
+const LEGACY_AGY_ALLOW_RULE: &str = "mcp(studio)";
+
 /// Returns the standard path to `%USERPROFILE%/.gemini/antigravity-cli/settings.json`.
 pub fn default_agy_settings_path() -> Option<PathBuf> {
     let home = env::var("USERPROFILE").or_else(|_| env::var("HOME")).ok()?;
@@ -43,39 +48,43 @@ pub fn setup_agy_at(settings_path: &Path, studio_mcp_exe: &Path, run_cli: bool) 
             path: settings_path.to_path_buf(),
             source: e,
         })?;
-        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+        // Never overwrite a settings file we cannot parse: that would wipe the user's agy config.
+        serde_json::from_str(&content).map_err(|e| {
+            ToolError::ParseError(format!(
+                "Không đọc được {} ({e}); không sửa để tránh mất cấu hình",
+                settings_path.display()
+            ))
+        })?
     } else {
         serde_json::json!({})
     };
 
-    if !doc.is_object() {
-        doc = serde_json::json!({});
-    }
-
-    let permissions = doc
-        .as_object_mut()
-        .unwrap()
+    let root = doc.as_object_mut().ok_or_else(|| {
+        ToolError::ParseError(format!(
+            "{} không phải object JSON; không sửa",
+            settings_path.display()
+        ))
+    })?;
+    let permissions = root
         .entry("permissions")
         .or_insert_with(|| serde_json::json!({}));
-
     if !permissions.is_object() {
         *permissions = serde_json::json!({});
     }
-
-    let allow = permissions
-        .as_object_mut()
-        .unwrap()
-        .entry("allow")
-        .or_insert_with(|| serde_json::json!([]));
-
-    if !allow.is_array() {
-        *allow = serde_json::json!([]);
-    }
-
-    let allow_arr = allow.as_array_mut().unwrap();
-    let rule = serde_json::Value::String("mcp(studio)".to_string());
-    if !allow_arr.contains(&rule) {
-        allow_arr.push(rule);
+    if let Some(perms) = permissions.as_object_mut() {
+        let allow = perms
+            .entry("allow")
+            .or_insert_with(|| serde_json::json!([]));
+        if !allow.is_array() {
+            *allow = serde_json::json!([]);
+        }
+        if let Some(allow_arr) = allow.as_array_mut() {
+            allow_arr.retain(|item| item.as_str() != Some(LEGACY_AGY_ALLOW_RULE));
+            let rule = serde_json::Value::String(AGY_ALLOW_RULE.to_string());
+            if !allow_arr.contains(&rule) {
+                allow_arr.push(rule);
+            }
+        }
     }
 
     let updated =
@@ -112,8 +121,12 @@ pub fn remove_agy_at(settings_path: &Path, run_cli: bool) -> Result<()> {
 
     if let Some(perms) = doc.get_mut("permissions").and_then(|p| p.as_object_mut()) {
         if let Some(allow) = perms.get_mut("allow").and_then(|a| a.as_array_mut()) {
-            let rule = serde_json::Value::String("mcp(studio)".to_string());
-            allow.retain(|item| item != &rule);
+            allow.retain(|item| {
+                !matches!(
+                    item.as_str(),
+                    Some(AGY_ALLOW_RULE) | Some(LEGACY_AGY_ALLOW_RULE)
+                )
+            });
         }
     }
 

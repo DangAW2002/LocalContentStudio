@@ -359,7 +359,7 @@ fn test_setup_agy_edits_settings_preserving_keys() {
   "theme": "dark",
   "custom_key": 12345,
   "permissions": {
-    "allow": ["file_read", "command(git)"]
+    "allow": ["file_read", "command(git)", "mcp(studio)"]
   }
 }"#;
     fs::write(&settings_file, initial_json).unwrap();
@@ -382,7 +382,9 @@ fn test_setup_agy_edits_settings_preserving_keys() {
     let allow = parsed["permissions"]["allow"].as_array().unwrap();
     assert!(allow.contains(&serde_json::json!("file_read")));
     assert!(allow.contains(&serde_json::json!("command(git)")));
-    assert!(allow.contains(&serde_json::json!("mcp(studio)")));
+    assert!(allow.contains(&serde_json::json!("mcp(studio/*)")));
+    // The legacy rule (no longer matched by agy 1.4) is migrated away.
+    assert!(!allow.contains(&serde_json::json!("mcp(studio)")));
 
     // 2. Remove agy
     remove_agy_at(&settings_file, false).unwrap();
@@ -394,8 +396,25 @@ fn test_setup_agy_edits_settings_preserving_keys() {
     assert_eq!(parsed_after["theme"], "dark");
     assert_eq!(parsed_after["custom_key"], 12345);
     let allow_after = parsed_after["permissions"]["allow"].as_array().unwrap();
+    assert!(!allow_after.contains(&serde_json::json!("mcp(studio/*)")));
     assert!(!allow_after.contains(&serde_json::json!("mcp(studio)")));
     assert!(allow_after.contains(&serde_json::json!("file_read")));
+}
+
+#[test]
+fn test_setup_agy_refuses_to_overwrite_unparseable_settings() {
+    let tmp = tempdir().unwrap();
+    let settings_file = tmp.path().join("settings.json");
+    let original = "{
+  // user comment
+  \"theme\": \"dark\"
+}";
+    fs::write(&settings_file, original).unwrap();
+    let fake_mcp_exe = tmp.path().join("studio-mcp.exe");
+    fs::write(&fake_mcp_exe, "binary").unwrap();
+
+    assert!(setup_agy_at(&settings_file, &fake_mcp_exe, false).is_err());
+    assert_eq!(fs::read_to_string(&settings_file).unwrap(), original);
 }
 
 #[test]
