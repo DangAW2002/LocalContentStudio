@@ -2,7 +2,7 @@ use crate::db::WorkspaceDb;
 use crate::error::{Result, WorkspaceError};
 use crate::workspace::Workspace;
 use chrono::{DateTime, Utc};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -176,6 +176,15 @@ impl CheckpointService {
                 continue;
             }
 
+            // If file already exists and has the exact same content, do not touch it
+            if target_path.is_file() {
+                if let Ok((cur_sha, _)) = hash_and_read_file(&target_path) {
+                    if cur_sha == sha {
+                        continue;
+                    }
+                }
+            }
+
             if let Some(parent) = target_path.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -189,6 +198,64 @@ impl CheckpointService {
                 temp_file.sync_all()?;
             }
             fs::rename(&temp_path, &target_path)?;
+        }
+
+        Ok(())
+    }
+
+    /// Undo a turn at the workspace level:
+    /// - Checks turn status: if already 'undone', returns WorkspaceError::TurnAlreadyUndone
+    /// - Restores the checkpoint created before the turn
+    /// - Deletes events emitted during the turn
+    /// - Marks turn status as 'undone'
+    /// - Sets thread note if turn was part of a thread
+    pub fn undo_turn(ws: &Workspace, turn_id: &str) -> Result<()> {
+        let db = WorkspaceDb::open(ws)?;
+
+        // Check if turn is already undone
+        let turn_info: Option<(String, Option<String>)> = db
+            .conn()
+            .query_row(
+                "SELECT status, thread_id FROM turns WHERE id = ?1",
+                params![turn_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+
+        if let Some((status, _)) = &turn_info {
+            if status == "undone" {
+                return Err(WorkspaceError::TurnAlreadyUndone);
+            }
+        }
+
+        let checkpoint = Self::list(ws)?
+            .into_iter()
+            .find(|c| c.turn_id.as_deref() == Some(turn_id))
+            .ok_or_else(|| {
+                WorkspaceError::CheckpointNotFound(format!(
+                    "Không tìm thấy checkpoint của lượt '{turn_id}'."
+                ))
+            })?;
+
+        Self::restore(ws, &checkpoint.id)?;
+
+        db.conn()
+            .execute("DELETE FROM events WHERE turn_id = ?1", params![turn_id])?;
+        db.conn().execute(
+            "UPDATE turns SET status = 'undone' WHERE id = ?1",
+            params![turn_id],
+        )?;
+
+        if let Some((_, Some(thread_id))) = turn_info {
+            let note_key = format!("thread.note.{thread_id}");
+            let _ = db.conn().execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![
+                    note_key,
+                    "Lưu ý: người dùng đã hoàn tác lượt trước; các thay đổi tệp của lượt đó không còn nữa."
+                ],
+            );
         }
 
         Ok(())

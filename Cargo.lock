@@ -3940,6 +3940,7 @@ dependencies = [
  "tracing",
  "uuid",
  "walkdir",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

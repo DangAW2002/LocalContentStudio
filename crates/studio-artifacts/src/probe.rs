@@ -282,14 +282,13 @@ mod which {
     use std::path::PathBuf;
 
     pub fn which(name: &str) -> std::result::Result<PathBuf, ()> {
-        let path_var = std::env::var_os("PATH").ok_or(())?;
         let pathext_var =
             std::env::var_os("PATHEXT").unwrap_or_else(|| ".EXE;.CMD;.BAT;.COM".into());
         let extensions: Vec<String> = std::env::split_paths(&pathext_var)
             .filter_map(|p| p.to_str().map(|s| s.to_string()))
             .collect();
 
-        for dir in std::env::split_paths(&path_var) {
+        for dir in studio_workspace::env_path::get_fresh_paths(false) {
             let candidate = dir.join(name);
             if candidate.is_file() {
                 return Ok(candidate);

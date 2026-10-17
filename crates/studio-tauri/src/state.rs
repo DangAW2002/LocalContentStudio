@@ -63,15 +63,20 @@ impl AppState {
     pub fn new() -> Self {
         let app_paths = AppPaths::from_env();
         let estimates: Arc<dyn EstimateStore> = Arc::new(MemoryEstimateStore::new());
-        let local = std::env::var("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| app_paths.data_dir().to_path_buf());
-        Self {
-            catalog_path: app_paths.data_dir().join("catalog").join("catalog.yaml"),
-            sources_dir: local
+        let sources_dir = if std::env::var("STUDIO_APP_DIR").is_ok() {
+            app_paths.data_dir().join("catalog").join("sources")
+        } else {
+            let local = std::env::var("LOCALAPPDATA")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| app_paths.data_dir().to_path_buf());
+            local
                 .join("LocalContentStudio")
                 .join("catalog")
-                .join("sources"),
+                .join("sources")
+        };
+        Self {
+            catalog_path: app_paths.data_dir().join("catalog").join("catalog.yaml"),
+            sources_dir,
             app_paths: app_paths.clone(),
             scheduler: Scheduler::new(
                 SchedulerConfig::default(),

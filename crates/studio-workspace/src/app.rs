@@ -202,18 +202,32 @@ impl AppDb {
         Ok(list)
     }
 
-    /// Record a workspace opening.
-    pub fn record_workspace_open(&self, path: &str) -> Result<()> {
+    /// Record a workspace opening, normalizing the path and deduplicating.
+    pub fn record_workspace_open(&self, raw_path: &str) -> Result<()> {
+        let norm = normalize_workspace_path(raw_path);
         let now = chrono::Utc::now().to_rfc3339();
+
+        if cfg!(windows) {
+            let verbatim = format!(r"\\?\{norm}");
+            let _ = self.conn.execute(
+                "DELETE FROM recent_workspaces WHERE lower(path) = lower(?1) OR lower(path) = lower(?2)",
+                params![norm, verbatim],
+            );
+        } else {
+            let _ = self.conn.execute(
+                "DELETE FROM recent_workspaces WHERE path = ?1",
+                params![norm],
+            );
+        }
+
         self.conn.execute(
-            "INSERT INTO recent_workspaces (path, last_opened) VALUES (?1, ?2)
-             ON CONFLICT(path) DO UPDATE SET last_opened = excluded.last_opened",
-            params![path, now],
+            "INSERT INTO recent_workspaces (path, last_opened) VALUES (?1, ?2)",
+            params![norm, now],
         )?;
         Ok(())
     }
 
-    /// List recent workspaces, sorted descending by last_opened.
+    /// List recent workspaces, sorted descending by last_opened, deduplicated.
     pub fn list_recent_workspaces(&self) -> Result<Vec<RecentWorkspace>> {
         let mut stmt = self
             .conn
@@ -224,9 +238,24 @@ impl AppDb {
                 last_opened: row.get(1)?,
             })
         })?;
+
+        let mut seen = std::collections::HashSet::new();
         let mut list = Vec::new();
         for r in rows {
-            list.push(r?);
+            let item = r?;
+            let norm = normalize_workspace_path(&item.path);
+            let key = if cfg!(windows) {
+                norm.to_lowercase()
+            } else {
+                norm.clone()
+            };
+
+            if seen.insert(key) {
+                list.push(RecentWorkspace {
+                    path: norm,
+                    last_opened: item.last_opened,
+                });
+            }
         }
         Ok(list)
     }
@@ -274,5 +303,27 @@ impl AppDb {
             list.push(r?);
         }
         Ok(list)
+    }
+}
+
+/// Normalize a workspace path for storage and deduplication:
+/// Strips verbatim prefixes (`\\?\` or `\\?\UNC\`) and trims trailing slashes (preserving drive roots like `C:\`).
+pub fn normalize_workspace_path(path: impl AsRef<Path>) -> String {
+    let raw = path.as_ref().to_string_lossy();
+    let stripped = if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        raw.into_owned()
+    };
+
+    let trimmed = stripped.trim_end_matches(['/', '\\']);
+    if trimmed.len() == 2 && trimmed.ends_with(':') {
+        format!("{trimmed}\\")
+    } else if trimmed.is_empty() {
+        stripped
+    } else {
+        trimmed.to_string()
     }
 }

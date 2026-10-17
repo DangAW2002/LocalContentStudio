@@ -132,19 +132,6 @@ fn ws_summary(ws: &Workspace, current: bool) -> Value {
 fn activate(app: &AppHandle, state: &AppState, ws: &Workspace) -> CmdResult<()> {
     let norm = normalize_workspace_path(ws.root());
     if let Ok(db) = state.app_paths.open_app_db() {
-        if let Ok(conn) = rusqlite::Connection::open(state.app_paths.app_db_path()) {
-            if cfg!(windows) {
-                let _ = conn.execute(
-                    "DELETE FROM recent_workspaces WHERE lower(path) = lower(?1) OR lower(path) = lower(?2)",
-                    params![norm, format!(r"\\?\{norm}")],
-                );
-            } else {
-                let _ = conn.execute(
-                    "DELETE FROM recent_workspaces WHERE path = ?1",
-                    params![norm],
-                );
-            }
-        }
         let _ = db.record_workspace_open(&norm);
     }
     let _ = app.asset_protocol_scope().allow_directory(ws.root(), true);
@@ -1193,6 +1180,9 @@ pub struct EnvProbeItem {
 /// Probes external tools (Node, npx, FFmpeg, ffprobe, Chrome/Edge, claude, agy) via real binaries.
 #[tauri::command]
 pub async fn env_probe(state: State<'_, AppState>) -> CmdResult<Vec<EnvProbeItem>> {
+    // "Quét lại" forces a fresh PATH inspection from registry
+    studio_workspace::env_path::get_fresh_paths(true);
+
     let mut items = Vec::new();
 
     let (node, npx) = studio_artifacts::probe_node_npx();

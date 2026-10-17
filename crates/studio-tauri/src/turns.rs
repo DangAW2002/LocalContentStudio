@@ -559,10 +559,6 @@ async fn run_turn(t: TurnTask, mut turn: Turn, cancel: Arc<Notify>) {
 /// Undo a turn: restore the checkpoint taken before it and drop its events.
 pub fn undo_turn(state: &AppState, turn_id: &str) -> CmdResult<bool> {
     let ws = state.workspace()?;
-    let checkpoint = CheckpointService::list(&ws)?
-        .into_iter()
-        .find(|c| c.turn_id.as_deref() == Some(turn_id))
-        .ok_or_else(|| CmdError::msg("Không tìm thấy checkpoint của lượt này."))?;
     if state
         .turns
         .lock()
@@ -573,29 +569,7 @@ pub fn undo_turn(state: &AppState, turn_id: &str) -> CmdResult<bool> {
             "Lượt đang chạy; hãy dừng trước khi hoàn tác.",
         ));
     }
-    CheckpointService::restore(&ws, &checkpoint.id)?;
-    let db = WorkspaceDb::open(&ws)?;
-    let thread_id: Option<String> = db
-        .conn()
-        .query_row(
-            "SELECT thread_id FROM turns WHERE id = ?1",
-            [turn_id],
-            |r| r.get(0),
-        )
-        .optional()?;
-    db.conn()
-        .execute("DELETE FROM events WHERE turn_id = ?1", [turn_id])?;
-    db.conn().execute(
-        "UPDATE turns SET status = 'undone' WHERE id = ?1",
-        [turn_id],
-    )?;
-    if let Some(thread) = thread_id {
-        set_setting(
-            &db,
-            &format!("thread.note.{thread}"),
-            "Lưu ý: người dùng đã hoàn tác lượt trước; các thay đổi tệp của lượt đó không còn nữa.",
-        )?;
-    }
+    CheckpointService::undo_turn(&ws, turn_id).map_err(|e| CmdError::msg(e.to_string()))?;
     Ok(true)
 }
 

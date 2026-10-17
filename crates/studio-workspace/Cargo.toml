@@ -18,5 +18,12 @@ serde_yaml = "0.9"
 walkdir = "2.5"
 notify = "8.2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_System_Registry",
+    "Win32_System_Environment",
+] }
+
 [dev-dependencies]
 tempfile = { workspace = true }

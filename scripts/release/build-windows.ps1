@@ -22,7 +22,11 @@ if ($LASTEXITCODE -ne 0) { throw "Build desktop-ui failed with exit code $LASTEX
 
 Write-Host "=== 3. Building Tauri Windows Release Bundle ===" -ForegroundColor Cyan
 $TauriCli = Join-Path $RepoRoot "packages\desktop-ui\node_modules\@tauri-apps\cli\tauri.js"
-node $TauriCli build --bundles nsis --no-sign
+if (Test-Path $TauriCli) {
+    node $TauriCli build --bundles nsis --no-sign
+} else {
+    pnpm --filter @studio/desktop-ui exec tauri build --bundles nsis --no-sign
+}
 if ($LASTEXITCODE -ne 0) { throw "Tauri build failed with exit code $LASTEXITCODE" }
 
 Write-Host "=== 4. Locating NSIS Installer ===" -ForegroundColor Cyan

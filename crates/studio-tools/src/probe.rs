@@ -3,7 +3,6 @@
 use crate::manifest::ToolManifest;
 use crate::secret::SecretStore;
 use serde::{Deserialize, Serialize};
-use std::env;
 use std::path::PathBuf;
 use std::process::Command;
 use studio_workspace::Workspace;
@@ -138,15 +137,16 @@ pub fn probe_binary(bin: &str) -> bool {
 }
 
 /// Locate binary executable in PATH considering OS-specific executable extensions.
+/// Uses refreshed PATH (including registry on Windows, deduped, process PATH first).
 pub fn find_in_path(bin: &str) -> Option<PathBuf> {
-    let path_var = env::var_os("PATH")?;
-
     #[cfg(windows)]
     let extensions = ["", ".exe", ".cmd", ".bat", ".com"];
     #[cfg(not(windows))]
     let extensions = [""];
 
-    for dir in env::split_paths(&path_var) {
+    let search_dirs = studio_workspace::env_path::get_fresh_paths(false);
+
+    for dir in search_dirs {
         for ext in &extensions {
             let candidate = if ext.is_empty() {
                 dir.join(bin)
