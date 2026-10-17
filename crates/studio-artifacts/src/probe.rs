@@ -179,6 +179,9 @@ pub fn probe_ffprobe() -> ProbeReport {
 }
 
 /// Helper to probe Node and npx.
+///
+/// On Windows, `npx` is a `.cmd` batch script; `which` resolves it to `npx.cmd`.
+/// The path is stored in `ProbeReport.path` and must be invoked via `cmd.exe /C` on Windows.
 pub fn probe_node_npx() -> (ProbeReport, ProbeReport) {
     let node_report = if let Ok(path) = which::which("node") {
         let ver = get_binary_version(&path, &["--version"]);
@@ -199,8 +202,21 @@ pub fn probe_node_npx() -> (ProbeReport, ProbeReport) {
         }
     };
 
-    let npx_report = if let Ok(path) = which::which("npx") {
-        let ver = get_binary_version(&path, &["--version"]);
+    // On Windows npx is npx.cmd; which() already appends PATHEXT so we get the .cmd path.
+    let npx_name = if cfg!(windows) { "npx.cmd" } else { "npx" };
+    let npx_report = if let Ok(path) = which::which(npx_name) {
+        // Use --version; npx.cmd needs cmd.exe on Windows, but --version works via direct spawn too.
+        let ver = get_npx_version(&path);
+        ProbeReport {
+            name: "npx".into(),
+            available: true,
+            path: Some(path),
+            version: ver,
+            note: format!("Found {} on PATH", npx_name),
+        }
+    } else if let Ok(path) = which::which("npx") {
+        // Fallback: plain 'npx' (non-Windows or npx.cmd not found under that name)
+        let ver = get_npx_version(&path);
         ProbeReport {
             name: "npx".into(),
             available: true,
@@ -219,6 +235,36 @@ pub fn probe_node_npx() -> (ProbeReport, ProbeReport) {
     };
 
     (node_report, npx_report)
+}
+
+/// Get npx version, handling `.cmd` scripts on Windows that require `cmd.exe /C`.
+fn get_npx_version(path: &std::path::Path) -> Option<String> {
+    #[cfg(windows)]
+    {
+        let out = std::process::Command::new("cmd.exe")
+            .args(["/C", &path.to_string_lossy(), "--version"])
+            .output()
+            .ok()?;
+        let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        // npx --version prints to stdout; pick first non-empty line from either
+        for line in stdout.lines().chain(stderr.lines()) {
+            let t = line.trim();
+            if !t.is_empty()
+                && t.chars()
+                    .next()
+                    .map(|c| c.is_ascii_digit())
+                    .unwrap_or(false)
+            {
+                return Some(t.to_string());
+            }
+        }
+        None
+    }
+    #[cfg(not(windows))]
+    {
+        get_binary_version(path, &["--version"])
+    }
 }
 
 fn get_binary_version(path: &Path, args: &[&str]) -> Option<String> {

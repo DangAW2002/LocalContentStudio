@@ -311,15 +311,19 @@ pub async fn run_tool(
             source: e,
         })?;
         let len = content.len();
-        let json: serde_json::Value = serde_json::from_slice(&content).unwrap_or_else(
-            |_| serde_json::json!({ "raw": String::from_utf8_lossy(&content).to_string() }),
+        let slice = content
+            .strip_prefix(&[0xEF, 0xBB, 0xBF])
+            .unwrap_or(&content);
+        let json: serde_json::Value = serde_json::from_slice(slice).unwrap_or_else(
+            |_| serde_json::json!({ "raw": String::from_utf8_lossy(slice).to_string() }),
         );
         (json, len)
     } else {
         let combined = stdout_lines.join("\n");
         let len = combined.len();
-        let json: serde_json::Value = serde_json::from_str(&combined).unwrap_or_else(|_| {
-            if combined.trim().is_empty() {
+        let trimmed = combined.trim_start_matches('\u{feff}').trim();
+        let json: serde_json::Value = serde_json::from_str(trimmed).unwrap_or_else(|_| {
+            if trimmed.is_empty() {
                 serde_json::json!({})
             } else {
                 serde_json::json!({ "output": combined })
