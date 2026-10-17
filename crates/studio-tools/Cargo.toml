@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 studio-workspace = { path = "../studio-workspace" }
 studio-jobs = { path = "../studio-jobs" }
+studio-brand = { path = "../studio-brand" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = "0.9"
@@ -22,6 +23,7 @@ base64 = "0.22"
 zip = { workspace = true }
 url = { workspace = true }
 tempfile = { workspace = true }
+sha2 = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_Security_Credentials", "Win32_Foundation"] }

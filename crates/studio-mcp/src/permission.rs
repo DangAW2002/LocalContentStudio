@@ -63,7 +63,11 @@ pub fn policy_check(ctx: &TurnContext, tool_name: &str, input: &Value) -> Option
             }
         }
     }
-    if tool_name == "artifact_render" || tool_name == "mcp__studio__artifact_render" {
+    if tool_name == "artifact_render"
+        || tool_name == "mcp__studio__artifact_render"
+        || tool_name == "publish_prepare"
+        || tool_name == "mcp__studio__publish_prepare"
+    {
         if let Some(ref turn_proj) = ctx.project {
             if let Some(p) = input.get("project").and_then(Value::as_str) {
                 if p != turn_proj {

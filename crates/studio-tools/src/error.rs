@@ -61,6 +61,10 @@ pub enum ToolError {
     #[error("Lỗi điều phối tiến trình: {0}")]
     JobSchedulerError(String),
 
+    /// Execution or operational error.
+    #[error("Lỗi thực thi: {0}")]
+    ExecutionError(String),
+
     /// Database error.
     #[error("Lỗi cơ sở dữ liệu: {0}")]
     DatabaseError(#[from] rusqlite::Error),

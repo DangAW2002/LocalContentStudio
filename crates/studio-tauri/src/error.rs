@@ -40,5 +40,6 @@ from_err!(
     studio_workspace::WorkspaceError,
     studio_catalog::CatalogError,
     studio_engine::EngineError,
-    studio_brand::BrandError
+    studio_brand::BrandError,
+    studio_tools::ToolError
 );

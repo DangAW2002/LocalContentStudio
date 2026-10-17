@@ -3,6 +3,7 @@ import { Icon } from "../../components/Icon";
 import { Tabs, Button, Badge, Dialog, EmptyState } from "@studio/design-system";
 import { studioApi } from "../../api/client";
 import { ProjectFolderTree } from "./ProjectFolderTree";
+import { PublishDialog } from "../../components/PublishDialog";
 import type {
   ArtifactSummary,
   CheckpointSummary,
@@ -31,6 +32,8 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
   const [restoreConfirmId, setRestoreConfirmId] = React.useState<string | null>(null);
   const [restoring, setRestoring] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  const [publishArtifact, setPublishArtifact] = React.useState<ArtifactSummary | null>(null);
+  const [publishDialogOpen, setPublishDialogOpen] = React.useState(false);
 
   // Load artifacts, checkpoints and catalog info
   const loadArtifactsData = React.useCallback(async () => {
@@ -259,9 +262,22 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
                         {art.title || art.id}
                       </span>
                     </div>
-                    <Badge variant="info">
-                      {ARTIFACT_KIND_VI[art.kind] || art.kind}
-                    </Badge>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <Badge variant="info">
+                        {ARTIFACT_KIND_VI[art.kind] || art.kind}
+                      </Badge>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPublishArtifact(art);
+                          setPublishDialogOpen(true);
+                        }}
+                      >
+                        Đăng…
+                      </Button>
+                    </div>
                   </div>
 
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", color: "var(--cs-fg-muted)", fontSize: 11 }}>
@@ -481,6 +497,17 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
           </p>
         </Dialog>
       )}
+
+      {/* Publish Dialog */}
+      <PublishDialog
+        open={publishDialogOpen}
+        onClose={() => {
+          setPublishDialogOpen(false);
+          setPublishArtifact(null);
+        }}
+        projectSlug={projectSlug}
+        artifact={publishArtifact}
+      />
     </div>
   );
 };

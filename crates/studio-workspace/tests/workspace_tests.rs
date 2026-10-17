@@ -222,7 +222,7 @@ fn test_migrations_idempotency_and_backup() {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
     }
 
     // Second open must be idempotent
@@ -234,7 +234,7 @@ fn test_migrations_idempotency_and_backup() {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
     }
 }
 
