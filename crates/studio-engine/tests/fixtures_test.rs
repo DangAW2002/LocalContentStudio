@@ -365,3 +365,40 @@ fn claude_thinking_text_is_forwarded_once() {
     let ev = p.feed(r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"","signature":"x"}]}}"#);
     assert!(matches!(ev.as_slice(), [studio_engine::Event::Thinking(t)] if t.is_empty()));
 }
+
+#[test]
+fn claude_thinking_tokens_live_frame() {
+    let mut p = ClaudeParser::new();
+    let ev = p.feed(r#"{"type":"system","subtype":"thinking_tokens","estimated_tokens":1234}"#);
+    assert_eq!(
+        ev,
+        vec![studio_engine::Event::Usage {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            reasoning_tokens: 1234,
+            cost_usd: None,
+        }]
+    );
+}
+
+#[test]
+fn agy_tool_calls_mapped_to_friendly_names() {
+    let mut p = AgyParser::new();
+    let ev = p.feed(r#"{"event":"step_update","step_update":{"step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"write_to_file","tool_info":{"name":"write_to_file","parameters":{"TargetFile":"test.md"}}}}"#);
+    assert_eq!(
+        ev,
+        vec![
+            studio_engine::Event::FileChange {
+                path: std::path::PathBuf::from("test.md"),
+                op: studio_engine::FileOp::Write,
+            },
+            studio_engine::Event::ToolCall {
+                id: "step-2".to_string(),
+                name: "Tạo tệp".to_string(),
+                input: serde_json::json!({"TargetFile": "test.md"}),
+            }
+        ]
+    );
+}

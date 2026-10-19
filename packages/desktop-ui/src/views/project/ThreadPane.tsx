@@ -2,9 +2,10 @@ import React from "react";
 import { useStickToBottom } from "../../runtime/chat/useStickToBottom";
 import { newQueuedSend } from "../../runtime/chat/send-queue";
 import { Icon } from "../../components/Icon";
-import { Button, Badge, Callout } from "@studio/design-system";
+import { Button, Badge, Callout, Select, type SelectOption } from "@studio/design-system";
 import { studioApi } from "../../api/client";
 import type {
+  EngineModelOption,
   ProjectFileEntry,
   PublishRequest,
   ScopeItem,
@@ -60,6 +61,15 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
   const [undoing, setUndoing] = React.useState(false);
   const [undoToast, setUndoToast] = React.useState<string | null>(null);
 
+  // M07: Mid-thread model selection and options
+  const [availableModels, setAvailableModels] = React.useState<EngineModelOption[]>([]);
+  const [selectedModel, setSelectedModel] = React.useState<string>(activeThread?.model || "");
+  const [savingModel, setSavingModel] = React.useState(false);
+
+  // M07: Edit & resend last message target
+  const [editResendTargetTurnId, setEditResendTargetTurnId] = React.useState<string | null>(null);
+  const [editResendPrompt, setEditResendPrompt] = React.useState<string>("");
+
   const [pendingPublishRequests, setPendingPublishRequests] = React.useState<PublishRequest[]>([]);
   const [selectedPublishRequest, setSelectedPublishRequest] = React.useState<PublishRequest | null>(null);
   const [publishDialogOpen, setPublishDialogOpen] = React.useState(false);
@@ -105,6 +115,18 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
     activeThreadId: activeThread?.id,
     onTurnDone: loadPublishRequests,
   });
+
+  // Sync selectedModel with activeThread
+  React.useEffect(() => {
+    setSelectedModel(activeThread?.model || "");
+    if (activeThread?.engine) {
+      studioApi.getEngineModels(activeThread.engine as any).then((models: EngineModelOption[]) => {
+        setAvailableModels(models);
+      }).catch(() => {
+        setAvailableModels([]);
+      });
+    }
+  }, [activeThread?.id, activeThread?.engine, activeThread?.model]);
 
   // Handle pending text insertion from StagePane
   React.useEffect(() => {
@@ -220,6 +242,74 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
     else setInputPrompt((cur) => cur || userText);
   };
 
+  const handleModelChange = async (newModel: string) => {
+    if (!activeThread) return;
+    setSavingModel(true);
+    try {
+      const val = newModel.trim() ? newModel.trim() : null;
+      await studioApi.setThreadModel(activeThread.id, val);
+      setSelectedModel(newModel);
+      activeThread.model = val || undefined;
+    } catch (e: any) {
+      setError(e?.message || "Không thể cập nhật model.");
+    } finally {
+      setSavingModel(false);
+    }
+  };
+
+  const handleRetryTurn = async (turnId?: string) => {
+    if (!activeThread) return;
+    // Find the user prompt for this turn or the last user prompt
+    let promptToRetry = "";
+    if (turnId) {
+      const userMsg = messages.find((m) => m.role === "user" && m.turnId === turnId);
+      if (userMsg?.text) promptToRetry = userMsg.text;
+    }
+    if (!promptToRetry) {
+      const lastUser = [...messages].reverse().find((m) => m.role === "user" && m.text);
+      if (lastUser) promptToRetry = lastUser.text;
+    }
+    if (promptToRetry) {
+      await startPrompt(promptToRetry);
+    }
+  };
+
+  const handleStartEditResend = (prompt: string, turnId?: string) => {
+    if (!turnId) {
+      // Just populate composer if turn has no id
+      setInputPrompt(prompt);
+      textareaRef.current?.focus();
+      return;
+    }
+    const agentTurn = messages.find((m) => m.role === "agent" && m.turnId === turnId);
+    const hasFiles = Boolean(agentTurn?.fileChanges?.length);
+    if (hasFiles) {
+      // Need confirmation before undoing files
+      setEditResendTargetTurnId(turnId);
+      setEditResendPrompt(prompt);
+    } else {
+      // No files changed: directly undo turn and populate prompt in composer
+      handleConfirmEditResend(turnId, prompt);
+    }
+  };
+
+  const handleConfirmEditResend = async (turnId: string, prompt?: string) => {
+    const textToEdit = prompt || editResendPrompt;
+    setUndoing(true);
+    try {
+      await studioApi.undoTurn({ turnId });
+      setEditResendTargetTurnId(null);
+      setMessages((prev) => prev.filter((m) => m.turnId !== turnId));
+      setInputPrompt(textToEdit);
+      textareaRef.current?.focus();
+      onUndoTurnSuccess?.();
+    } catch (err: any) {
+      setError(err?.message || "Không thể hoàn tác lượt để sửa tin nhắn.");
+    } finally {
+      setUndoing(false);
+    }
+  };
+
   const handleUndoTurn = async (turnId: string) => {
     setUndoing(true);
     try {
@@ -288,6 +378,13 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
     );
   };
 
+  const lastUserMsgIdx = React.useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") return i;
+    }
+    return -1;
+  }, [messages]);
+
   return (
     <div
       style={{
@@ -311,13 +408,28 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
           fontSize: "var(--cs-text-sm)",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontWeight: 600, color: "var(--cs-fg-primary)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+          <span style={{ fontWeight: 600, color: "var(--cs-fg-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {activeThread?.title || "Hội thoại chính"}
           </span>
           <Badge variant={activeThread?.engine === "claude" ? "info" : "neutral"}>
             {activeThread?.engine === "claude" ? "Claude" : "agy"}
           </Badge>
+          {availableModels.length > 0 && (
+            <div style={{ width: 170, marginLeft: 4 }}>
+              <Select
+                size="sm"
+                value={selectedModel}
+                disabled={Boolean(runningTurnId) || savingModel}
+                options={[
+                  { value: "", label: "(Mặc định của engine)" },
+                  ...availableModels.map((m) => ({ value: m.value, label: m.label })),
+                ]}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleModelChange(e.target.value)}
+                title="Đổi model cho các lượt tiếp theo"
+              />
+            </div>
+          )}
         </div>
 
         {runningTurnId && (
@@ -384,8 +496,42 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
                   maxWidth: "85%",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    fontSize: "var(--cs-text-xs)",
+                    color: "var(--cs-fg-muted)",
+                  }}
+                >
                   <span style={{ fontWeight: 600 }}>Bạn</span>
+                  {msgIdx === lastUserMsgIdx && !runningTurnId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const associatedTurnId = msg.turnId || messages[msgIdx + 1]?.turnId;
+                        handleStartEditResend(msg.text, associatedTurnId);
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--cs-fg-secondary)",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        fontSize: "var(--cs-text-xs)",
+                        padding: "2px 6px",
+                        borderRadius: "var(--cs-radius-control)",
+                      }}
+                      title="Sửa và gửi lại tin nhắn này (hoàn tác lượt agent tương ứng nếu có)"
+                    >
+                      <Icon name="writing" size={11} />
+                      <span>Sửa</span>
+                    </button>
+                  )}
                 </div>
                 <div
                   style={{
@@ -414,6 +560,7 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
                 onSelectFile={onSelectFile}
                 onPermissionRespond={handlePermissionRespond}
                 onRerunPrompt={(p) => setInputPrompt(p)}
+                onRetryTurn={handleRetryTurn}
                 onOpenPublishDraft={async () => {
                   try {
                     const list = await studioApi.publishList(projectSlug);
@@ -512,6 +659,17 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
         undoing={undoing}
         onClose={() => setUndoTurnTarget(null)}
         onConfirm={handleUndoTurn}
+      />
+
+      {/* Edit & Resend Undo Confirm Dialog */}
+      <UndoConfirmDialog
+        targetTurnId={editResendTargetTurnId}
+        messages={messages}
+        undoing={undoing}
+        title="Sửa và gửi lại tin nhắn?"
+        confirmLabel="Hoàn tác & Sửa"
+        onClose={() => setEditResendTargetTurnId(null)}
+        onConfirm={(turnId) => handleConfirmEditResend(turnId)}
       />
 
       {/* Undo Result Toast */}

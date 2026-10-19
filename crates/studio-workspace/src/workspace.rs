@@ -17,8 +17,11 @@ pub struct WorkspaceMeta {
     #[serde(default)]
     pub default_brand: Option<String>,
     /// Monthly budget in USD
-    #[serde(default)]
+    #[serde(default, alias = "budget_month_usd")]
     pub monthly_budget_usd: Option<f64>,
+    /// Daily budget in USD
+    #[serde(default, alias = "budget_day_usd")]
+    pub daily_budget_usd: Option<f64>,
 }
 
 fn default_ws_version() -> u32 {
@@ -168,6 +171,7 @@ impl Workspace {
             version: 1,
             default_brand: None,
             monthly_budget_usd: None,
+            daily_budget_usd: None,
         };
 
         let yaml = serde_yaml::to_string(&meta)
@@ -248,6 +252,12 @@ impl Workspace {
     /// Organization owning or encompassing this workspace.
     pub fn org(&self) -> &Org {
         &self.org
+    }
+
+    /// Read workspace metadata from `studio.yaml`.
+    pub fn meta(&self) -> Result<WorkspaceMeta> {
+        let content = fs::read_to_string(self.root.join("studio.yaml"))?;
+        serde_yaml::from_str(&content).map_err(|e| WorkspaceError::Serialization(e.to_string()))
     }
 
     /// `.studio` directory.

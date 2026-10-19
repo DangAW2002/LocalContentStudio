@@ -198,6 +198,11 @@ function seedWorkspaceAndAppDb({ appDir, wsDir }) {
       cost_usd REAL NOT NULL,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
   `);
 
   // Insert seed thread, turn, event, artifact, checkpoint

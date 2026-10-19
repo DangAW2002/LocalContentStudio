@@ -130,6 +130,32 @@ describe("turn-reducer", () => {
       expect(state[0].thinkingMs).toBe(2000); // 3000 - 1000
     });
 
+    it("does not close thinking block on live Usage event with reasoningTokens", () => {
+      let state: ThreadMessage[] = [];
+      state = applyTurnEvent(state, {
+        turnId: "t-1",
+        event: { type: "Thinking", text: "Đang suy luận" },
+      }, 1000);
+      expect(state[0].thinkingActive).toBe(true);
+
+      // Live thinking tokens update (Usage event)
+      state = applyTurnEvent(state, {
+        turnId: "t-1",
+        event: {
+          type: "Usage",
+          inputTokens: 10,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: 42,
+        },
+      }, 1200);
+
+      // Thinking is STILL active, but reasoningTokens is populated
+      expect(state[0].thinkingActive).toBe(true);
+      expect(state[0].usage?.reasoningTokens).toBe(42);
+    });
+
     it("handles ToolCall and ToolResult", () => {
       let state: ThreadMessage[] = [];
       state = applyTurnEvent(state, {
