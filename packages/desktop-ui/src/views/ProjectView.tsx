@@ -499,6 +499,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                     setSelectedFilePath(path);
                     setNarrowTab("stage");
                   }}
+                  onAskAgentToFix={handleAskAi}
                 />
               </PaneBoundary>
             )}
@@ -566,6 +567,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                   artifacts={artifacts}
                   onRefreshArtifacts={refreshArtifacts}
                   onSelectFile={setSelectedFilePath}
+                  onAskAgentToFix={handleAskAi}
                 />
               </PaneBoundary>
             </div>

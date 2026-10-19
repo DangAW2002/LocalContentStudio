@@ -1708,6 +1708,257 @@ pub fn artifact_check(
     artifact_check_impl(&state, project, id, channels)
 }
 
+/// Channel matrix status item for a single artifact x channel pair.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ArtifactChannelMatrixCell {
+    pub channel_id: String,
+    pub channel_name: String,
+    pub status: String, // "passed" | "warning" | "error" | "unrendered"
+    pub errors_count: usize,
+    pub warnings_count: usize,
+    pub render_hash: Option<String>,
+    pub findings: Vec<Value>,
+}
+
+/// Matrix row for an artifact.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ArtifactChannelMatrixRow {
+    pub artifact_id: String,
+    pub artifact_title: String,
+    pub kind: String,
+    pub source: String,
+    pub channels: Vec<ArtifactChannelMatrixCell>,
+}
+
+/// Compute channel matrix for all artifacts in a project, using SQLite cache by (render_hash, channel_version).
+pub fn artifact_channel_matrix_impl(
+    state: &AppState,
+    project: String,
+) -> CmdResult<Vec<ArtifactChannelMatrixRow>> {
+    let ws = state.workspace()?;
+    let p = Project::open(&ws, &project)?;
+    let artifacts =
+        studio_artifacts::Artifact::list(&p).map_err(|e| CmdError::msg(e.to_string()))?;
+
+    // Resolve available channels for project via ScopeChain
+    let scope_chain = ScopeChain::with_app_paths(&ws, state.app_paths.clone());
+    let resolved_channels = scope_chain.resolve("channels");
+    let mut channel_map = std::collections::BTreeMap::new();
+    for item in &resolved_channels {
+        if item.path.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&item.path) {
+                use sha2::{Digest, Sha256};
+                let mut hasher = Sha256::new();
+                hasher.update(content.as_bytes());
+                let ch_version = hex::encode(hasher.finalize());
+                let title = serde_yaml::from_str::<studio_brand::ChannelSpec>(&content)
+                    .map(|s| s.title)
+                    .unwrap_or_else(|_| item.id.clone());
+                channel_map.insert(item.id.clone(), (title, ch_version));
+            }
+        }
+    }
+
+    let db = WorkspaceDb::open(&ws)?;
+
+    let mut rows = Vec::new();
+
+    for art in artifacts {
+        let art_channels: Vec<String> = if !art.channels.is_empty() {
+            art.channels.clone()
+        } else {
+            channel_map.keys().cloned().collect()
+        };
+
+        // Query newest render hash for this artifact
+        let newest_render: Option<(String, Vec<PathBuf>)> = {
+            let stmt = db.conn().prepare(
+                "SELECT output_path, hash FROM renders WHERE artifact_id = ?1 ORDER BY created_at DESC",
+            ).ok();
+            let mut out_hash = None;
+            let mut out_paths = Vec::new();
+            if let Some(mut stmt) = stmt {
+                if let Ok(rows) = stmt.query_map([&art.id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                }) {
+                    for r in rows.flatten() {
+                        match &out_hash {
+                            None => out_hash = Some(r.1.clone()),
+                            Some(h) if *h != r.1 => break,
+                            Some(_) => {}
+                        }
+                        if let Ok(p) = ws.scoped_path(&r.0) {
+                            if p.is_file() {
+                                out_paths.push(p);
+                            }
+                        }
+                    }
+                }
+            }
+            out_hash.map(|h| (h, out_paths))
+        };
+
+        let mut cells = Vec::new();
+
+        for ch_id in art_channels {
+            let (ch_name, ch_ver) = channel_map
+                .get(&ch_id)
+                .cloned()
+                .unwrap_or_else(|| (ch_id.clone(), "default".to_string()));
+
+            if let Some((render_hash, render_files)) = &newest_render {
+                // Check cache in SQLite artifact_checks
+                let cached: Option<(String, i64, i64, String)> = db.conn().query_row(
+                    "SELECT status, errors_count, warnings_count, findings_json FROM artifact_checks
+                     WHERE project = ?5 AND artifact_id = ?1 AND channel_id = ?2 AND render_hash = ?3 AND channel_version = ?4",
+                    rusqlite::params![art.id, ch_id, render_hash, ch_ver, project],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                ).ok();
+
+                if let Some((status, err_cnt, warn_cnt, findings_json)) = cached {
+                    let findings: Vec<Value> =
+                        serde_json::from_str(&findings_json).unwrap_or_default();
+                    cells.push(ArtifactChannelMatrixCell {
+                        channel_id: ch_id,
+                        channel_name: ch_name,
+                        status,
+                        errors_count: err_cnt as usize,
+                        warnings_count: warn_cnt as usize,
+                        render_hash: Some(render_hash.clone()),
+                        findings,
+                    });
+                } else {
+                    // Cache miss: execute checker for this specific channel
+                    let art_dir = art.dir(&p);
+                    let source_file = art.source.clone();
+                    let source_content = std::fs::read_to_string(art_dir.join(&source_file)).ok();
+                    let brand_set = studio_brand::BrandSet::load(&ws)
+                        .map_err(|e| CmdError::msg(e.to_string()))?;
+                    let brand_slug = art.brand.as_deref().unwrap_or("example");
+
+                    let report = studio_brand::checkers::run_checks(
+                        studio_brand::checkers::CheckSubject {
+                            artifact_dir: &art_dir,
+                            source_content: source_content.as_deref(),
+                            source_file: Some(&source_file),
+                            renders: render_files,
+                            ffprobe_json: None,
+                        },
+                        &brand_set,
+                        brand_slug,
+                        &[&ch_id],
+                    );
+
+                    let (status, err_cnt, warn_cnt, findings_val) = if let Some(mut rep) = report {
+                        let ch_rep = rep.channels.remove(&ch_id);
+                        if let Some(ch_rep) = ch_rep {
+                            let mut errs = 0;
+                            let mut warns = 0;
+                            let mut f_vals = Vec::new();
+                            for mut f in ch_rep.findings {
+                                if let Some(loc) = f.location.as_mut() {
+                                    let loc_p = Path::new(loc.as_str());
+                                    if loc_p.is_absolute() {
+                                        *loc = rel(&ws, loc_p);
+                                    }
+                                }
+                                match f.severity {
+                                    studio_brand::checkers::Severity::Error => errs += 1,
+                                    studio_brand::checkers::Severity::Warn => warns += 1,
+                                    _ => {}
+                                }
+                                if let Ok(val) = serde_json::to_value(&f) {
+                                    f_vals.push(val);
+                                }
+                            }
+                            let st = if errs > 0 {
+                                "error"
+                            } else if warns > 0 {
+                                "warning"
+                            } else {
+                                "passed"
+                            };
+                            (st.to_string(), errs, warns, f_vals)
+                        } else {
+                            ("passed".to_string(), 0, 0, Vec::new())
+                        }
+                    } else {
+                        (
+                            "error".to_string(),
+                            1,
+                            0,
+                            vec![json!({
+                                "severity": "error",
+                                "code": "BRAND_NOT_FOUND",
+                                "message_vi": format!("Không tìm thấy cấu hình thương hiệu: {brand_slug}"),
+                            })],
+                        )
+                    };
+
+                    let findings_json_str =
+                        serde_json::to_string(&findings_val).unwrap_or_else(|_| "[]".into());
+                    let _ = db.conn().execute(
+                        "INSERT OR REPLACE INTO artifact_checks
+                         (artifact_id, project, channel_id, render_hash, channel_version, status, errors_count, warnings_count, findings_json, checked_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                        rusqlite::params![
+                            art.id,
+                            project,
+                            ch_id,
+                            render_hash,
+                            ch_ver,
+                            status,
+                            err_cnt,
+                            warn_cnt,
+                            findings_json_str,
+                            now()
+                        ],
+                    );
+
+                    cells.push(ArtifactChannelMatrixCell {
+                        channel_id: ch_id,
+                        channel_name: ch_name,
+                        status,
+                        errors_count: err_cnt,
+                        warnings_count: warn_cnt,
+                        render_hash: Some(render_hash.clone()),
+                        findings: findings_val,
+                    });
+                }
+            } else {
+                // Not rendered
+                cells.push(ArtifactChannelMatrixCell {
+                    channel_id: ch_id,
+                    channel_name: ch_name,
+                    status: "unrendered".to_string(),
+                    errors_count: 0,
+                    warnings_count: 0,
+                    render_hash: None,
+                    findings: Vec::new(),
+                });
+            }
+        }
+
+        rows.push(ArtifactChannelMatrixRow {
+            artifact_id: art.id,
+            artifact_title: art.title,
+            kind: art.kind,
+            source: art.source,
+            channels: cells,
+        });
+    }
+
+    Ok(rows)
+}
+
+#[tauri::command]
+pub fn artifact_channel_matrix(
+    state: State<'_, AppState>,
+    project: String,
+) -> CmdResult<Vec<ArtifactChannelMatrixRow>> {
+    artifact_channel_matrix_impl(&state, project)
+}
+
 /// Secret status entry returned to the UI.
 #[derive(Clone, serde::Serialize)]
 pub struct SecretStatusItem {
@@ -3506,5 +3757,187 @@ formats: [unclosed list
             crate::web_dispatch::dispatch_invoke(&state, "scope_remove_override", rem_args, true)
                 .await;
         assert!(sudo_ok.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_artifact_channel_matrix_and_cache() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let ws_dir = temp.path().join("my_ws");
+        let ws = Workspace::create(&ws_dir, "Matrix WS").unwrap();
+
+        // 1. Setup channels: youtube (1920x1080) and tiktok (1080x1920)
+        let ch_dir = ws_dir.join("channels");
+        std::fs::create_dir_all(&ch_dir).unwrap();
+        std::fs::write(
+            ch_dir.join("youtube.yaml"),
+            r#"
+id: youtube
+platform: youtube
+title: "YouTube Video"
+formats:
+  - name: landscape
+    width: 1920
+    height: 1080
+    aspect: "16:9"
+notes: "Kênh YouTube chuẩn 16:9"
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            ch_dir.join("tiktok.yaml"),
+            r#"
+id: tiktok
+platform: tiktok
+title: "TikTok Video"
+formats:
+  - name: vertical
+    width: 1080
+    height: 1920
+    aspect: "9:16"
+notes: "Kênh TikTok dọc"
+"#,
+        )
+        .unwrap();
+
+        // 2. Setup project and 2 artifacts
+        let proj = Project::create(&ws, "demo-proj", "Demo Project").unwrap();
+
+        // Artifact 1: thumbnail (rendered as 1280x720 png)
+        let art1_dir = proj.artifacts_dir().join("thumbnail");
+        std::fs::create_dir_all(&art1_dir).unwrap();
+        std::fs::write(
+            art1_dir.join("artifact.yaml"),
+            r#"
+id: thumbnail
+title: "Ảnh bìa video"
+kind: design
+channels: [youtube, tiktok]
+brand: example
+source: index.html
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            art1_dir.join("index.html"),
+            "<html><body>Thumb</body></html>",
+        )
+        .unwrap();
+
+        // Artifact 2: poster (unrendered)
+        let art2_dir = proj.artifacts_dir().join("poster");
+        std::fs::create_dir_all(&art2_dir).unwrap();
+        std::fs::write(
+            art2_dir.join("artifact.yaml"),
+            r#"
+id: poster
+title: "Poster dự án"
+kind: design
+channels: [youtube, tiktok]
+brand: example
+source: index.html
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            art2_dir.join("index.html"),
+            "<html><body>Poster</body></html>",
+        )
+        .unwrap();
+
+        // Create a 1280x720 PNG file for thumbnail render
+        let renders_dir = proj.renders_dir().join("thumbnail");
+        std::fs::create_dir_all(&renders_dir).unwrap();
+        let render_img_path = renders_dir.join("render.png");
+
+        let img = image::RgbaImage::new(1280, 720);
+        img.save(&render_img_path).unwrap();
+
+        // Record in WorkspaceDb renders table
+        let db = WorkspaceDb::open(&ws).unwrap();
+        let rel_render_path = "projects/demo-proj/renders/thumbnail/render.png".to_string();
+        db.conn()
+            .execute(
+                "INSERT INTO renders (id, artifact_id, hash, output_path, format, size_bytes, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    "rend-1",
+                    "thumbnail",
+                    "hash-1280x720",
+                    rel_render_path,
+                    "png",
+                    1000,
+                    chrono::Utc::now().to_rfc3339()
+                ],
+            )
+            .unwrap();
+
+        let state = AppState::new();
+        *state.current.lock().unwrap() = Some(ws_dir.clone());
+
+        // 3. First call: computes matrix and caches results
+        let rows = artifact_channel_matrix_impl(&state, "demo-proj".to_string()).unwrap();
+        assert_eq!(rows.len(), 2, "Must return 2 artifact rows");
+
+        let thumb_row = rows.iter().find(|r| r.artifact_id == "thumbnail").unwrap();
+        assert_eq!(thumb_row.channels.len(), 2, "Must have 2 channel cells");
+
+        // YouTube check on 1280x720 vs 1920x1080 -> error (DIMENSIONS_MISMATCH)
+        let yt_cell = thumb_row
+            .channels
+            .iter()
+            .find(|c| c.channel_id == "youtube")
+            .unwrap();
+        assert_eq!(yt_cell.status, "error");
+        assert!(yt_cell.errors_count > 0);
+        assert!(
+            yt_cell
+                .findings
+                .iter()
+                .any(|f| f["code"] == "DIMENSIONS_MISMATCH" || f["code"] == "BRAND_NOT_FOUND"),
+            "Expected dimension mismatch or brand not found finding"
+        );
+
+        // Poster is unrendered
+        let poster_row = rows.iter().find(|r| r.artifact_id == "poster").unwrap();
+        let poster_yt = poster_row
+            .channels
+            .iter()
+            .find(|c| c.channel_id == "youtube")
+            .unwrap();
+        assert_eq!(poster_yt.status, "unrendered");
+        assert_eq!(poster_yt.render_hash, None);
+
+        // 4. Verify SQLite cache was populated
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_checks WHERE artifact_id = 'thumbnail'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 2, "2 channels checked and cached for thumbnail");
+
+        // 5. Update cached status in DB to a sentinel value to prove second call hits the cache
+        db.conn()
+            .execute(
+                "UPDATE artifact_checks SET status = 'cached_sentinel' WHERE artifact_id = 'thumbnail' AND channel_id = 'youtube'",
+                [],
+            )
+            .unwrap();
+
+        let rows2 = artifact_channel_matrix_impl(&state, "demo-proj".to_string()).unwrap();
+        let thumb_row2 = rows2.iter().find(|r| r.artifact_id == "thumbnail").unwrap();
+        let yt_cell2 = thumb_row2
+            .channels
+            .iter()
+            .find(|c| c.channel_id == "youtube")
+            .unwrap();
+        assert_eq!(
+            yt_cell2.status, "cached_sentinel",
+            "Second call must hit SQLite cache without running checker"
+        );
     }
 }

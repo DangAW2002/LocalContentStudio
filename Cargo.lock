@@ -4402,6 +4402,8 @@ name = "studio-tauri"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "hex",
+ "image",
  "include_dir",
  "notify 6.1.1",
  "rfd",

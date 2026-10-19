@@ -303,6 +303,11 @@ pub async fn dispatch_invoke(
                 get_opt_arg(&args, "channels").or_else(|| get_opt_arg(&args, "checks"));
             commands::artifact_check_impl(state, project, id, channels)
         }
+        "artifact_channel_matrix" => {
+            let project: String = get_arg(&args, "project")?;
+            let res = commands::artifact_channel_matrix_impl(state, project)?;
+            Ok(serde_json::to_value(res)?)
+        }
         "secret_status" => {
             let res = commands::secret_status_impl(state).await?;
             Ok(serde_json::to_value(res)?)

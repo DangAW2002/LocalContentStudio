@@ -92,6 +92,7 @@ import type {
   ArtifactRenderResult,
   ArtifactCheckRequest,
   ArtifactCheckResult,
+  ArtifactChannelMatrixRow,
   SecretStatusItem,
   SecretSetRequest,
   SecretDeleteRequest,
@@ -489,6 +490,11 @@ export class StudioApiClient {
   /** Command: `artifact_check`. */
   async checkArtifact(req: ArtifactCheckRequest): Promise<ArtifactCheckResult> {
     return invoke<ArtifactCheckResult>("artifact_check", { ...req });
+  }
+
+  /** Command: `artifact_channel_matrix`. */
+  async getArtifactChannelMatrix(project: string): Promise<ArtifactChannelMatrixRow[]> {
+    return invoke<ArtifactChannelMatrixRow[]>("artifact_channel_matrix", { project });
   }
 
   // ==========================================
