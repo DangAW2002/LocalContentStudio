@@ -3,7 +3,7 @@
 // Fully isolated via STUDIO_APP_DIR and WEBVIEW2_USER_DATA_FOLDER.
 import { E2E_EXE, E2E_TARGET_DIR, getProcessInfo } from "./stop.mjs";
 import { spawn, execSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync, openSync, closeSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync, openSync, closeSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import net from "node:net";
 import path from "node:path";
@@ -48,22 +48,27 @@ function seedWorkspaceAndAppDb({ appDir, wsDir }) {
     `name: "E2E Workspace"\nversion: 1\ndefault_brand: demo\nmonthly_budget_usd: 50\n`
   );
 
-  // brand file
+  // Brand/channel/playbook seeds are copied from the shipped defaults so they always match the
+  // real schemas (one invalid file makes BrandSet::load fail for the whole scope chain).
+  const defaults = path.resolve("crates/studio-brand/defaults");
+  cpSync(path.join(defaults, "brands/example"), path.join(wsDir, "brands/demo"), { recursive: true });
+  const brandYaml = path.join(wsDir, "brands/demo/brand.yaml");
   writeFileSync(
-    path.join(wsDir, "brands/demo.brand.yaml"),
-    `slug: demo\nname: "Thương hiệu E2E"\ndescription: "Thương hiệu thử nghiệm E2E"\ncolors:\n  primary: "#6366f1"\n  secondary: "#ec4899"\nrules: []\n`
+    brandYaml,
+    readFileSync(brandYaml, "utf-8").replace(/^name: .*$/m, 'name: "Thương hiệu E2E"'),
   );
-
-  // channel file
   writeFileSync(
-    path.join(wsDir, "channels/youtube.channel.yaml"),
-    `slug: youtube\nname: "Kênh YouTube E2E"\nplatform: youtube\nformat: landscape\nmax_duration_seconds: 3600\n`
+    path.join(wsDir, "channels/youtube-e2e.yaml"),
+    readFileSync(path.join(defaults, "channels/youtube.yaml"), "utf-8")
+      .replace(/^id: .*$/m, 'id: "youtube-e2e"')
+      .replace(/^title: .*$/m, 'title: "Kênh YouTube E2E"'),
   );
-
-  // playbook file
   writeFileSync(
-    path.join(wsDir, "playbooks/short-video.playbook.yaml"),
-    `slug: short-video\nname: "Kịch bản Video ngắn"\nsteps:\n  - name: "Lên dàn ý"\n  - name: "Tạo giọng đọc"\n`
+    path.join(wsDir, "playbooks/e2e-short.md"),
+    readFileSync(path.join(defaults, "playbooks/shorts.md"), "utf-8").replace(
+      /^name: .*$/m,
+      'name: "Kịch bản Video ngắn E2E"',
+    ),
   );
 
   // demo project.yaml

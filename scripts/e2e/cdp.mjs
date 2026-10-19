@@ -274,6 +274,10 @@ export class CDPClient {
       if (bodyText.includes("Tệp nằm ngoài workspace")) {
         return { ok: false, reason: 'Phát hiện lỗi "Tệp nằm ngoài workspace"' };
       }
+      // Every seeded/default channel declares formats; this text means the brand set failed to load.
+      if (bodyText.includes("Kênh này chưa khai báo định dạng khung hình")) {
+        return { ok: false, reason: "Kênh không có định dạng (BrandSet không tải được?)" };
+      }
 
       // Check text nodes for undefined / NaN / [object Object]
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
