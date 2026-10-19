@@ -68,6 +68,7 @@ pub const ALLOWED_WEB_COMMANDS: &[&str] = &[
     "artifact_list",
     "artifact_render",
     "artifact_check",
+    "artifact_channel_matrix",
     // Secrets status and configuration (write-only / sudo-gated)
     "secret_status",
     "secret_set",

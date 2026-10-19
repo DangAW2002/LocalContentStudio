@@ -11,6 +11,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 include_dir = "0.7"
 sha2 = { workspace = true }
+hex = { workspace = true }
 tauri = { version = "2", features = ["protocol-asset"] }
 studio-workspace = { path = "../studio-workspace" }
 studio-engine = { path = "../studio-engine" }
@@ -36,6 +37,7 @@ rfd = "0.15"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [features]
 default = []

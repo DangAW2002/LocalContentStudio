@@ -1,6 +1,7 @@
 import React from "react";
 import { Button, Badge, Dialog } from "@studio/design-system";
 import type { ArtifactCheckResult } from "../../../api/types";
+import { getCheckErrorLabel } from "../../../runtime/check-error-labels";
 
 export interface CheckResultDialogProps {
   open: boolean;
@@ -94,7 +95,7 @@ export const CheckResultDialog: React.FC<CheckResultDialogProps> = ({
                         gap: 2,
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <Badge
                           variant={
                             f.severity === "error"
@@ -104,7 +105,7 @@ export const CheckResultDialog: React.FC<CheckResultDialogProps> = ({
                               : "info"
                           }
                         >
-                          {f.severity.toUpperCase()}
+                          {getCheckErrorLabel(f.code)}
                         </Badge>
                         <span style={{ fontWeight: 600 }}>{f.message_vi}</span>
                       </div>

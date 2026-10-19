@@ -195,6 +195,7 @@ fn main() {
             commands::artifact_list,
             commands::artifact_render,
             commands::artifact_check,
+            commands::artifact_channel_matrix,
             commands::secret_status,
             commands::secret_set,
             commands::secret_delete,

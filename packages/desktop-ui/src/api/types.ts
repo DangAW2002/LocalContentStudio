@@ -533,6 +533,26 @@ export interface ArtifactCheckResult {
   channels: Record<string, ChannelCheckResult>;
 }
 
+export type ChannelMatrixCellStatus = "passed" | "warning" | "error" | "unrendered";
+
+export interface ArtifactChannelMatrixCell {
+  channel_id: string;
+  channel_name: string;
+  status: ChannelMatrixCellStatus;
+  errors_count: number;
+  warnings_count: number;
+  render_hash?: string;
+  findings: CheckFinding[];
+}
+
+export interface ArtifactChannelMatrixRow {
+  artifact_id: string;
+  artifact_title: string;
+  kind: string;
+  source: string;
+  channels: ArtifactChannelMatrixCell[];
+}
+
 // ==========================================
 // Global Event Payloads
 // ==========================================

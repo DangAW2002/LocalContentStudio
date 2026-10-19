@@ -5,6 +5,7 @@ import { studioApi } from "../../api/client";
 import { ProjectFolderTree } from "./ProjectFolderTree";
 import { PublishDialog } from "../../components/PublishDialog";
 import { CreateArtifactDialog } from "./CreateArtifactDialog";
+import { ChannelMatrixView } from "./outputs/ChannelMatrixView";
 import type {
   ArtifactSummary,
   CheckpointSummary,
@@ -19,6 +20,7 @@ export interface OutputsPaneProps {
   onSelectFile: (path: string) => void;
   artifacts?: ArtifactSummary[];
   onRefreshArtifacts?: () => Promise<any> | any;
+  onAskAgentToFix?: (promptText: string) => void;
 }
 
 export const OutputsPane: React.FC<OutputsPaneProps> = ({
@@ -27,6 +29,7 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
   onSelectFile,
   artifacts: propsArtifacts,
   onRefreshArtifacts,
+  onAskAgentToFix,
 }) => {
   const [activeTab, setActiveTab] = React.useState<string>("artifacts");
   const [internalArtifacts, setInternalArtifacts] = React.useState<ArtifactSummary[]>([]);
@@ -164,6 +167,7 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
 
   const tabs = [
     { id: "artifacts", label: "Thành phẩm", count: artifacts.length > 0 ? artifacts.length : undefined },
+    { id: "channels", label: "Kênh" },
     { id: "checkpoints", label: "Checkpoints", count: checkpoints.length > 0 ? checkpoints.length : undefined },
     { id: "modules", label: "Modules" },
   ];
@@ -452,6 +456,16 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
               );
             })()}
           </div>
+        )}
+
+        {activeTab === "channels" && (
+          <ChannelMatrixView
+            projectSlug={projectSlug}
+            artifacts={artifacts}
+            onSelectFile={onSelectFile}
+            onAskAgentToFix={onAskAgentToFix}
+            onRefreshArtifacts={onRefreshArtifacts}
+          />
         )}
 
         {activeTab === "checkpoints" && (

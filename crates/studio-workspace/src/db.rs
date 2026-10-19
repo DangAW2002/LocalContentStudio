@@ -114,6 +114,24 @@ impl WorkspaceDb {
             Self::apply_v2(conn)?;
         }
 
+        if current < 3 {
+            // Backup before applying v3 if database file already exists and has tables
+            if db_path.exists() {
+                let table_count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name != 'schema_migrations'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
+                if table_count > 0 {
+                    Self::perform_backup(conn, backup_dir, "v3")?;
+                }
+            }
+
+            Self::apply_v3(conn)?;
+        }
+
         Ok(())
     }
 
@@ -320,6 +338,41 @@ impl WorkspaceDb {
         let now = chrono::Utc::now().to_rfc3339();
         tx.execute(
             "INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (2, 'v2-publish-requests', ?1)
+             ON CONFLICT(version) DO NOTHING",
+            [&now],
+        )?;
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn apply_v3(conn: &mut Connection) -> Result<()> {
+        let tx = conn.transaction()?;
+
+        tx.execute_batch(
+            "
+            -- 15. Artifact Checks Matrix Cache
+            CREATE TABLE IF NOT EXISTS artifact_checks (
+                artifact_id TEXT NOT NULL,
+                project TEXT NOT NULL,
+                channel_id TEXT NOT NULL,
+                render_hash TEXT NOT NULL,
+                channel_version TEXT NOT NULL,
+                status TEXT NOT NULL,
+                errors_count INTEGER NOT NULL,
+                warnings_count INTEGER NOT NULL,
+                findings_json TEXT NOT NULL,
+                checked_at TEXT NOT NULL,
+                PRIMARY KEY (project, artifact_id, channel_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_art_checks_lookup
+                ON artifact_checks(project, artifact_id, channel_id, render_hash, channel_version);
+            ",
+        )?;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (3, 'v3-artifact-checks-matrix', ?1)
              ON CONFLICT(version) DO NOTHING",
             [&now],
         )?;
