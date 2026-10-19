@@ -21,6 +21,10 @@ pub struct Transcript {
     pub output_tokens: u64,
     /// Latest cache read token metrics.
     pub cache_read_tokens: u64,
+    /// Latest cache write (warm-up) token metrics.
+    pub cache_write_tokens: u64,
+    /// Latest thinking/reasoning token metrics.
+    pub reasoning_tokens: u64,
     /// Total cost in USD, if provided.
     pub cost_usd: Option<f64>,
     /// Permission denials recorded during the turn.
@@ -61,7 +65,7 @@ impl Transcript {
                     self.text.push_str(full_chunk);
                 }
             }
-            Event::Thinking => {}
+            Event::Thinking(_) => {}
             Event::ToolCall { .. } => {}
             Event::ToolResult { .. } => {}
             Event::FileChange { path, op } => {
@@ -77,11 +81,15 @@ impl Transcript {
                 input_tokens,
                 output_tokens,
                 cache_read_tokens,
+                cache_write_tokens,
+                reasoning_tokens,
                 cost_usd,
             } => {
                 self.input_tokens = *input_tokens;
                 self.output_tokens = *output_tokens;
                 self.cache_read_tokens = *cache_read_tokens;
+                self.cache_write_tokens = *cache_write_tokens;
+                self.reasoning_tokens = *reasoning_tokens;
                 if cost_usd.is_some() {
                     self.cost_usd = *cost_usd;
                 }

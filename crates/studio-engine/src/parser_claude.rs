@@ -11,6 +11,8 @@ use crate::types::{DoneStatus, Event, FileOp};
 pub struct ClaudeParser {
     session_id: Option<String>,
     seen_tool_ids: HashSet<String>,
+    /// Thinking text already arrived as stream deltas for the current message.
+    streamed_thinking: bool,
 }
 
 impl ClaudeParser {
@@ -60,10 +62,11 @@ impl ClaudeParser {
                 if let Some(inner) = value.get("event") {
                     let inner_type = inner.get("type").and_then(|v| v.as_str()).unwrap_or("");
                     match inner_type {
+                        "message_start" => self.streamed_thinking = false,
                         "content_block_start" => {
                             if let Some(cb) = inner.get("content_block") {
                                 if cb.get("type").and_then(|v| v.as_str()) == Some("thinking") {
-                                    events.push(Event::Thinking);
+                                    events.push(Event::Thinking(String::new()));
                                 }
                             }
                         }
@@ -76,7 +79,14 @@ impl ClaudeParser {
                                         events.push(Event::TextDelta(text.to_string()));
                                     }
                                 } else if delta_type == "thinking_delta" {
-                                    // Thinking delta, can optionally emit Thinking or ignore
+                                    let text = delta
+                                        .get("thinking")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    if !text.is_empty() {
+                                        self.streamed_thinking = true;
+                                        events.push(Event::Thinking(text.to_string()));
+                                    }
                                 }
                             }
                         }
@@ -92,7 +102,14 @@ impl ClaudeParser {
                                 block.get("type").and_then(|v| v.as_str()).unwrap_or("");
                             match block_type {
                                 "thinking" => {
-                                    events.push(Event::Thinking);
+                                    // Without partial messages the full block is the only source.
+                                    let text = block
+                                        .get("thinking")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("");
+                                    if !self.streamed_thinking {
+                                        events.push(Event::Thinking(text.to_string()));
+                                    }
                                 }
                                 "text" => {
                                     if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
@@ -166,29 +183,24 @@ impl ClaudeParser {
             "result" => {
                 // Usage & cost
                 let cost_usd = value.get("total_cost_usd").and_then(|v| v.as_f64());
-                let (input_tokens, output_tokens, cache_read_tokens) =
-                    if let Some(usage) = value.get("usage") {
-                        let in_tok = usage
-                            .get("input_tokens")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        let out_tok = usage
-                            .get("output_tokens")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        let cache_tok = usage
-                            .get("cache_read_input_tokens")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        (in_tok, out_tok, cache_tok)
-                    } else {
-                        (0, 0, 0)
-                    };
+                let usage = value.get("usage");
+                let tok = |key: &str| {
+                    usage
+                        .and_then(|u| u.get(key))
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0)
+                };
+                let reasoning_tokens = usage
+                    .and_then(|u| u.pointer("/output_tokens_details/thinking_tokens"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
 
                 events.push(Event::Usage {
-                    input_tokens,
-                    output_tokens,
-                    cache_read_tokens,
+                    input_tokens: tok("input_tokens"),
+                    output_tokens: tok("output_tokens"),
+                    cache_read_tokens: tok("cache_read_input_tokens"),
+                    cache_write_tokens: tok("cache_creation_input_tokens"),
+                    reasoning_tokens,
                     cost_usd,
                 });
 

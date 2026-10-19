@@ -51,8 +51,9 @@ pub enum Event {
     TextDelta(String),
     /// Complete text message chunk.
     Text(String),
-    /// Model entered thinking state.
-    Thinking,
+    /// Model is thinking. Empty text marks the start of a thinking block; non-empty text is
+    /// thinking content (only when the CLI exposes it — Claude Code redacts it by default).
+    Thinking(String),
     /// Model initiated a tool call.
     ToolCall {
         /// Tool call ID.
@@ -100,6 +101,10 @@ pub enum Event {
         output_tokens: u64,
         /// Number of tokens read from prompt cache.
         cache_read_tokens: u64,
+        /// Number of tokens written to prompt cache (cache warm-up).
+        cache_write_tokens: u64,
+        /// Number of thinking/reasoning tokens, if reported separately.
+        reasoning_tokens: u64,
         /// Cost in USD, if provided by engine.
         cost_usd: Option<f64>,
     },

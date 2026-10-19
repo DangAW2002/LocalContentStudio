@@ -17,6 +17,13 @@ use crate::types::{DoneStatus, EngineError, Event, Probe, TurnRequest};
 pub const SUPPORTED_CLAUDE_VERSION: &str = "2.1.299";
 pub const SUPPORTED_AGY_VERSION: &str = "1.4.0";
 
+/// A turn whose engine prints nothing for this long is treated as hung and killed.
+/// Generous on purpose: long tool runs (renders, installs) can be silent for minutes.
+pub const TURN_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
+/// Number of trailing stderr lines kept for error reports.
+const STDERR_TAIL_LINES: usize = 20;
+
 /// Trait implemented by agent engine adapters.
 pub trait Engine: Send + Sync {
     /// Probes the system to detect installation, version, and compatibility status.
@@ -350,43 +357,65 @@ async fn spawn_turn_process(
         drop(stdin);
     });
 
+    // Drain stderr continuously: an unread pipe fills up and blocks the engine forever.
+    // Keep the tail so a turn that dies without a result can say why.
+    let stderr_tail = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new()));
+    if let Some(stderr) = child.stderr.take() {
+        let tail = Arc::clone(&stderr_tail);
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if let Ok(mut t) = tail.lock() {
+                    if t.len() == STDERR_TAIL_LINES {
+                        t.pop_front();
+                    }
+                    t.push_back(line);
+                }
+            }
+        });
+    }
+
     let (tx, rx) = mpsc::channel(128);
     let is_cancelled = Arc::new(AtomicBool::new(false));
     let is_cancelled_clone = Arc::clone(&is_cancelled);
 
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout).lines();
+        let mut claude = ClaudeParser::new();
+        let mut agy = AgyParser::new();
+        let mut saw_done = false;
+        let mut timed_out = false;
 
-        if is_claude {
-            let mut parser = ClaudeParser::new();
-            while let Ok(Some(line)) = reader.next_line().await {
-                if is_cancelled_clone.load(Ordering::SeqCst) {
+        loop {
+            let line = match tokio::time::timeout(TURN_IDLE_TIMEOUT, reader.next_line()).await {
+                Ok(Ok(Some(line))) => line,
+                Ok(_) => break,
+                Err(_) => {
+                    timed_out = true;
+                    if let Some(pid) = pid {
+                        let _ = kill_process_tree(pid).await;
+                    }
                     break;
                 }
-                let events = parser.feed(&line);
-                for ev in events {
-                    if tx.send(ev).await.is_err() {
-                        return;
-                    }
-                }
+            };
+            if is_cancelled_clone.load(Ordering::SeqCst) {
+                break;
             }
-        } else {
-            let mut parser = AgyParser::new();
-            while let Ok(Some(line)) = reader.next_line().await {
-                if is_cancelled_clone.load(Ordering::SeqCst) {
-                    break;
-                }
-                let events = parser.feed(&line);
-                for ev in events {
-                    if tx.send(ev).await.is_err() {
-                        return;
-                    }
+            let events = if is_claude {
+                claude.feed(&line)
+            } else {
+                agy.feed(&line)
+            };
+            for ev in events {
+                saw_done |= matches!(ev, Event::Done { .. });
+                if tx.send(ev).await.is_err() {
+                    return;
                 }
             }
         }
 
         // Wait for child exit
-        let _ = child.wait().await;
+        let exit = child.wait().await;
 
         if is_cancelled_clone.load(Ordering::SeqCst) {
             let _ = tx
@@ -395,6 +424,30 @@ async fn spawn_turn_process(
                     text: None,
                 })
                 .await;
+            return;
+        }
+
+        if !saw_done {
+            let mut msg = if timed_out {
+                format!(
+                    "Engine không phản hồi trong {} phút nên đã bị dừng.",
+                    TURN_IDLE_TIMEOUT.as_secs() / 60
+                )
+            } else {
+                match exit {
+                    Ok(status) => format!("Engine thoát (mã {status}) mà không trả kết quả."),
+                    Err(e) => format!("Engine thoát bất thường: {e}"),
+                }
+            };
+            let tail = stderr_tail
+                .lock()
+                .map(|t| t.iter().cloned().collect::<Vec<_>>().join("\n"))
+                .unwrap_or_default();
+            if !tail.trim().is_empty() {
+                msg.push('\n');
+                msg.push_str(tail.trim());
+            }
+            let _ = tx.send(Event::Error(msg)).await;
         }
     });
 

@@ -12,6 +12,7 @@ pub struct AgyParser {
     accumulated_input_tokens: u64,
     accumulated_output_tokens: u64,
     accumulated_cache_read_tokens: u64,
+    accumulated_reasoning_tokens: u64,
 }
 
 impl AgyParser {
@@ -73,15 +74,23 @@ impl AgyParser {
                             .get("cache_read_tokens")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0);
+                        let think_tok = usage
+                            .get("thinking_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
 
                         self.accumulated_input_tokens += in_tok;
                         self.accumulated_output_tokens += out_tok;
                         self.accumulated_cache_read_tokens += cache_tok;
+                        self.accumulated_reasoning_tokens += think_tok;
 
                         events.push(Event::Usage {
                             input_tokens: self.accumulated_input_tokens,
                             output_tokens: self.accumulated_output_tokens,
                             cache_read_tokens: self.accumulated_cache_read_tokens,
+                            // Gemini caches implicitly; agy reports no cache writes.
+                            cache_write_tokens: 0,
+                            reasoning_tokens: self.accumulated_reasoning_tokens,
                             cost_usd: None,
                         });
                     }
@@ -158,11 +167,17 @@ impl AgyParser {
                             .get("cache_read_tokens")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(self.accumulated_cache_read_tokens);
+                        let think_tok = usage
+                            .get("thinking_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(self.accumulated_reasoning_tokens);
 
                         events.push(Event::Usage {
                             input_tokens: in_tok,
                             output_tokens: out_tok,
                             cache_read_tokens: cache_tok,
+                            cache_write_tokens: 0,
+                            reasoning_tokens: think_tok,
                             cost_usd: None,
                         });
                     }

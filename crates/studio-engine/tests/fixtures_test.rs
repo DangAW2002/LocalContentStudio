@@ -44,6 +44,13 @@ fn test_claude_turn1_mcp_edit() {
     assert!(has_hello_file, "must record FileChange for hello.md");
 
     // Assert cost ~ 0.00482
+    // Token breakdown from the result line (cache read vs. cache write/warm-up).
+    assert_eq!(transcript.input_tokens, 8);
+    assert_eq!(transcript.output_tokens, 447);
+    assert_eq!(transcript.cache_read_tokens, 58852);
+    assert_eq!(transcript.cache_write_tokens, 20021);
+    assert_eq!(transcript.reasoning_tokens, 138);
+
     let cost = transcript.cost_usd.expect("cost_usd must be present");
     assert!((cost - 0.00481702).abs() < 1e-6);
 
@@ -331,4 +338,30 @@ fn agy_models_output_is_parsed() {
     assert_eq!(models.len(), 3);
     assert_eq!(models[0].id, "gemini-3.8-flash-high");
     assert_eq!(models[2].label, "Claude Opus 4.6 (Thinking)");
+}
+
+#[test]
+fn claude_thinking_text_is_forwarded_once() {
+    let mut p = ClaudeParser::new();
+    let lines = [
+        r#"{"type":"stream_event","event":{"type":"message_start","message":{}}}"#,
+        r#"{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"thinking","thinking":""}}}"#,
+        r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"Cân nhắc"}}}"#,
+        r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Cân nhắc"}]}}"#,
+    ];
+    let events: Vec<_> = lines.iter().flat_map(|l| p.feed(l)).collect();
+    let thinking: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            studio_engine::Event::Thinking(t) => Some(t.as_str()),
+            _ => None,
+        })
+        .collect();
+    // Start marker + the streamed delta; the final block is not repeated.
+    assert_eq!(thinking, vec!["", "Cân nhắc"]);
+
+    // Redacted thinking (what Claude Code sends by default) only yields the start marker.
+    let mut p = ClaudeParser::new();
+    let ev = p.feed(r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"","signature":"x"}]}}"#);
+    assert!(matches!(ev.as_slice(), [studio_engine::Event::Thinking(t)] if t.is_empty()));
 }
