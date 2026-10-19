@@ -49,7 +49,8 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
   - **Track video:** Danh sách clips hình ảnh và video B-roll, gán đúng `start` và `duration`.
   - **Track audio:** Ghép các đoạn voiceover từ bước 2 và nhạc nền nhẹ nhàng (nếu có).
   - **Track caption (phụ đề):** Đặt lời thoại khớp với âm thanh hiển thị theo mốc thời gian.
-- Kiểm tra tính hợp lệ của cấu trúc `timeline.json`. Mẫu tối thiểu hợp lệ (đường dẫn `source` tính từ thư mục
+- Kiểm tra tính hợp lệ của cấu trúc `timeline.json`. Mẫu tối thiểu hợp lệ (`source` là đường dẫn tính từ gốc workspace như
+  `projects/<slug>/assets/...`, hoặc tính từ thư mục
   artifact `projects/<slug>/artifacts/<id>/`; mỗi track/clip bắt buộc có `id`, mỗi clip bắt buộc có `source` + `duration`):
 
   ```json

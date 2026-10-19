@@ -159,8 +159,13 @@ pub async fn render(
 
             let timeline_file = artifact.source_path(project);
             let content = fs::read_to_string(&timeline_file)?;
-            let timeline_doc: crate::timeline::TimelineDoc = serde_json::from_str(&content)
+            let mut timeline_doc: crate::timeline::TimelineDoc = serde_json::from_str(&content)
                 .map_err(|e| ArtifactError::InvalidConfig(timeline_schema_hint(&e)))?;
+            resolve_workspace_relative_sources(
+                &mut timeline_doc,
+                &artifact.dir(project),
+                workspace.root(),
+            );
 
             let out_file = output_dir.join("output.mp4");
             expected_outputs.push(out_file.clone());
@@ -352,5 +357,68 @@ mod output_tail_tests {
         assert!(!tail.contains("ffmpeg version"));
         assert!(!tail.contains("configuration"));
         assert!(tail.ends_with("captions.srt: No such file or directory"));
+    }
+}
+
+/// Clip sources are resolved by ffmpeg from the artifact folder. Studio tools hand out
+/// workspace-relative paths (`projects/<slug>/assets/...`), so a source that does not exist
+/// next to the artifact but does exist under the workspace root is rewritten to that file.
+/// Colours, caption text and anything outside the workspace are left untouched.
+pub(crate) fn resolve_workspace_relative_sources(
+    doc: &mut crate::timeline::TimelineDoc,
+    artifact_dir: &std::path::Path,
+    workspace_root: &std::path::Path,
+) {
+    for track in &mut doc.tracks {
+        for clip in &mut track.clips {
+            let src = clip.source.trim();
+            if src.is_empty() || src.starts_with("color:") || src.contains('\n') {
+                continue;
+            }
+            let rel = std::path::Path::new(src);
+            if rel.is_absolute() || artifact_dir.join(rel).exists() {
+                continue;
+            }
+            let candidate = workspace_root.join(rel);
+            let inside = candidate
+                .canonicalize()
+                .ok()
+                .zip(workspace_root.canonicalize().ok())
+                .is_some_and(|(c, root)| c.starts_with(root));
+            if inside && candidate.is_file() {
+                clip.source = candidate.to_string_lossy().into_owned();
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod source_resolution_tests {
+    use crate::timeline::TimelineDoc;
+
+    #[test]
+    fn workspace_relative_sources_are_rewritten_only_when_found_inside() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("ws");
+        let art = root.join("projects/p/artifacts/video");
+        std::fs::create_dir_all(&art).unwrap();
+        std::fs::create_dir_all(root.join("projects/p/assets")).unwrap();
+        std::fs::write(root.join("projects/p/assets/a.wav"), b"x").unwrap();
+        std::fs::write(art.join("local.png"), b"x").unwrap();
+
+        let mut doc: TimelineDoc = serde_json::from_str(
+            r#"{"tracks":[{"id":"v","kind":"video","clips":[
+                {"id":"1","source":"projects/p/assets/a.wav","duration":1},
+                {"id":"2","source":"local.png","duration":1},
+                {"id":"3","source":"color:#000000","duration":1},
+                {"id":"4","source":"../../../../outside.wav","duration":1}]}]}"#,
+        )
+        .unwrap();
+        super::resolve_workspace_relative_sources(&mut doc, &art, &root);
+        let c = &doc.tracks[0].clips;
+        assert!(c[0].source.ends_with("a.wav") && std::path::Path::new(&c[0].source).is_absolute());
+        assert_eq!(c[1].source, "local.png");
+        assert_eq!(c[2].source, "color:#000000");
+        assert_eq!(c[3].source, "../../../../outside.wav");
     }
 }
