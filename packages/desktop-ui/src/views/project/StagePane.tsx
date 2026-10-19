@@ -14,6 +14,7 @@ import {
 } from "./DesignEditor";
 import { PlainHtmlPreview } from "./PlainHtmlPreview";
 import { TimelineEditor } from "./TimelineEditor";
+import { renderMarkdown } from "../../runtime/markdown";
 import type {
   ArtifactSummary,
   ArtifactRenderResult,
@@ -47,105 +48,6 @@ function isMediaOutput(path: string): boolean {
     p.endsWith(".mp3") ||
     p.endsWith(".wav")
   );
-}
-
-/** Simple, clean regex-based markdown renderer without heavy dependencies */
-function renderSimpleMarkdown(md: string): React.ReactNode {
-  const lines = md.split("\n");
-  const elements: React.ReactNode[] = [];
-  let inCodeBlock = false;
-  let codeBuffer: string[] = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    if (line.trim().startsWith("```")) {
-      if (inCodeBlock) {
-        elements.push(
-          <pre
-            key={`code-${i}`}
-            style={{
-              padding: "var(--cs-space-3)",
-              backgroundColor: "var(--cs-bg-raised)",
-              border: "1px solid var(--cs-border-subtle)",
-              borderRadius: "var(--cs-radius-control)",
-              fontFamily: "var(--cs-font-mono)",
-              fontSize: "var(--cs-text-xs)",
-              overflowX: "auto",
-              margin: "8px 0",
-            }}
-          >
-            {codeBuffer.join("\n")}
-          </pre>
-        );
-        codeBuffer = [];
-        inCodeBlock = false;
-      } else {
-        inCodeBlock = true;
-      }
-      continue;
-    }
-
-    if (inCodeBlock) {
-      codeBuffer.push(line);
-      continue;
-    }
-
-    if (line.startsWith("# ")) {
-      elements.push(
-        <h1 key={i} style={{ fontSize: "var(--cs-text-xl)", margin: "16px 0 8px", color: "var(--cs-fg-primary)" }}>
-          {line.slice(2)}
-        </h1>
-      );
-    } else if (line.startsWith("## ")) {
-      elements.push(
-        <h2 key={i} style={{ fontSize: "var(--cs-text-lg)", margin: "14px 0 6px", color: "var(--cs-fg-primary)" }}>
-          {line.slice(3)}
-        </h2>
-      );
-    } else if (line.startsWith("### ")) {
-      elements.push(
-        <h3 key={i} style={{ fontSize: "var(--cs-text-md)", margin: "12px 0 4px", color: "var(--cs-fg-primary)" }}>
-          {line.slice(4)}
-        </h3>
-      );
-    } else if (line.startsWith("- ") || line.startsWith("* ")) {
-      elements.push(
-        <li key={i} style={{ marginLeft: 20, margin: "2px 0", color: "var(--cs-fg-primary)" }}>
-          {line.slice(2)}
-        </li>
-      );
-    } else if (line.trim() === "") {
-      elements.push(<div key={i} style={{ height: 8 }} />);
-    } else {
-      elements.push(
-        <p key={i} style={{ margin: "4px 0", lineHeight: 1.6, color: "var(--cs-fg-primary)" }}>
-          {line}
-        </p>
-      );
-    }
-  }
-
-  if (inCodeBlock && codeBuffer.length > 0) {
-    elements.push(
-      <pre
-        key="code-end"
-        style={{
-          padding: "var(--cs-space-3)",
-          backgroundColor: "var(--cs-bg-raised)",
-          border: "1px solid var(--cs-border-subtle)",
-          borderRadius: "var(--cs-radius-control)",
-          fontFamily: "var(--cs-font-mono)",
-          fontSize: "var(--cs-text-xs)",
-          overflowX: "auto",
-        }}
-      >
-        {codeBuffer.join("\n")}
-      </pre>
-    );
-  }
-
-  return <div>{elements}</div>;
 }
 
 export const StagePane: React.FC<StagePaneProps> = ({
@@ -555,47 +457,30 @@ export const StagePane: React.FC<StagePaneProps> = ({
             overflow: "hidden",
           }}
         >
-          {/* Subheader for Text / Markdown controls */}
-          <div
-            style={{
-              height: 32,
-              padding: "0 var(--cs-space-3)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              borderBottom: "1px solid var(--cs-border-subtle)",
-              backgroundColor: "var(--cs-bg-raised)",
-              fontSize: "var(--cs-text-xs)",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              {isDirty && (
-                <Badge variant="warning">Chưa lưu (Ctrl+S)</Badge>
-              )}
-              {saveStatus === "saving" && (
-                <span style={{ color: "var(--cs-accent)" }}>Đang lưu...</span>
-              )}
-              {saveStatus === "saved" && (
-                <span style={{ color: "var(--cs-success)" }}>Đã lưu</span>
-              )}
-              {saveStatus === "error" && (
-                <span style={{ color: "var(--cs-danger)" }}>Lỗi: {saveError}</span>
-              )}
+          {/* Markdown subheader: edit / preview toggle (save state lives in the main header). */}
+          {fileData.kind === "markdown" && (
+            <div
+              style={{
+                height: 32,
+                padding: "0 var(--cs-space-3)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "flex-end",
+                borderBottom: "1px solid var(--cs-border-subtle)",
+                backgroundColor: "var(--cs-bg-raised)",
+                fontSize: "var(--cs-text-xs)",
+              }}
+            >
+              <Button
+                size="sm"
+                variant={showMdPreview ? "secondary" : "quiet"}
+                onClick={() => setShowMdPreview(!showMdPreview)}
+                leftIcon={<Icon name="eye" size={12} />}
+              >
+                {showMdPreview ? "Chỉnh sửa" : "Xem thử Markdown"}
+              </Button>
             </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {fileData.kind === "markdown" && (
-                <Button
-                  size="sm"
-                  variant={showMdPreview ? "secondary" : "quiet"}
-                  onClick={() => setShowMdPreview(!showMdPreview)}
-                  leftIcon={<Icon name="eye" size={12} />}
-                >
-                  {showMdPreview ? "Chỉnh sửa" : "Xem thử Markdown"}
-                </Button>
-              )}
-            </div>
-          </div>
+          )}
 
           {/* Editor Body */}
           <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
@@ -614,7 +499,7 @@ export const StagePane: React.FC<StagePaneProps> = ({
                   boxSizing: "border-box",
                 }}
               >
-                {renderSimpleMarkdown(textValue)}
+                <div className="cs-md">{renderMarkdown(textValue)}</div>
               </div>
             ) : (
               <textarea
@@ -829,7 +714,15 @@ export const StagePane: React.FC<StagePaneProps> = ({
             </Badge>
           )}
           {isDirty && (
-            <Badge variant="warning">Đã sửa</Badge>
+            <Badge variant="warning">Đã sửa · Ctrl+S để lưu</Badge>
+          )}
+          {!isDirty && saveStatus === "saved" && (
+            <span style={{ color: "var(--cs-success)" }}>Đã lưu</span>
+          )}
+          {saveStatus === "error" && (
+            <span style={{ color: "var(--cs-danger)" }} title={saveError ?? undefined}>
+              Lỗi lưu: {saveError}
+            </span>
           )}
         </div>
 

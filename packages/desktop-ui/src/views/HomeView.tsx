@@ -187,14 +187,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
       }}
     >
       <div style={{ width: "100%", maxWidth: 840, display: "flex", flexDirection: "column", gap: "var(--cs-space-6)" }}>
-        {error && (
-          <ErrorState
-            title="Kết nối Studio core"
-            reason={error}
-            safetyNote="Khi chạy độc lập không qua Tauri shell, vui lòng kiểm tra backend Rust hoặc mở ứng dụng desktop."
-            onRetry={loadData}
-          />
-        )}
+        {error && (() => {
+          const isNoWs = error.includes("workspace") || error.includes("Workspace");
+          return (
+            <ErrorState
+              title={isNoWs ? "Chưa chọn Workspace" : "Kết nối Studio core"}
+              reason={error}
+              safetyNote={
+                isNoWs
+                  ? "Vui lòng chọn hoặc tạo mới một thư mục Workspace để bắt đầu làm việc."
+                  : "Khi chạy độc lập không qua Tauri shell, vui lòng kiểm tra backend Rust hoặc mở ứng dụng desktop."
+              }
+              actionText={isNoWs ? "Mở / Tạo Workspace" : "Thử lại"}
+              onRetry={isNoWs ? () => window.dispatchEvent(new CustomEvent("studio:open-workspace-switcher")) : loadData}
+            />
+          );
+        })()}
 
         {/* Big Request Box */}
         <section
@@ -375,7 +383,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <Icon name="loader" size={16} color="var(--cs-accent)" />
+                    <Icon name="loader" size={16} color="var(--cs-accent)" className="cs-spin" />
                     <span style={{ fontWeight: 600 }}>{j.title}</span>
                     <span style={{ color: "var(--cs-fg-muted)", fontSize: "var(--cs-text-xs)" }}>
                       ({j.stageName || "Đang xử lý"})

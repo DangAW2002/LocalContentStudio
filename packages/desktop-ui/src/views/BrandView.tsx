@@ -10,7 +10,7 @@ import {
   stringifyBrandYaml,
   isValidHexColor,
 } from "../utils/brandYaml";
-import type { ScopeItem, ScopeKind } from "../api/types";
+import type { ChannelFormat, ScopeItem, ScopeKind } from "../api/types";
 
 const LAYER_LABELS: Record<string, string> = {
   workspace: "Thư mục Workspace",
@@ -190,7 +190,10 @@ const BrandViewInner: React.FC = () => {
     setSaveSuccess(false);
 
     try {
-      const itemPath = selectedItem.path || `brands/${selectedItem.id}`;
+      // App/Org layers are read-only: saving one creates a workspace-layer override with the same
+      // id, which the scope chain then resolves ahead of the inherited copy.
+      const inherited = selectedItem.layer !== "workspace";
+      const itemPath = !inherited && selectedItem.path ? selectedItem.path : `brands/${selectedItem.id}`;
       const targetYamlPath = itemPath.endsWith(".yaml") ? itemPath : `${itemPath}/brand.yaml`;
       const yamlContent = stringifyBrandYaml(brandSpec);
 
@@ -199,6 +202,10 @@ const BrandViewInner: React.FC = () => {
         text: yamlContent,
       });
 
+      if (inherited) {
+        const list = await studioApi.getScopeItems("brands");
+        setItems(list);
+      }
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: any) {
@@ -380,8 +387,13 @@ const BrandViewInner: React.FC = () => {
                           busyText="Đang lưu..."
                           onClick={handleSaveBrand}
                           leftIcon={<Icon name="check" size={14} />}
+                          title={
+                            selectedItem.layer !== "workspace"
+                              ? "Brand kế thừa chỉ đọc — lưu sẽ tạo bản ghi đè trong workspace này"
+                              : undefined
+                          }
                         >
-                          Lưu thương hiệu
+                          {selectedItem.layer !== "workspace" ? "Lưu bản ghi đè" : "Lưu thương hiệu"}
                         </Button>
                       </div>
                     )}
@@ -442,97 +454,44 @@ const BrandViewInner: React.FC = () => {
                       <div style={cardSectionStyle}>
                         <div style={sectionTitleStyle}>2. BẢNG MÀU NHẬN DIỆN (PALETTE)</div>
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-                          {/* Primary */}
-                          <div style={colorBoxStyle}>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                              <span style={{ fontWeight: 600, fontSize: "var(--cs-text-xs)" }}>Màu chính (Primary)</span>
-                              <input
-                                type="color"
-                                value={isValidHexColor(brandSpec.colors.primary) ? brandSpec.colors.primary : "#1e88e5"}
-                                onChange={(e) => setBrandSpec({ ...brandSpec, colors: { ...brandSpec.colors, primary: e.target.value.toUpperCase() } })}
-                                style={{ width: 24, height: 24, border: "none", cursor: "pointer", background: "none" }}
-                              />
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <div style={{ width: 32, height: 32, borderRadius: "var(--cs-radius-control)", backgroundColor: brandSpec.colors.primary, border: "1px solid rgba(255,255,255,0.2)" }} />
-                              <input
-                                type="text"
-                                value={brandSpec.colors.primary}
-                                onChange={(e) => setBrandSpec({ ...brandSpec, colors: { ...brandSpec.colors, primary: e.target.value } })}
-                                style={{ ...inputStyle, flex: 1, fontFamily: "var(--cs-font-mono)", fontSize: 11 }}
-                              />
-                            </div>
-                            {fieldErrors.primary && <span style={errorTextStyle}>{fieldErrors.primary}</span>}
-                          </div>
-
-                          {/* Accent */}
-                          <div style={colorBoxStyle}>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                              <span style={{ fontWeight: 600, fontSize: "var(--cs-text-xs)" }}>Màu nhấn (Accent)</span>
-                              <input
-                                type="color"
-                                value={isValidHexColor(brandSpec.colors.accent) ? brandSpec.colors.accent : "#ffb300"}
-                                onChange={(e) => setBrandSpec({ ...brandSpec, colors: { ...brandSpec.colors, accent: e.target.value.toUpperCase() } })}
-                                style={{ width: 24, height: 24, border: "none", cursor: "pointer", background: "none" }}
-                              />
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <div style={{ width: 32, height: 32, borderRadius: "var(--cs-radius-control)", backgroundColor: brandSpec.colors.accent, border: "1px solid rgba(255,255,255,0.2)" }} />
-                              <input
-                                type="text"
-                                value={brandSpec.colors.accent}
-                                onChange={(e) => setBrandSpec({ ...brandSpec, colors: { ...brandSpec.colors, accent: e.target.value } })}
-                                style={{ ...inputStyle, flex: 1, fontFamily: "var(--cs-font-mono)", fontSize: 11 }}
-                              />
-                            </div>
-                            {fieldErrors.accent && <span style={errorTextStyle}>{fieldErrors.accent}</span>}
-                          </div>
-
-                          {/* Background */}
-                          <div style={colorBoxStyle}>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                              <span style={{ fontWeight: 600, fontSize: "var(--cs-text-xs)" }}>Màu nền (Background)</span>
-                              <input
-                                type="color"
-                                value={isValidHexColor(brandSpec.colors.bg) ? brandSpec.colors.bg : "#0b0f14"}
-                                onChange={(e) => setBrandSpec({ ...brandSpec, colors: { ...brandSpec.colors, bg: e.target.value.toUpperCase() } })}
-                                style={{ width: 24, height: 24, border: "none", cursor: "pointer", background: "none" }}
-                              />
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <div style={{ width: 32, height: 32, borderRadius: "var(--cs-radius-control)", backgroundColor: brandSpec.colors.bg, border: "1px solid rgba(255,255,255,0.2)" }} />
-                              <input
-                                type="text"
-                                value={brandSpec.colors.bg}
-                                onChange={(e) => setBrandSpec({ ...brandSpec, colors: { ...brandSpec.colors, bg: e.target.value } })}
-                                style={{ ...inputStyle, flex: 1, fontFamily: "var(--cs-font-mono)", fontSize: 11 }}
-                              />
-                            </div>
-                            {fieldErrors.bg && <span style={errorTextStyle}>{fieldErrors.bg}</span>}
-                          </div>
-
-                          {/* Text */}
-                          <div style={colorBoxStyle}>
-                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                              <span style={{ fontWeight: 600, fontSize: "var(--cs-text-xs)" }}>Màu chữ (Text)</span>
-                              <input
-                                type="color"
-                                value={isValidHexColor(brandSpec.colors.text) ? brandSpec.colors.text : "#ffffff"}
-                                onChange={(e) => setBrandSpec({ ...brandSpec, colors: { ...brandSpec.colors, text: e.target.value.toUpperCase() } })}
-                                style={{ width: 24, height: 24, border: "none", cursor: "pointer", background: "none" }}
-                              />
-                            </div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                              <div style={{ width: 32, height: 32, borderRadius: "var(--cs-radius-control)", backgroundColor: brandSpec.colors.text, border: "1px solid rgba(255,255,255,0.2)" }} />
-                              <input
-                                type="text"
-                                value={brandSpec.colors.text}
-                                onChange={(e) => setBrandSpec({ ...brandSpec, colors: { ...brandSpec.colors, text: e.target.value } })}
-                                style={{ ...inputStyle, flex: 1, fontFamily: "var(--cs-font-mono)", fontSize: 11 }}
-                              />
-                            </div>
-                            {fieldErrors.text && <span style={errorTextStyle}>{fieldErrors.text}</span>}
-                          </div>
+                          {PALETTE_FIELDS.map(({ key, label, fallback }) => {
+                            const value = brandSpec.colors[key];
+                            const setValue = (v: string) =>
+                              setBrandSpec({ ...brandSpec, colors: { ...brandSpec.colors, [key]: v } });
+                            return (
+                              <div key={key} style={colorBoxStyle}>
+                                <span style={{ fontWeight: 600, fontSize: "var(--cs-text-xs)" }}>{label}</span>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                                  {/* The native picker doubles as the swatch. */}
+                                  <input
+                                    type="color"
+                                    aria-label={`Chọn ${label}`}
+                                    value={isValidHexColor(value) ? value : fallback}
+                                    onChange={(e) => setValue(e.target.value.toUpperCase())}
+                                    style={swatchInputStyle}
+                                  />
+                                  <input
+                                    type="text"
+                                    aria-label={`Mã màu ${label}`}
+                                    value={value}
+                                    spellCheck={false}
+                                    onChange={(e) => setValue(e.target.value)}
+                                    style={{
+                                      ...inputStyle,
+                                      flex: 1,
+                                      minWidth: 0,
+                                      width: "100%",
+                                      boxSizing: "border-box",
+                                      fontFamily: "var(--cs-font-mono)",
+                                      fontSize: 11,
+                                      borderColor: fieldErrors[key] ? "var(--cs-danger)" : undefined,
+                                    }}
+                                  />
+                                </div>
+                                {fieldErrors[key] && <span style={errorTextStyle}>{fieldErrors[key]}</span>}
+                              </div>
+                            );
+                          })}
                         </div>
 
                         {/* Extra Colors */}
@@ -663,7 +622,7 @@ const BrandViewInner: React.FC = () => {
                               color: brandSpec.colors.text,
                             }}
                           >
-                            {brandSpec.slogan} Nội dung mẫu hiển thị trực quan kiểm tra màu nền, màu chữ và phông chữ.
+                            {brandSpec.slogan ? `${brandSpec.slogan.replace(/[.!?…]*$/, "")}. ` : ""}Nội dung mẫu để kiểm tra màu nền, màu chữ và phông chữ.
                           </div>
                         </div>
                       </div>
@@ -978,81 +937,17 @@ const BrandViewInner: React.FC = () => {
                           Khu vực an toàn đảm bảo phụ đề, logo và nội dung cốt lõi không bị che bởi giao diện người dùng (nút thả tim, thanh điều hướng, mô tả).
                         </p>
 
-                        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", justifyContent: "center" }}>
-                          {/* 16:9 Landscape Safe Zone */}
-                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                            <div
-                              style={{
-                                width: 240,
-                                height: 135,
-                                backgroundColor: "#1e293b",
-                                border: "1px solid var(--cs-border-subtle)",
-                                borderRadius: "var(--cs-radius-control)",
-                                position: "relative",
-                                overflow: "hidden",
-                              }}
-                            >
-                              <div
-                                style={{
-                                  position: "absolute",
-                                  top: "10%",
-                                  bottom: "10%",
-                                  left: "5%",
-                                  right: "5%",
-                                  border: "1px dashed #3b82f6",
-                                  backgroundColor: "rgba(59, 130, 246, 0.1)",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  fontSize: 10,
-                                  color: "#60a5fa",
-                                  fontWeight: 600,
-                                }}
-                              >
-                                Safe Zone (16:9)
-                              </div>
-                            </div>
-                            <span style={{ fontSize: 11, color: "var(--cs-fg-muted)" }}>Ngang 16:9 (1920×1080)</span>
+                        {selectedItem.formats && selectedItem.formats.length > 0 ? (
+                          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", justifyContent: "center", alignItems: "flex-end" }}>
+                            {selectedItem.formats.map((f) => (
+                              <SafeZonePreview key={f.name} format={f} />
+                            ))}
                           </div>
-
-                          {/* 9:16 Vertical Safe Zone (Shorts / Reels / TikTok) */}
-                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                            <div
-                              style={{
-                                width: 100,
-                                height: 177,
-                                backgroundColor: "#1e293b",
-                                border: "1px solid var(--cs-border-subtle)",
-                                borderRadius: "var(--cs-radius-control)",
-                                position: "relative",
-                                overflow: "hidden",
-                              }}
-                            >
-                              <div
-                                style={{
-                                  position: "absolute",
-                                  top: "12%",
-                                  bottom: "20%",
-                                  left: "6%",
-                                  right: "12%",
-                                  border: "1px dashed #ef4444",
-                                  backgroundColor: "rgba(239, 68, 68, 0.1)",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  fontSize: 9,
-                                  color: "#f87171",
-                                  fontWeight: 600,
-                                  textAlign: "center",
-                                  padding: 2,
-                                }}
-                              >
-                                Safe Zone (9:16)
-                              </div>
-                            </div>
-                            <span style={{ fontSize: 11, color: "var(--cs-fg-muted)" }}>Dọc 9:16 (1080×1920)</span>
-                          </div>
-                        </div>
+                        ) : (
+                          <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
+                            Kênh này chưa khai báo định dạng khung hình.
+                          </span>
+                        )}
                       </div>
 
                       {/* Raw Channel Definition Text */}
@@ -1111,6 +1006,54 @@ const BrandViewInner: React.FC = () => {
   );
 };
 
+/** One channel format drawn to scale, with its safe zone inset by the real margins. */
+const SafeZonePreview: React.FC<{ format: ChannelFormat }> = ({ format }) => {
+  const BOX = 180;
+  const ratio = format.width / Math.max(1, format.height);
+  const w = ratio >= 1 ? BOX : Math.round(BOX * ratio);
+  const h = ratio >= 1 ? Math.round(BOX / ratio) : BOX;
+  const z = format.safe_zone;
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  const margins = `Lề an toàn — trên ${pct(z.top)}, dưới ${pct(z.bottom)}, trái ${pct(z.left)}, phải ${pct(z.right)}`;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, maxWidth: BOX }}>
+      <div
+        title={margins}
+        style={{
+          width: w,
+          height: h,
+          backgroundColor: "#1e293b",
+          border: "1px solid var(--cs-border-subtle)",
+          borderRadius: "var(--cs-radius-control)",
+          position: "relative",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            position: "absolute",
+            top: pct(z.top),
+            bottom: pct(z.bottom),
+            left: pct(z.left),
+            right: pct(z.right),
+            border: "1px dashed #60a5fa",
+            backgroundColor: "rgba(59, 130, 246, 0.12)",
+          }}
+        />
+      </div>
+      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--cs-fg-secondary)", textAlign: "center" }}>{format.name}</span>
+      <span style={{ fontSize: 11, color: "var(--cs-fg-muted)", textAlign: "center" }}>
+        {format.aspect} · {format.width}×{format.height}
+      </span>
+      <span style={{ fontSize: 10, color: "var(--cs-fg-muted)", textAlign: "center", lineHeight: 1.4 }}>
+        Lề trên {pct(z.top)} · dưới {pct(z.bottom)}
+        <br />
+        trái {pct(z.left)} · phải {pct(z.right)}
+      </span>
+    </div>
+  );
+};
+
 const cardSectionStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
@@ -1146,10 +1089,29 @@ const inputStyle: React.CSSProperties = {
   outline: "none",
 };
 
+const PALETTE_FIELDS = [
+  { key: "primary", label: "Màu chính (Primary)", fallback: "#1e88e5" },
+  { key: "accent", label: "Màu nhấn (Accent)", fallback: "#ffb300" },
+  { key: "bg", label: "Màu nền (Background)", fallback: "#0b0f14" },
+  { key: "text", label: "Màu chữ (Text)", fallback: "#ffffff" },
+] as const;
+
+const swatchInputStyle: React.CSSProperties = {
+  width: 32,
+  height: 32,
+  flexShrink: 0,
+  padding: 2,
+  border: "1px solid var(--cs-border-subtle)",
+  borderRadius: "var(--cs-radius-control)",
+  backgroundColor: "var(--cs-bg-app)",
+  cursor: "pointer",
+};
+
 const colorBoxStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 6,
+  minWidth: 0,
   padding: 8,
   backgroundColor: "var(--cs-bg-raised)",
   border: "1px solid var(--cs-border-subtle)",

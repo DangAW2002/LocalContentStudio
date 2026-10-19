@@ -35,6 +35,10 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
   const [kits, setKits] = React.useState<CatalogKit[]>([]);
   const [modules, setModules] = React.useState<CatalogModule[]>([]);
   const [activeModuleIds, setActiveModuleIds] = React.useState<string[]>([]);
+  // Budget as resolved by the backend (kit + modules); null until the first save.
+  const [serverBudget, setServerBudget] = React.useState<number | null>(null);
+  const [modulesError, setModulesError] = React.useState<string | null>(null);
+  const [modulesSaving, setModulesSaving] = React.useState(false);
   const [restoreConfirmId, setRestoreConfirmId] = React.useState<string | null>(null);
   const [restoring, setRestoring] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
@@ -63,19 +67,22 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
 
     const loadData = async () => {
       try {
-        const [artList, cpList, kitList, modList] = await Promise.all([
+        const [artList, cpList, kitList, modList, projects] = await Promise.all([
           studioApi.listArtifacts(projectSlug).catch(() => []),
           studioApi.getCheckpoints().catch(() => []),
           studioApi.getCatalogKits().catch(() => []),
           studioApi.getCatalogModules().catch(() => []),
+          studioApi.getProjects().catch(() => []),
         ]);
         if (isMounted) {
           setInternalArtifacts(artList);
           setCheckpoints(cpList);
           setKits(kitList);
           setModules(modList);
-          // Default initial active modules
-          setActiveModuleIds(modList.slice(0, 3).map((m) => m.id));
+          // Modules actually enabled in project.yaml.
+          setActiveModuleIds(projects.find((p) => p.slug === projectSlug)?.modules ?? []);
+          setServerBudget(null);
+          setModulesError(null);
         }
       } finally {
         if (isMounted) setLoading(false);
@@ -156,16 +163,66 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
   };
 
   const tabs = [
-    { id: "artifacts", label: "Thành phẩm", count: artifacts.length > 0 ? artifacts.length : projectFiles.length },
-    { id: "checkpoints", label: "Checkpoints", count: checkpoints.length },
-    { id: "modules", label: "Modules & Ngân sách" },
+    { id: "artifacts", label: "Thành phẩm", count: artifacts.length > 0 ? artifacts.length : undefined },
+    { id: "checkpoints", label: "Checkpoints", count: checkpoints.length > 0 ? checkpoints.length : undefined },
+    { id: "modules", label: "Modules" },
   ];
 
   // Token budget calculations (ADR-010 limit: max 2,000 tokens)
   const MAX_TOKEN_BUDGET = 2000;
-  const currentTokenUsage = modules
-    .filter((m) => activeModuleIds.includes(m.id))
-    .reduce((sum, m) => sum + (m.tokenCount || 150), 300);
+  const currentTokenUsage =
+    serverBudget ??
+    modules.filter((m) => activeModuleIds.includes(m.id)).reduce((sum, m) => sum + (m.tokenCount || 150), 300);
+
+  const toggleModule = async (id: string) => {
+    const prev = activeModuleIds;
+    const next = prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id];
+    setActiveModuleIds(next);
+    setModulesSaving(true);
+    setModulesError(null);
+    try {
+      const res = await studioApi.setProjectModules({ project: projectSlug, modules: next });
+      setActiveModuleIds(res.modules);
+      setServerBudget(res.totalTokenBudget);
+    } catch (err: any) {
+      setActiveModuleIds(prev);
+      setModulesError(err?.message || "Không lưu được danh sách module.");
+    } finally {
+      setModulesSaving(false);
+    }
+  };
+
+  const renderModuleRow = (mod: CatalogModule) => {
+    const isActive = activeModuleIds.includes(mod.id);
+    return (
+      <div
+        key={mod.id}
+        style={{
+          padding: "8px 10px",
+          border: `1px solid ${isActive ? "var(--cs-accent)" : "var(--cs-border-subtle)"}`,
+          backgroundColor: isActive ? "var(--cs-accent-subtle)" : "var(--cs-bg-raised)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          borderRadius: "var(--cs-radius-control)",
+          fontSize: "var(--cs-text-xs)",
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+          <span style={{ fontWeight: 600, color: "var(--cs-fg-primary)", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {mod.name}
+          </span>
+          <span style={{ color: "var(--cs-fg-muted)", fontSize: 11 }}>
+            {mod.skillCount} skills · ~{mod.tokenCount} tokens
+          </span>
+        </div>
+        <Button size="sm" variant="secondary" disabled={modulesSaving} onClick={() => toggleModule(mod.id)}>
+          {isActive ? "Tắt" : "Bật"}
+        </Button>
+      </div>
+    );
+  };
 
   const budgetPercent = Math.min(100, Math.round((currentTokenUsage / MAX_TOKEN_BUDGET) * 100));
 
@@ -430,12 +487,8 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
                       Phục hồi
                     </Button>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--cs-fg-muted)" }}>
-                    <code style={{ fontFamily: "var(--cs-font-mono)", fontSize: 11 }}>
-                      {cp.id.slice(0, 8)}...
-                    </code>
-                    <span>·</span>
-                    <span>{new Date(cp.timestamp).toLocaleTimeString("vi-VN")}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--cs-fg-muted)" }} title={cp.id}>
+                    <span>{formatCheckpointTime(cp.timestamp)}</span>
                     <span>·</span>
                     <span>{cp.filesChanged} tệp thay đổi</span>
                   </div>
@@ -459,9 +512,9 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
                 gap: 6,
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "var(--cs-text-xs)" }}>
-                <span style={{ fontWeight: 600 }}>Ngân sách Token mỗi lượt</span>
-                <span style={{ fontFamily: "var(--cs-font-mono)", fontWeight: 600, color: budgetPercent > 80 ? "var(--cs-danger)" : "var(--cs-accent)" }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: "2px 8px", fontSize: "var(--cs-text-xs)" }}>
+                <span style={{ fontWeight: 600, whiteSpace: "nowrap" }}>Ngân sách token mỗi lượt</span>
+                <span style={{ fontFamily: "var(--cs-font-mono)", fontWeight: 600, whiteSpace: "nowrap", color: budgetPercent > 80 ? "var(--cs-danger)" : "var(--cs-accent)" }}>
                   {currentTokenUsage.toLocaleString()} / {MAX_TOKEN_BUDGET.toLocaleString()} tokens ({budgetPercent}%)
                 </span>
               </div>
@@ -487,56 +540,34 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
               </span>
             </div>
 
-            {/* Modules List */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={{ fontSize: "var(--cs-text-xs)", fontWeight: 700, textTransform: "uppercase", color: "var(--cs-fg-muted)" }}>
-                Modules đang kích hoạt
-              </span>
-              {modules.length === 0 ? (
-                <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
-                  Không có module nào trong catalog.
-                </div>
-              ) : (
-                modules.map((mod) => {
-                  const isActive = activeModuleIds.includes(mod.id);
-                  return (
-                    <div
-                      key={mod.id}
-                      style={{
-                        padding: "8px 10px",
-                        border: "1px solid var(--cs-border-subtle)",
-                        backgroundColor: isActive ? "var(--cs-bg-panel)" : "var(--cs-bg-raised)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        borderRadius: "var(--cs-radius-control)",
-                        fontSize: "var(--cs-text-xs)",
-                      }}
-                    >
-                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                        <span style={{ fontWeight: 600, color: "var(--cs-fg-primary)" }}>{mod.name}</span>
-                        <span style={{ color: "var(--cs-fg-muted)", fontSize: 11 }}>
-                          {mod.skillCount} skills · ~{mod.tokenCount} tokens
-                        </span>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant={isActive ? "secondary" : "quiet"}
-                        onClick={() => {
-                          if (isActive) {
-                            setActiveModuleIds((prev) => prev.filter((id) => id !== mod.id));
-                          } else {
-                            setActiveModuleIds((prev) => [...prev, mod.id]);
-                          }
-                        }}
-                      >
-                        {isActive ? "Bỏ chọn" : "Bật"}
-                      </Button>
+            {/* Modules: enabled first, then the rest of the catalog. Toggling saves to project.yaml. */}
+            {modulesError && (
+              <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-danger)" }}>{modulesError}</div>
+            )}
+            {modules.length === 0 ? (
+              <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
+                Không có module nào trong catalog.
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={moduleGroupTitleStyle}>
+                    Đang bật ({modules.filter((m) => activeModuleIds.includes(m.id)).length})
+                  </span>
+                  {activeModuleIds.length === 0 ? (
+                    <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
+                      Chưa bật module nào — agent chỉ dùng kit mặc định của dự án.
                     </div>
-                  );
-                })
-              )}
-            </div>
+                  ) : (
+                    modules.filter((m) => activeModuleIds.includes(m.id)).map(renderModuleRow)
+                  )}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <span style={moduleGroupTitleStyle}>Có sẵn</span>
+                  {modules.filter((m) => !activeModuleIds.includes(m.id)).map(renderModuleRow)}
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -596,3 +627,18 @@ export const OutputsPane: React.FC<OutputsPaneProps> = ({
     </div>
   );
 };
+
+const moduleGroupTitleStyle: React.CSSProperties = {
+  fontSize: "var(--cs-text-xs)",
+  fontWeight: 700,
+  textTransform: "uppercase",
+  color: "var(--cs-fg-muted)",
+};
+
+/** "18/10 14:27" — day/month then time, as Vietnamese readers expect. */
+function formatCheckpointTime(ts: string): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${two(d.getDate())}/${two(d.getMonth() + 1)} ${two(d.getHours())}:${two(d.getMinutes())}`;
+}

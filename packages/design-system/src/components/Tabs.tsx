@@ -23,9 +23,30 @@ export const Tabs: React.FC<TabsProps> = ({
 }) => {
   const height = size === "sm" ? 32 : 40;
   const fontSize = size === "sm" ? "var(--cs-text-xs)" : "var(--cs-text-sm)";
+  const listRef = React.useRef<HTMLDivElement>(null);
+
+  // Keep the active tab visible when the strip overflows.
+  React.useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    el?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeId]);
+
+  // The scrollbar is hidden, so map vertical wheel to horizontal scroll (as VS Code's tab bar does).
+  React.useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   return (
     <div
+      ref={listRef}
       role="tablist"
       style={{
         display: "flex",
@@ -33,6 +54,10 @@ export const Tabs: React.FC<TabsProps> = ({
         gap: "var(--cs-space-4)",
         borderBottom: "1px solid var(--cs-border-subtle)",
         height,
+        // Like VS Code tabs: labels never wrap; overflow scrolls horizontally instead.
+        overflowX: "auto",
+        overflowY: "hidden",
+        scrollbarWidth: "none",
         ...style,
       }}
     >
@@ -58,11 +83,18 @@ export const Tabs: React.FC<TabsProps> = ({
               cursor: "pointer",
               padding: "0 4px",
               marginBottom: -1,
-              outline: "none",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
               transition: "color var(--cs-motion-duration) ease",
             }}
           >
-            <span>{item.label}</span>
+            {/* A hidden bold copy reserves the active width, so selecting a tab never shifts its neighbours. */}
+            <span style={{ display: "inline-grid" }}>
+              <span style={{ gridArea: "1 / 1" }}>{item.label}</span>
+              <span aria-hidden style={{ gridArea: "1 / 1", fontWeight: 600, visibility: "hidden" }}>
+                {item.label}
+              </span>
+            </span>
             {item.count !== undefined && (
               <span
                 style={{

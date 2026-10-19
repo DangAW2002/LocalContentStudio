@@ -518,9 +518,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engine
           padding: "var(--cs-space-3) var(--cs-space-5)",
           backgroundColor: "var(--cs-bg-panel)",
           borderBottom: "1px solid var(--cs-border-subtle)",
+          paddingBottom: 0,
           display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
+          flexDirection: "column",
+          gap: "var(--cs-space-2)",
         }}
       >
         <div>
@@ -537,6 +538,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engine
           activeId={activeTab}
           onChange={(id) => setActiveTab(id as any)}
           size="sm"
+          style={{ borderBottom: "none" }}
         />
       </div>
 
@@ -562,10 +564,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engine
               {engines.length === 0 ? (
                 <EmptyState
                   icon={<Icon name="cpu" size={28} />}
-                  title="Chưa có kết quả probe"
-                  description="Bấm 'Kiểm tra lại' để quét các công cụ CLI đã cài trên máy."
+                  title={loading ? "Đang quét công cụ trên máy…" : "Chưa có kết quả probe"}
+                  description={loading ? undefined : "Bấm 'Kiểm tra lại' để quét các công cụ CLI đã cài trên máy."}
                   action={
-                    <Button variant="secondary" onClick={loadData}>
+                    <Button variant="secondary" onClick={loadData} busy={loading} busyText="Đang quét...">
                       Kiểm tra lại
                     </Button>
                   }
@@ -1576,7 +1578,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engine
                             </div>
                             <Button
                               variant="primary"
-                              size="sm"
                               onClick={() => handleSaveSecret(item.name)}
                               disabled={!inputVal.trim()}
                             >
@@ -1695,7 +1696,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engine
                           <div style={{ marginTop: 22, display: "flex", gap: "var(--cs-space-2)" }}>
                             <Button
                               variant="secondary"
-                              size="sm"
                               onClick={() => handleSaveEndpoint(p.id)}
                             >
                               Lưu
@@ -1703,7 +1703,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engine
                             {endpoints[p.id] && (
                               <Button
                                 variant="quiet"
-                                size="sm"
                                 onClick={() => {
                                   setEndpointInputs((prev) => ({ ...prev, [p.id]: "" }));
                                   studioApi.setProviderEndpoint({ toolId: p.id, baseUrl: null }).then(() => {
@@ -1833,7 +1832,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engine
                           <div style={{ marginTop: 22, display: "flex", gap: "var(--cs-space-2)" }}>
                             <Button
                               variant="secondary"
-                              size="sm"
                               onClick={() => handleSavePricing(p.id)}
                             >
                               Lưu

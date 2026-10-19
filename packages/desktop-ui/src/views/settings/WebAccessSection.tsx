@@ -66,7 +66,8 @@ export const WebAccessSection: React.FC = () => {
           : "Đã tắt Chế độ Web Cá nhân."
       );
     } catch (err: any) {
-      setError(err?.message || "Không thể thay đổi trạng thái Chế độ Web.");
+      const msg = typeof err === "string" ? err : err?.message || err?.error || "Không thể thay đổi trạng thái Chế độ Web.";
+      setError(msg);
     } finally {
       setToggleBusy(false);
     }
@@ -87,7 +88,8 @@ export const WebAccessSection: React.FC = () => {
           : "Đã giới hạn truy cập chỉ trên máy tính này (127.0.0.1)."
       );
     } catch (err: any) {
-      setError(err?.message || "Không thể thay đổi quyền truy cập LAN.");
+      const msg = typeof err === "string" ? err : err?.message || err?.error || "Không thể thay đổi quyền truy cập LAN.";
+      setError(msg);
     } finally {
       setToggleBusy(false);
     }
@@ -108,7 +110,8 @@ export const WebAccessSection: React.FC = () => {
       setStatus(res);
       setSuccessMsg(`Đã cập nhật cổng dịch vụ thành ${p}.`);
     } catch (err: any) {
-      setError(err?.message || "Không thể cập nhật cổng.");
+      const msg = typeof err === "string" ? err : err?.message || err?.error || "Không thể cập nhật cổng.";
+      setError(msg);
     } finally {
       setPortBusy(false);
     }
@@ -138,7 +141,8 @@ export const WebAccessSection: React.FC = () => {
       setConfirmPassword("");
       setSuccessMsg("Đã lưu mật khẩu chủ sở hữu (mã hóa an toàn bằng Argon2id)!");
     } catch (err: any) {
-      setPasswordError(err?.message || "Không thể lưu mật khẩu.");
+      const msg = typeof err === "string" ? err : err?.message || err?.error || "Không thể lưu mật khẩu.";
+      setPasswordError(msg);
     } finally {
       setPasswordBusy(false);
     }
@@ -343,7 +347,6 @@ export const WebAccessSection: React.FC = () => {
             />
           </div>
           <Button
-            size="sm"
             variant="secondary"
             onClick={handleSavePort}
             busy={portBusy}

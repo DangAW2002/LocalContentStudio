@@ -19,6 +19,8 @@ const ICON_PATHS: Record<string, string> = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   minus: '<path d="M5 12h14"/>',
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  "panel-left": '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/>',
+  "panel-right": '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
   "check-circle": '<circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/>',
   "x-circle": '<circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/>',
@@ -75,6 +77,11 @@ const ICON_PATHS: Record<string, string> = {
   tool: '<path d="m14.7 6.3 5 5-11.4 11.4a2 2 0 0 1-2.8 0l-2.2-2.2a2 2 0 0 1 0-2.8Z"/><path d="M18 3 3 18"/>',
   globe: '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
   qr: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>',
+  activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+  loader: '<path d="M21 12a9 9 0 1 1-6.2-8.6"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  unlink: '<path d="m18.8 13.3 1.7-1.8a5 5 0 0 0-7-7l-1.8 1.7"/><path d="m5.2 10.7-1.7 1.8a5 5 0 0 0 7 7l1.8-1.7"/><path d="M8 2v3M2 8h3M16 22v-3M22 16h-3"/>',
+  command: '<path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/>',
 };
 
 export interface IconProps {
