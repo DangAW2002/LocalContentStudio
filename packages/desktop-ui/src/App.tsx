@@ -48,6 +48,7 @@ export const App: React.FC = () => {
   const [engines, setEngines] = React.useState<EngineProbeResult[]>([]);
   const [jobs, setJobs] = React.useState<JobSnapshot[]>([]);
   const [diskUsage, setDiskUsage] = React.useState<DiskUsageReport | undefined>();
+  const [budgetStatus, setBudgetStatus] = React.useState<import("./api/types").BudgetStatus | undefined>();
 
   // Context for files and threads
   const [projectList, setProjectList] = React.useState<ProjectSummary[]>([]);
@@ -79,13 +80,14 @@ export const App: React.FC = () => {
   // Initial data loading
   const loadWorkspaceAndCore = React.useCallback(async () => {
     try {
-      const [currWs, recents, engs, jobList, disk, projs] = await Promise.all([
+      const [currWs, recents, engs, jobList, disk, projs, bgt] = await Promise.all([
         studioApi.getCurrentWorkspace().catch(() => null),
         studioApi.getRecentWorkspaces().catch(() => []),
         studioApi.probeEngines().catch(() => []),
         studioApi.getJobsSnapshot().catch(() => []),
         studioApi.getDiskUsage().catch(() => undefined),
         studioApi.getProjects().catch(() => []),
+        studioApi.getBudget().catch(() => undefined),
       ]);
 
       if (currWs?.workspace) {
@@ -98,6 +100,7 @@ export const App: React.FC = () => {
       setJobs(jobList);
       setDiskUsage(disk);
       setProjectList(projs);
+      setBudgetStatus(bgt);
       if (!activeProjectSlug && projs.length > 0) {
         setActiveProjectSlug(projs[0].slug);
       }
@@ -650,6 +653,8 @@ export const App: React.FC = () => {
         engines={engines}
         jobs={jobs}
         diskUsage={diskUsage}
+        todayCostUsd={budgetStatus?.todaySpendUsd}
+        todayBudgetUsd={budgetStatus?.dailyBudgetUsd}
         onOpenTaskCenter={() => setTaskCenterOpen(true)}
         onOpenSettings={handleNavigateSettings}
         onOpenWorkspaceFolder={() => setWorkspaceSwitcherOpen(true)}

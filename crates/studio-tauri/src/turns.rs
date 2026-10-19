@@ -13,9 +13,6 @@ use tokio::sync::Notify;
 use crate::error::{CmdError, CmdResult};
 use crate::state::{AppState, RunningTurn};
 
-/// Default per-turn budget for paid tools when `studio.yaml` sets none.
-const DEFAULT_TURN_BUDGET_USD: f64 = 1.0;
-
 fn now() -> String {
     chrono::Utc::now().to_rfc3339()
 }
@@ -322,6 +319,7 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
     del_setting(&db, &note_key)?;
     let context = build_context(&ws, project.as_ref(), &modules, note, is_claude);
 
+    let turn_budget = crate::budget::calculate_turn_budget(&ws);
     let token = state.tokens.issue(TurnContext {
         workspace_dir: ws.root().to_path_buf(),
         turn_id: turn_id.clone(),
@@ -332,7 +330,7 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
             McpEngine::Agy
         },
         allowed_capabilities: None,
-        budget_usd: Some(DEFAULT_TURN_BUDGET_USD),
+        budget_usd: turn_budget,
     });
     state.broker.register_turn(&turn_id, &thread_id);
 

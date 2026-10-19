@@ -19,6 +19,7 @@ export interface AgentMessageProps {
   onSelectFile: (path: string) => void;
   onPermissionRespond: (requestId: string, allow: boolean) => void;
   onRerunPrompt?: (prompt: string) => void;
+  onRetryTurn?: (turnId?: string) => void;
   onOpenPublishDraft?: () => void;
   onNavigateSettings?: (tab?: string) => void;
   onUndoClick?: (turnId: string) => void;
@@ -34,6 +35,7 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
   onSelectFile,
   onPermissionRespond,
   onRerunPrompt,
+  onRetryTurn,
   onOpenPublishDraft,
   onNavigateSettings,
   onUndoClick,
@@ -94,7 +96,21 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
         {/* Danger Callout inside bubble on error */}
         {msg.errorMessage && (
           <div style={{ marginTop: msg.text ? 8 : 0 }}>
-            <Callout variant="danger">
+            <Callout
+              variant="danger"
+              actions={
+                onRetryTurn && !isAnyTurnRunning ? (
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={() => onRetryTurn(msg.turnId)}
+                    leftIcon={<Icon name="refresh" size={12} />}
+                  >
+                    Thử lại
+                  </Button>
+                ) : undefined
+              }
+            >
               <div style={{ fontWeight: 600 }}>Engine báo lỗi:</div>
               <div style={{ marginTop: 2 }}>{msg.errorMessage}</div>
             </Callout>
@@ -522,7 +538,7 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
         }}
       >
         <div style={{ flex: 1, minWidth: 0 }}>
-          {msg.usage ? <UsageSummary usage={msg.usage} /> : null}
+          {msg.usage ? <UsageSummary usage={msg.usage} model={msg.model} /> : null}
         </div>
 
         {msg.turnId && !msg.isStreaming && (

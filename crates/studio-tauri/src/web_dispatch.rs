@@ -186,6 +186,24 @@ pub async fn dispatch_invoke(
             let res = commands::thread_events_impl(state, thread_id)?;
             Ok(serde_json::to_value(res)?)
         }
+        "thread_set_model" => {
+            let thread_id: String =
+                get_arg(&args, "threadId").or_else(|_| get_arg(&args, "thread_id"))?;
+            let model: Option<String> = get_opt_arg(&args, "model");
+            crate::budget::thread_set_model_impl(state, thread_id, model)
+        }
+        "budget_get" => {
+            let res = crate::budget::budget_get_impl(state)?;
+            Ok(serde_json::to_value(res)?)
+        }
+        "budget_set" => {
+            let daily: Option<f64> = get_opt_arg(&args, "dailyBudgetUsd")
+                .or_else(|| get_opt_arg(&args, "daily_budget_usd"));
+            let monthly: Option<f64> = get_opt_arg(&args, "monthlyBudgetUsd")
+                .or_else(|| get_opt_arg(&args, "monthly_budget_usd"));
+            let res = crate::budget::budget_set_impl(state, daily, monthly)?;
+            Ok(serde_json::to_value(res)?)
+        }
         "turn_start" => {
             let thread_id: String =
                 get_arg(&args, "threadId").or_else(|_| get_arg(&args, "thread_id"))?;

@@ -111,6 +111,16 @@ export interface BudgetSummary {
   warningThreshold: number;
 }
 
+export interface BudgetStatus {
+  todaySpendUsd: number;
+  dailyBudgetUsd?: number | null;
+  monthSpendUsd: number;
+  monthlyBudgetUsd?: number | null;
+  warningThreshold: number;
+  isDailyOver: boolean;
+  isMonthlyOver: boolean;
+}
+
 export interface WorkspaceCurrentResponse {
   workspace: WorkspaceSummary;
   org?: OrgSummary;

@@ -6,6 +6,8 @@ export interface UndoConfirmDialogProps {
   targetTurnId: string | null;
   messages: ThreadMessage[];
   undoing: boolean;
+  title?: string;
+  confirmLabel?: string;
   onClose: () => void;
   onConfirm: (turnId: string) => void;
 }
@@ -14,6 +16,8 @@ export const UndoConfirmDialog: React.FC<UndoConfirmDialogProps> = ({
   targetTurnId,
   messages,
   undoing,
+  title,
+  confirmLabel,
   onClose,
   onConfirm,
 }) => {
@@ -23,7 +27,7 @@ export const UndoConfirmDialog: React.FC<UndoConfirmDialogProps> = ({
 
   return (
     <Dialog
-      title="Xác nhận hoàn tác lượt này?"
+      title={title || "Xác nhận hoàn tác lượt này?"}
       open={Boolean(targetTurnId)}
       onClose={onClose}
       actions={
@@ -37,7 +41,7 @@ export const UndoConfirmDialog: React.FC<UndoConfirmDialogProps> = ({
             busyText="Đang hoàn tác..."
             onClick={() => onConfirm(targetTurnId)}
           >
-            Hoàn tác lượt
+            {confirmLabel || "Hoàn tác lượt"}
           </Button>
         </>
       }

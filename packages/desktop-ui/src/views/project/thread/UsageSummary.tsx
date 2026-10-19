@@ -5,16 +5,18 @@ export type UsageInfo = NonNullable<ThreadMessage["usage"]>;
 
 export interface UsageSummaryProps {
   usage: UsageInfo;
+  model?: string;
 }
 
 /** Per-turn token breakdown: total, cost, cache hit ratio and cache write (warm-up). */
-export const UsageSummary: React.FC<UsageSummaryProps> = ({ usage }) => {
+export const UsageSummary: React.FC<UsageSummaryProps> = ({ usage, model }) => {
   const fmt = (n: number) => n.toLocaleString();
   const promptTokens = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
   const total = promptTokens + usage.outputTokens;
   const hitPct = promptTokens > 0 ? Math.round((usage.cacheReadTokens / promptTokens) * 100) : 0;
 
   const head: string[] = [];
+  if (model) head.push(model);
   if (usage.costUsd != null) head.push(`$${usage.costUsd.toFixed(4)}`);
   if (usage.estimatedCostUsd) head.push(`~$${usage.estimatedCostUsd.toFixed(2)} (ước tính)`);
   if (total > 0) head.push(`${fmt(total)} tokens`);

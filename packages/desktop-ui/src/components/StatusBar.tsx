@@ -9,6 +9,7 @@ export interface StatusBarProps {
   jobs: JobSnapshot[];
   diskUsage?: DiskUsageReport;
   todayCostUsd?: number;
+  todayBudgetUsd?: number | null;
   onOpenTaskCenter: () => void;
   onOpenSettings: (tab?: string) => void;
   onOpenWorkspaceFolder?: () => void;
@@ -20,6 +21,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   jobs,
   diskUsage,
   todayCostUsd,
+  todayBudgetUsd,
   onOpenTaskCenter,
   onOpenSettings,
   onOpenWorkspaceFolder,
@@ -161,19 +163,36 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
       {/* Right: Cost (if M07 available) + Disk Usage + Jobs snapshot */}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        {!isUnder600 && typeof todayCostUsd === "number" && todayCostUsd > 0 && (
-          <span
+        {!isUnder600 && typeof todayCostUsd === "number" && (
+          <button
+            type="button"
+            onClick={() => onOpenSettings("jobs")}
             style={{
               display: "inline-flex",
               alignItems: "center",
               gap: 4,
-              color: "var(--cs-fg-secondary)",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: "inherit",
+              padding: "2px 4px",
+              borderRadius: "var(--cs-radius-control)",
+              color: todayBudgetUsd && todayCostUsd >= todayBudgetUsd ? "var(--cs-danger)" : "var(--cs-fg-secondary)",
+              fontWeight: todayBudgetUsd && todayCostUsd >= todayBudgetUsd ? 600 : 400,
             }}
-            title="Chi phí ước tính hôm nay"
+            title={
+              todayBudgetUsd
+                ? `Hôm nay: $${todayCostUsd.toFixed(2)} / $${todayBudgetUsd.toFixed(2)} (Bấm để đổi ngân sách)`
+                : `Hôm nay: $${todayCostUsd.toFixed(2)} (Chưa đặt giới hạn ngày)`
+            }
           >
-            <Icon name="dollar-sign" size={12} color="var(--cs-fg-muted)" />
-            <span>${todayCostUsd.toFixed(2)} hôm nay</span>
-          </span>
+            <Icon name="dollar-sign" size={12} color={todayBudgetUsd && todayCostUsd >= todayBudgetUsd ? "var(--cs-danger)" : "var(--cs-fg-muted)"} />
+            <span>
+              {todayBudgetUsd != null
+                ? `Hôm nay $${todayCostUsd.toFixed(2)} / $${todayBudgetUsd.toFixed(2)}`
+                : `$${todayCostUsd.toFixed(2)} hôm nay`}
+            </span>
+          </button>
         )}
 
         {!isUnder600 && diskUsage && (

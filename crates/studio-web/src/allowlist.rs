@@ -42,7 +42,10 @@ pub const ALLOWED_WEB_COMMANDS: &[&str] = &[
     // Threads and turns
     "thread_list",
     "thread_create",
+    "thread_set_model",
     "thread_events",
+    "budget_get",
+    "budget_set",
     "turn_start",
     "turn_cancel",
     "turn_undo",
