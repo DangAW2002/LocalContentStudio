@@ -41,6 +41,6 @@ cargo fmt --all -- --check
 cargo clippy -p <your-crate> --all-targets -- -D warnings
 cargo test -p <your-crate>
 ```
-For UI: `pnpm --filter @studio/desktop-ui typecheck` and `pnpm --filter @studio/desktop-ui build`.
+For UI: `pnpm --filter @studio/desktop-ui typecheck`, `pnpm --filter @studio/desktop-ui test` and `pnpm --filter @studio/desktop-ui build`.
 
 Do not commit; the orchestrator reviews and commits. When committing, strictly forbid `Co-Authored-By` or AI attribution trailers. Report: what you built, public API, tests, gate output, known gaps.
