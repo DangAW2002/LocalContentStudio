@@ -5,6 +5,8 @@
   "description": "Local Content Studio — Standalone Desktop Creative Production Workspace",
   "scripts": {
     "dev": "pnpm --filter @studio/desktop-ui dev",
+    "desktop": "node packages/desktop-ui/node_modules/@tauri-apps/cli/tauri.js dev",
+    "tauri": "node packages/desktop-ui/node_modules/@tauri-apps/cli/tauri.js",
     "build": "pnpm --recursive run build",
     "test": "pnpm --recursive run test",
     "typecheck": "pnpm --recursive run typecheck",

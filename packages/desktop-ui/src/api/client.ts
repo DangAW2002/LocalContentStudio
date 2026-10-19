@@ -158,6 +158,14 @@ export class StudioApiClient {
     return invoke<WorkspaceCurrentResponse>("workspace_current");
   }
 
+  /**
+   * Open native folder picker dialog.
+   * Command: `dialog_pick_folder`
+   */
+  async pickFolder(): Promise<string | null> {
+    return invoke<string | null>("dialog_pick_folder");
+  }
+
   // ==========================================
   // Project & File Commands
   // ==========================================
@@ -391,6 +399,19 @@ export class StudioApiClient {
    */
   async onTurnEvent(callback: (payload: TurnEventPayload) => void): Promise<() => void> {
     return listen<TurnEventPayload>("turn-event", (e) => callback(e.payload));
+  }
+
+  /**
+   * Web mode: the SSE stream could not replay what was missed (reconnect after a long gap,
+   * server restart). Views showing live data should reload it. Never fires on desktop.
+   */
+  /** A thread was renamed (auto-titled from its first prompt). */
+  async onThreadUpdated(callback: (payload: { threadId: string; title: string }) => void): Promise<() => void> {
+    return listen<{ threadId: string; title: string }>("thread-updated", (e) => callback(e.payload));
+  }
+
+  async onResync(callback: () => void): Promise<() => void> {
+    return listen("studio-resync", () => callback());
   }
 
   /**
@@ -639,7 +660,7 @@ export class StudioApiClient {
    * Command: `web_configure`
    */
   async webConfigure(req: WebConfigureRequest): Promise<WebStatus> {
-    return invoke<WebStatus>("web_configure", { ...req });
+    return invoke<WebStatus>("web_configure", { ...req, req });
   }
 
   // ==========================================

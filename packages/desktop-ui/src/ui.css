@@ -1,0 +1,141 @@
+/* Small app-wide interaction styles that inline styles cannot express (keyframes, :hover, :focus-visible). */
+
+/* Pulsing dot of the "agent is working" indicator. */
+.cs-thinking-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cs-accent);
+  animation: cs-pulse 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+@keyframes cs-pulse {
+  0%, 100% { opacity: 0.25; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cs-thinking-dot { animation: none; opacity: 0.8; }
+}
+
+/* Pane resize handle: a thin hit area with a visible line on hover/drag/focus. */
+.cs-resizer {
+  position: relative;
+  width: 6px;
+  margin: 0 -3px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  z-index: 10;
+  touch-action: none;
+  outline: none;
+}
+.cs-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  background: transparent;
+  transition: background-color 100ms ease-out;
+}
+/* Like VS Code's sash: hover highlights only after 300ms (no flicker when the pointer passes
+   over), dragging and keyboard focus highlight immediately. */
+.cs-resizer:hover::after {
+  background: var(--cs-accent);
+  transition-delay: 300ms;
+}
+.cs-resizer[data-dragging="true"]::after,
+.cs-resizer:focus-visible::after {
+  background: var(--cs-accent);
+  transition-delay: 0ms;
+}
+/* While dragging, keep the col-resize cursor everywhere and stop iframes from eating events. */
+body[data-resizing="true"] {
+  cursor: col-resize !important;
+  user-select: none;
+}
+body[data-resizing="true"] iframe {
+  pointer-events: none;
+}
+
+/* Visible keyboard focus for plain <button>s styled inline. */
+button:focus-visible,
+[role="button"]:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--cs-focus, var(--cs-accent));
+  outline-offset: 1px;
+}
+
+/* Hover feedback for icon-only buttons. */
+.cs-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  border-radius: var(--cs-radius-sm);
+  background: none;
+  color: var(--cs-fg-secondary);
+  cursor: pointer;
+}
+.cs-icon-btn:hover:not(:disabled) {
+  background: var(--cs-bg-hover);
+  color: var(--cs-fg-primary);
+}
+.cs-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.cs-icon-btn[aria-pressed="true"] {
+  background: var(--cs-bg-active);
+  color: var(--cs-fg-primary);
+}
+
+/* Dropdown menu (VS Code context-view look): anchored panel with hoverable items. */
+.cs-menu {
+  position: absolute;
+  z-index: 40;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--cs-bg-panel);
+  border: 1px solid var(--cs-border-strong);
+  border-radius: var(--cs-radius-sm);
+  box-shadow: var(--cs-shadow-overlay);
+}
+.cs-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--cs-radius-sm);
+  background: none;
+  color: var(--cs-fg-primary);
+  font: inherit;
+  font-size: var(--cs-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.cs-menu-item:hover,
+.cs-menu-item:focus-visible {
+  background: var(--cs-selection);
+  outline: none;
+}
+
+/* Activity-bar items: inactive icons brighten on hover, like VS Code. */
+.cs-rail-item:not([aria-current="page"]):hover {
+  background-color: var(--cs-bg-hover) !important;
+  color: var(--cs-fg-primary) !important;
+}
+
+/* Spinning loader icon (Task Center running jobs). */
+@keyframes cs-spin {
+  to { transform: rotate(360deg); }
+}
+.cs-spin {
+  animation: cs-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cs-spin { animation: none; }
+}

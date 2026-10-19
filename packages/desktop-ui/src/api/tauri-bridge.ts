@@ -37,19 +37,26 @@ export async function invoke<T = unknown>(
   args?: Record<string, unknown>
 ): Promise<T> {
   if (isTauri()) {
-    const tauriInternals = (window as any).__TAURI_INTERNALS__;
-    if (tauriInternals && typeof tauriInternals.invoke === "function") {
-      return tauriInternals.invoke(cmd, args);
-    }
+    try {
+      const tauriInternals = (window as any).__TAURI_INTERNALS__;
+      if (tauriInternals && typeof tauriInternals.invoke === "function") {
+        return await tauriInternals.invoke(cmd, args);
+      }
 
-    const tauriCore = (window as any).__TAURI__?.core;
-    if (tauriCore && typeof tauriCore.invoke === "function") {
-      return tauriCore.invoke(cmd, args);
-    }
+      const tauriCore = (window as any).__TAURI__?.core;
+      if (tauriCore && typeof tauriCore.invoke === "function") {
+        return await tauriCore.invoke(cmd, args);
+      }
 
-    const tauriTauri = (window as any).__TAURI__?.tauri;
-    if (tauriTauri && typeof tauriTauri.invoke === "function") {
-      return tauriTauri.invoke(cmd, args);
+      const tauriTauri = (window as any).__TAURI__?.tauri;
+      if (tauriTauri && typeof tauriTauri.invoke === "function") {
+        return await tauriTauri.invoke(cmd, args);
+      }
+    } catch (err: any) {
+      if (typeof err === "string") {
+        throw new Error(err);
+      }
+      throw err;
     }
   }
 
@@ -119,10 +126,25 @@ export async function listen<T = unknown>(
   handler: EventCallback<T>
 ): Promise<UnlistenFn> {
   if (isTauri()) {
-    const eventApi = (window as any).__TAURI__?.event || (window as any).__TAURI_INTERNALS__;
+    const eventApi = (window as any).__TAURI__?.event;
     if (eventApi && typeof eventApi.listen === "function") {
       return eventApi.listen(event, handler);
     }
+    // Without `withGlobalTauri` only the internals exist: register through the event plugin
+    // the same way @tauri-apps/api does.
+    const internals = (window as any).__TAURI_INTERNALS__;
+    if (internals && typeof internals.transformCallback === "function") {
+      const handlerId = internals.transformCallback(handler);
+      const eventId = await internals.invoke("plugin:event|listen", {
+        event,
+        target: { kind: "Any" },
+        handler: handlerId,
+      });
+      return () => {
+        internals.invoke("plugin:event|unlisten", { event, eventId }).catch(() => {});
+      };
+    }
+    console.error(`[studio] Không đăng ký được sự kiện "${event}": thiếu Tauri event API.`);
     return () => {};
   }
 

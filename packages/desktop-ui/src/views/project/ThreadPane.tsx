@@ -1,4 +1,16 @@
 import React from "react";
+import { useStickToBottom } from "../../runtime/chat/useStickToBottom";
+import { renderMarkdown } from "../../runtime/markdown";
+import {
+  loadQueue,
+  saveQueue,
+  newQueuedSend,
+  removeQueued,
+  prioritizeQueued,
+  moveQueued,
+  type QueuedSend,
+} from "../../runtime/chat/send-queue";
+import { QueuedSendStack } from "../../components/QueuedSendStack";
 import { Icon } from "../../components/Icon";
 import { Button, Badge, Callout, Kbd, Dialog } from "@studio/design-system";
 import { studioApi } from "../../api/client";
@@ -16,6 +28,15 @@ export interface ThreadMessage {
   role: "user" | "agent";
   text: string;
   thinking?: string;
+  /** Live turns only (history has no timing): when the agent message started. */
+  startedAt?: number;
+  /** A thinking block is open (Claude reports thinking even when its text is redacted). */
+  thinkingActive?: boolean;
+  thinkingStartedAt?: number;
+  /** Accumulated thinking time in ms (live turns only). */
+  thinkingMs?: number;
+  /** The engine reported thinking at some point in this turn. */
+  thoughtSeen?: boolean;
   toolCalls?: Array<{
     id: string;
     name: string;
@@ -31,6 +52,8 @@ export interface ThreadMessage {
     inputTokens: number;
     outputTokens: number;
     cacheReadTokens: number;
+    cacheWriteTokens: number;
+    reasoningTokens: number;
     costUsd?: number | null;
     estimatedCostUsd?: number | null;
   };
@@ -106,7 +129,7 @@ export function isMcpLoadFailure(text?: string): boolean {
  * Pure reducer: fold one turn event into the message list. Used for the live stream and for history.
  * Every agent-side event lands in the agent message of its turn (created on demand).
  */
-export function applyTurnEvent(prev: ThreadMessage[], payload: EngineTurnEvent): ThreadMessage[] {
+export function applyTurnEvent(prev: ThreadMessage[], payload: EngineTurnEvent, now?: number): ThreadMessage[] {
   const event = payload.event;
   if (event.type === "UserPrompt") {
     const last = prev[prev.length - 1];
@@ -121,10 +144,15 @@ export function applyTurnEvent(prev: ThreadMessage[], payload: EngineTurnEvent):
   let list = prev;
   let idx = list.findIndex((m) => m.role === "agent" && m.turnId === payload.turnId);
   if (idx === -1) {
-    list = [...list, { id: `turn-${payload.turnId}`, role: "agent", text: "", turnId: payload.turnId, isStreaming: true }];
+    list = [...list, { id: `turn-${payload.turnId}`, role: "agent", text: "", turnId: payload.turnId, isStreaming: true, startedAt: now }];
     idx = list.length - 1;
   }
-  const msg = list[idx];
+  let msg = list[idx];
+  // Any non-thinking event closes an open thinking block.
+  if (msg.thinkingActive && event.type !== "Thinking" && event.type !== "Usage") {
+    const elapsed = now !== undefined && msg.thinkingStartedAt !== undefined ? now - msg.thinkingStartedAt : 0;
+    msg = { ...msg, thinkingActive: false, thinkingStartedAt: undefined, thinkingMs: (msg.thinkingMs ?? 0) + elapsed };
+  }
   let next: ThreadMessage = msg;
   switch (event.type) {
     case "TextDelta":
@@ -134,7 +162,13 @@ export function applyTurnEvent(prev: ThreadMessage[], payload: EngineTurnEvent):
       next = { ...msg, text: event.text };
       break;
     case "Thinking":
-      next = { ...msg, thinking: (msg.thinking || "") + event.text };
+      next = {
+        ...msg,
+        thinking: event.text ? (msg.thinking || "") + event.text : msg.thinking,
+        thoughtSeen: true,
+        thinkingActive: true,
+        thinkingStartedAt: msg.thinkingStartedAt ?? now,
+      };
       break;
     case "ToolCall":
       next = { ...msg, toolCalls: [...(msg.toolCalls || []), { id: event.id, name: event.name, input: event.input, expanded: false }] };
@@ -163,6 +197,9 @@ export function applyTurnEvent(prev: ThreadMessage[], payload: EngineTurnEvent):
           inputTokens: event.inputTokens,
           outputTokens: event.outputTokens,
           cacheReadTokens: event.cacheReadTokens,
+          // Older persisted events predate these fields.
+          cacheWriteTokens: event.cacheWriteTokens ?? 0,
+          reasoningTokens: event.reasoningTokens ?? 0,
           costUsd: event.costUsd,
           estimatedCostUsd: event.estimatedCostUsd,
         },
@@ -209,8 +246,24 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
   const [messages, setMessages] = React.useState<ThreadMessage[]>([]);
   const [inputPrompt, setInputPrompt] = React.useState("");
   const [runningTurnId, setRunningTurnId] = React.useState<string | null>(null);
+  // True between pressing Send and the backend accepting (or rejecting) the turn.
+  const [sending, setSending] = React.useState(false);
+  // Turns whose Done arrived, possibly before startTurn resolved (very short turns).
+  const finishedTurnsRef = React.useRef<Set<string>>(new Set());
+  // Prompts typed while the agent is busy (see runtime/chat/send-queue.ts).
+  const [queue, setQueue] = React.useState<QueuedSend[]>([]);
+  const queueRef = React.useRef<QueuedSend[]>([]);
+  const [queuePaused, setQueuePaused] = React.useState(false);
+  // The queue only drains once the thread's history is loaded, so it never races the reload.
+  const [historyReadyFor, setHistoryReadyFor] = React.useState<string | null>(null);
+  const drainingRef = React.useRef<string | null>(null);
+  // Bumped when the web event stream lost events and history must be reloaded.
+  const [historyReloadTick, setHistoryReloadTick] = React.useState(0);
   const [pickerMode, setPickerMode] = React.useState<"@" | "/" | null>(null);
   const [pickerIndex, setPickerIndex] = React.useState(0);
+  // Index of the trigger character ("@" or "/") in the prompt; the query is what follows it.
+  const [pickerStart, setPickerStart] = React.useState(0);
+  const pickerListRef = React.useRef<HTMLDivElement>(null);
   const [undoTurnTarget, setUndoTurnTarget] = React.useState<string | null>(null);
   const [undoing, setUndoing] = React.useState(false);
   const [undoToast, setUndoToast] = React.useState<string | null>(null);
@@ -259,7 +312,7 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
     loadPublishRequests();
   }, [loadPublishRequests]);
 
-  const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const scroll = useStickToBottom(activeThread?.id);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
 
   // Handle pending text insertion from StagePane (e.g. Ask AI about layer)
@@ -280,16 +333,16 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
     }
   }, [pendingInsert, onInsertConsumed]);
 
-  // Scroll to bottom on new messages
-  React.useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
   // Load persisted history of the active thread (same reducer as the live stream).
   React.useEffect(() => {
     let cancelled = false;
     setMessages([]);
     setRunningTurnId(null);
+    setHistoryReadyFor(null);
+    setQueuePaused(false);
+    const restored = activeThread ? loadQueue(activeThread.id) : [];
+    queueRef.current = restored;
+    setQueue(restored);
     if (!activeThread) return;
     (async () => {
       try {
@@ -301,7 +354,13 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
           if (!res.hasMore || !res.nextCursor) break;
           cursor = res.nextCursor;
         }
-        if (!cancelled) setMessages(folded.map((m) => ({ ...m, isStreaming: false })));
+        if (cancelled) return;
+        // A turn without Done/Error is still running (e.g. the thread was reopened mid-turn):
+        // keep it streaming so live events continue to land in it and Send stays locked.
+        const live = folded.find((m) => m.role === "agent" && m.isStreaming);
+        setRunningTurnId(live?.turnId ?? null);
+        setMessages(folded);
+        setHistoryReadyFor(activeThread.id);
       } catch (err: any) {
         if (!cancelled) setError(err?.message || "Không tải được lịch sử hội thoại.");
       }
@@ -309,45 +368,73 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [activeThread?.id]);
+  }, [activeThread?.id, historyReloadTick]);
 
-  // Listen to turn-event
   React.useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    studioApi
+      .onResync(() => setHistoryReloadTick((n) => n + 1))
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Listen to turn-event. Keyed on the thread id (not the object) so re-renders don't resubscribe.
+  const loadPublishRequestsRef = React.useRef(loadPublishRequests);
+  loadPublishRequestsRef.current = loadPublishRequests;
+  const activeThreadId = activeThread?.id;
+  React.useEffect(() => {
+    if (!activeThreadId) return;
+    let disposed = false;
     let unlisten: (() => void) | undefined;
 
-    const setupListener = async () => {
-      try {
-        unlisten = await studioApi.onTurnEvent((payload) => {
-          if (!activeThread || payload.threadId !== activeThread.id) return;
-          setMessages((prev) => applyTurnEvent(prev, payload));
-          if (payload.event.type === "Done") {
-            setRunningTurnId(null);
-            loadPublishRequests();
-          }
-          if (payload.event.type === "Error") {
-            setRunningTurnId(null);
-            setError(payload.event.message);
-          }
-        });
-      } catch (err: any) {
+    studioApi
+      .onTurnEvent((payload) => {
+        if (disposed || payload.threadId !== activeThreadId) return;
+        setMessages((prev) => applyTurnEvent(prev, payload, Date.now()));
+        if (payload.event.type === "Done") {
+          finishedTurnsRef.current.add(payload.turnId);
+          setRunningTurnId((cur) => (cur === null || cur === payload.turnId ? null : cur));
+          loadPublishRequestsRef.current();
+        }
+        if (payload.event.type === "Error") {
+          setError(payload.event.message);
+        }
+      })
+      .then((fn) => {
+        // The effect may have been cleaned up while registration was in flight.
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
         // Core absent
-      }
-    };
+      });
 
-    setupListener();
     return () => {
-      if (unlisten) unlisten();
+      disposed = true;
+      unlisten?.();
     };
-  }, [activeThread, loadPublishRequests]);
+  }, [activeThreadId]);
 
-  // Handle send message
-  const handleSend = async () => {
-    if (!inputPrompt.trim() || !activeThread || runningTurnId) return;
+  const commitQueue = (threadId: string, next: QueuedSend[]) => {
+    queueRef.current = next;
+    setQueue(next);
+    saveQueue(threadId, next);
+  };
 
-    const userText = inputPrompt.trim();
-    setInputPrompt("");
-    setPickerMode(null);
+  /** Start one turn. Returns false when the backend rejected it (bubble removed, error shown). */
+  const startPrompt = async (userText: string): Promise<boolean> => {
+    if (!activeThread) return false;
     setError(null);
+    setSending(true);
+    scroll.jumpToLatest();
 
     // Append user message
     const userMsgId = `user-${Date.now()}`;
@@ -361,18 +448,79 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
         threadId: activeThread.id,
         prompt: userText,
       });
-      setRunningTurnId(res.turnId);
+      if (!finishedTurnsRef.current.has(res.turnId)) setRunningTurnId(res.turnId);
+      return true;
     } catch (err: any) {
+      // Rejected before the backend recorded a turn (no UserPrompt echoed back): drop the
+      // optimistic bubble.
+      setMessages((prev) => prev.filter((m) => !(m.id === userMsgId && !m.turnId)));
       setError(err?.message || "Không thể bắt đầu lượt agent.");
+      return false;
+    } finally {
+      setSending(false);
     }
+  };
+
+  // Handle send message: run now when idle, otherwise queue it instead of refusing.
+  const handleSend = async () => {
+    const userText = inputPrompt.trim();
+    if (!userText || !activeThread) return;
+    setInputPrompt("");
+    setPickerMode(null);
+
+    if (runningTurnId || sending) {
+      commitQueue(activeThread.id, [...queueRef.current, newQueuedSend(userText)]);
+      return;
+    }
+    const started = await startPrompt(userText);
+    if (started) setQueuePaused(false);
+    else setInputPrompt((cur) => cur || userText);
+  };
+
+  // Drain: when the thread goes idle, start the head of the queue. A failed start keeps the item
+  // and pauses the queue instead of retrying in a loop.
+  React.useEffect(() => {
+    const threadId = activeThread?.id;
+    if (!threadId || historyReadyFor !== threadId) return;
+    if (runningTurnId || sending || queuePaused || drainingRef.current) return;
+    const next = queue[0];
+    if (!next) return;
+    drainingRef.current = next.id;
+    void (async () => {
+      const started = await startPrompt(next.prompt);
+      drainingRef.current = null;
+      if (started) commitQueue(threadId, removeQueued(queueRef.current, next.id));
+      else setQueuePaused(true);
+    })();
+    // startPrompt reads the latest render's state; the deps below are the triggers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeThread?.id, historyReadyFor, runningTurnId, sending, queuePaused, queue]);
+
+  /** "Gửi ngay": move to the front and stop the running turn; the drain sends it after Done. */
+  const handleSendQueuedNow = (id: string) => {
+    if (!activeThread) return;
+    commitQueue(activeThread.id, prioritizeQueued(queueRef.current, id));
+    setQueuePaused(false);
+    if (runningTurnId) void handleCancelTurn();
+  };
+
+  const handleEditQueued = (id: string) => {
+    if (!activeThread) return;
+    const item = queueRef.current.find((q) => q.id === id);
+    if (!item) return;
+    commitQueue(activeThread.id, removeQueued(queueRef.current, id));
+    setInputPrompt((cur) => (cur.trim() ? `${cur}\n${item.prompt}` : item.prompt));
+    textareaRef.current?.focus();
   };
 
   // Handle cancel
   const handleCancelTurn = async () => {
     if (!runningTurnId) return;
     try {
-      await studioApi.cancelTurn({ turnId: runningTurnId });
-      setRunningTurnId(null);
+      // The turn ends with a cancelled Done event, which clears runningTurnId. Clearing it here
+      // would let the queue start the next turn while the backend still holds this one.
+      const res = await studioApi.cancelTurn({ turnId: runningTurnId });
+      if (!res.success) setRunningTurnId(null);
     } catch (err: any) {
       setError(err?.message || "Không thể hủy lượt agent.");
     }
@@ -415,31 +563,91 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
     }
   };
 
-  // Handle picker trigger
+  // Mention picker, modeled on VS Code's suggest widget: opens on "@"/"/" typed at a word start,
+  // filters as you type, ArrowUp/Down to move, Enter/Tab to accept, Escape to close.
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
+    const caret = e.target.selectionStart ?? val.length;
     setInputPrompt(val);
 
-    const lastChar = val.slice(-1);
-    if (lastChar === "@") {
-      setPickerMode("@");
+    const typed = val.slice(caret - 1, caret);
+    const before = val.slice(caret - 2, caret - 1);
+    if ((typed === "@" || typed === "/") && (caret === 1 || /\s/.test(before))) {
+      setPickerMode(typed);
+      setPickerStart(caret - 1);
       setPickerIndex(0);
-    } else if (lastChar === "/") {
-      setPickerMode("/");
-      setPickerIndex(0);
-    } else if (val.endsWith(" ") || val === "") {
-      setPickerMode(null);
+      return;
+    }
+    if (pickerMode) {
+      // Close once the trigger is gone or the query ends (whitespace / caret moved before it).
+      const query = val.slice(pickerStart + 1, caret);
+      if (val[pickerStart] !== pickerMode || caret <= pickerStart || /\s/.test(query)) {
+        setPickerMode(null);
+      } else {
+        setPickerIndex(0);
+      }
     }
   };
 
+  const pickerQuery = pickerMode ? inputPrompt.slice(pickerStart + 1).split(/\s/)[0].toLowerCase() : "";
+  const pickerItems = React.useMemo(() => {
+    if (!pickerMode) return [];
+    const all =
+      pickerMode === "@"
+        ? projectFiles.map((f) => ({ key: f.path, insert: f.path, label: f.path, meta: "" }))
+        : playbooks.map((pb) => ({ key: pb.id, insert: pb.name, label: pb.name, meta: pb.layer }));
+    if (!pickerQuery) return all.slice(0, 50);
+    const matches = all.filter((it) => it.label.toLowerCase().includes(pickerQuery));
+    // Prefix matches first, like VS Code's fuzzy score favouring word starts.
+    matches.sort(
+      (x, y) =>
+        Number(!x.label.toLowerCase().startsWith(pickerQuery)) - Number(!y.label.toLowerCase().startsWith(pickerQuery)),
+    );
+    return matches.slice(0, 50);
+  }, [pickerMode, pickerQuery, projectFiles, playbooks]);
+
+  React.useEffect(() => {
+    const el = pickerListRef.current?.querySelector<HTMLElement>(`[data-index="${pickerIndex}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [pickerIndex]);
+
   const handleSelectPickerItem = (itemText: string) => {
-    if (pickerMode === "@") {
-      setInputPrompt((prev) => prev.slice(0, -1) + `@${itemText} `);
-    } else if (pickerMode === "/") {
-      setInputPrompt((prev) => prev.slice(0, -1) + `/${itemText} `);
-    }
+    if (!pickerMode) return;
+    const queryEnd = pickerStart + 1 + (inputPrompt.slice(pickerStart + 1).match(/^\S*/)?.[0].length ?? 0);
+    const head = inputPrompt.slice(0, pickerStart) + pickerMode + itemText + " ";
+    const next = head + inputPrompt.slice(queryEnd).replace(/^ /, "");
+    setInputPrompt(next);
     setPickerMode(null);
-    textareaRef.current?.focus();
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = head.length;
+    });
+  };
+
+  /** Keyboard handling of the open picker. Returns true when the key was consumed. */
+  const handlePickerKey = (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (!pickerMode) return false;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setPickerMode(null);
+      return true;
+    }
+    if (pickerItems.length === 0) return false;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const delta = e.key === "ArrowDown" ? 1 : -1;
+      setPickerIndex((i) => (i + delta + pickerItems.length) % pickerItems.length);
+      return true;
+    }
+    if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+      e.preventDefault();
+      const item = pickerItems[Math.min(pickerIndex, pickerItems.length - 1)];
+      if (item) handleSelectPickerItem(item.insert);
+      return true;
+    }
+    return false;
   };
 
   const toggleToolCallExpanded = (messageIndex: number, toolCallId: string) => {
@@ -503,6 +711,7 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
 
       {/* Messages Stream Body */}
       <div
+        ref={scroll.ref}
         style={{
           flex: 1,
           overflowY: "auto",
@@ -571,29 +780,19 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
                   wordBreak: "break-word",
                 }}
               >
-                {/* Thinking section (if present) */}
-                {msg.thinking && (
-                  <details
-                    style={{
-                      marginBottom: 8,
-                      padding: "4px 8px",
-                      backgroundColor: "var(--cs-bg-panel)",
-                      border: "1px solid var(--cs-border-subtle)",
-                      fontSize: "var(--cs-text-xs)",
-                      color: "var(--cs-fg-secondary)",
-                    }}
-                  >
-                    <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-                      Suy nghĩ của agent...
-                    </summary>
-                    <div style={{ marginTop: 4, whiteSpace: "pre-wrap", fontFamily: "var(--cs-font-mono)" }}>
-                      {msg.thinking}
-                    </div>
-                  </details>
-                )}
+                {/* Thinking / working indicator */}
+                {msg.role === "agent" && <ThinkingIndicator msg={msg} />}
 
                 {/* Main Text */}
-                {msg.text && <div>{msg.text}</div>}
+                {msg.text &&
+                  (msg.role === "agent" ? (
+                    // Markdown handles its own line breaks; pre-wrap would double them.
+                    <div className="cs-md" style={{ whiteSpace: "normal" }}>
+                      {renderMarkdown(msg.text, { syntaxHighlight: !msg.isStreaming })}
+                    </div>
+                  ) : (
+                    <div>{msg.text}</div>
+                  ))}
 
                 {/* Danger Callout inside bubble on error */}
                 {msg.errorMessage && (
@@ -1031,34 +1230,17 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
                 <div
                   style={{
                     display: "flex",
-                    alignItems: "center",
+                    alignItems: "flex-start",
                     justifyContent: "space-between",
+                    gap: 8,
                     fontSize: "var(--cs-text-xs)",
                     color: "var(--cs-fg-muted)",
                     padding: "0 4px",
                   }}
                 >
                   {/* Usage / Cost */}
-                  <div>
-                    {msg.usage ? (
-                      msg.usage.costUsd != null ? (
-                        <span>
-                          ${msg.usage.costUsd.toFixed(4)} · {(msg.usage.inputTokens + msg.usage.outputTokens).toLocaleString()} tokens
-                          {msg.usage.estimatedCostUsd ? ` · ~$${msg.usage.estimatedCostUsd.toFixed(2)} (ước tính)` : ""}
-                        </span>
-                      ) : msg.usage.estimatedCostUsd != null ? (
-                        <span>
-                          ~${msg.usage.estimatedCostUsd.toFixed(2)} USD (ước tính)
-                          {msg.usage.inputTokens + msg.usage.outputTokens > 0
-                            ? ` · ${(msg.usage.inputTokens + msg.usage.outputTokens).toLocaleString()} tokens`
-                            : ""}
-                        </span>
-                      ) : (
-                        <span>
-                          {msg.usage.inputTokens.toLocaleString()} in · {msg.usage.outputTokens.toLocaleString()} out
-                        </span>
-                      )
-                    ) : null}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {msg.usage ? <UsageSummary usage={msg.usage} /> : null}
                   </div>
 
                   {/* Undo Button */}
@@ -1079,6 +1261,8 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
                         gap: 4,
                         fontSize: "var(--cs-text-xs)",
                         borderRadius: "var(--cs-radius-control)",
+                        whiteSpace: "nowrap",
+                        flexShrink: 0,
                       }}
                       title={
                         Boolean(runningTurnId)
@@ -1087,7 +1271,7 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
                       }
                     >
                       <Icon name="undo" size={12} />
-                      <span>Hoàn tác lượt này</span>
+                      <span>Hoàn tác</span>
                     </button>
                   )}
                 </div>
@@ -1095,8 +1279,36 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
             </div>
           ))
         )}
-        <div ref={messagesEndRef} />
       </div>
+
+      {scroll.showJumpToLatest && (
+        <div style={{ position: "relative", height: 0 }}>
+          <button
+            type="button"
+            onClick={scroll.jumpToLatest}
+            style={{
+              position: "absolute",
+              bottom: 12,
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 5,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "4px 12px",
+              fontSize: "var(--cs-text-xs)",
+              color: "var(--cs-fg-primary)",
+              backgroundColor: "var(--cs-bg-raised)",
+              border: "1px solid var(--cs-border-strong)",
+              borderRadius: 999,
+              boxShadow: "var(--cs-shadow-overlay)",
+              cursor: "pointer",
+            }}
+          >
+            ↓ Về tin mới nhất
+          </button>
+        </div>
+      )}
 
       {/* Mention Pickers Popup */}
       {pickerMode && (
@@ -1119,63 +1331,52 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
           <div style={{ padding: "4px 10px", fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)", borderBottom: "1px solid var(--cs-border-subtle)" }}>
             {pickerMode === "@" ? "Chọn tệp trong dự án:" : "Chọn quy trình playbook:"}
           </div>
-          {pickerMode === "@" ? (
-            projectFiles.length === 0 ? (
+          <div ref={pickerListRef} role="listbox" aria-label="Gợi ý">
+            {pickerItems.length === 0 ? (
               <div style={{ padding: "8px 10px", fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
-                Chưa có tệp nào trong dự án
+                {pickerQuery
+                  ? `Không có kết quả cho "${pickerQuery}"`
+                  : pickerMode === "@"
+                    ? "Chưa có tệp nào trong dự án"
+                    : "Chưa có playbook nào trong scope chain"}
               </div>
             ) : (
-              projectFiles.map((f) => (
+              pickerItems.map((item, i) => (
                 <div
-                  key={f.path}
-                  onClick={() => handleSelectPickerItem(f.path)}
-                  style={{
-                    padding: "6px 10px",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    fontSize: "var(--cs-text-xs)",
-                    fontFamily: "var(--cs-font-mono)",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--cs-bg-hover)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                >
-                  <Icon name="file" size={13} color="var(--cs-accent)" />
-                  <span>{f.path}</span>
-                </div>
-              ))
-            )
-          ) : (
-            playbooks.length === 0 ? (
-              <div style={{ padding: "8px 10px", fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
-                Chưa có playbook nào trong scope chain
-              </div>
-            ) : (
-              playbooks.map((p) => (
-                <div
-                  key={p.id}
-                  onClick={() => handleSelectPickerItem(p.name)}
+                  key={item.key}
+                  role="option"
+                  data-index={i}
+                  aria-selected={i === pickerIndex}
+                  // Keep focus in the textarea so typing continues to filter.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => handleSelectPickerItem(item.insert)}
+                  onMouseMove={() => i !== pickerIndex && setPickerIndex(i)}
                   style={{
                     padding: "6px 10px",
                     cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
+                    gap: 6,
                     fontSize: "var(--cs-text-xs)",
+                    fontFamily: pickerMode === "@" ? "var(--cs-font-mono)" : undefined,
+                    backgroundColor: i === pickerIndex ? "var(--cs-selection)" : "transparent",
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--cs-bg-hover)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <Icon name="sparkles" size={13} color="var(--cs-accent)" />
-                    <span style={{ fontWeight: 600 }}>{p.name}</span>
-                  </div>
-                  <span style={{ color: "var(--cs-fg-muted)", fontSize: 11 }}>{p.layer}</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                    <Icon name={pickerMode === "@" ? "file" : "sparkles"} size={13} color="var(--cs-accent)" />
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: pickerMode === "/" ? 600 : undefined }}>
+                      {item.label}
+                    </span>
+                  </span>
+                  {item.meta && <span style={{ color: "var(--cs-fg-muted)", fontSize: 11 }}>{item.meta}</span>}
                 </div>
               ))
-            )
-          )}
+            )}
+          </div>
+          <div style={{ padding: "4px 10px", fontSize: 11, color: "var(--cs-fg-muted)", borderTop: "1px solid var(--cs-border-subtle)" }}>
+            ↑↓ chọn · Enter/Tab chèn · Esc đóng
+          </div>
         </div>
       )}
 
@@ -1213,6 +1414,19 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
         </div>
       )}
 
+      {/* Queued prompts */}
+      {activeThread && (
+        <QueuedSendStack
+          items={queue}
+          paused={queuePaused}
+          onSendNow={handleSendQueuedNow}
+          onEdit={handleEditQueued}
+          onRemove={(id) => commitQueue(activeThread.id, removeQueued(queueRef.current, id))}
+          onMove={(id, delta) => commitQueue(activeThread.id, moveQueued(queueRef.current, id, delta))}
+          onResume={() => setQueuePaused(false)}
+        />
+      )}
+
       {/* Prompt Input Box */}
       <div
         style={{
@@ -1227,6 +1441,7 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
             value={inputPrompt}
             onChange={handleInputChange}
             onKeyDown={(e) => {
+              if (handlePickerKey(e)) return;
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 handleSend();
@@ -1258,13 +1473,11 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
           <Button
             size="sm"
             variant="primary"
-            disabled={!inputPrompt.trim() || Boolean(runningTurnId)}
-            busy={Boolean(runningTurnId)}
-            busyText="Agent đang xử lý..."
+            disabled={!inputPrompt.trim()}
             onClick={handleSend}
-            leftIcon={<Icon name="arrow-right" size={14} />}
+            leftIcon={<Icon name={runningTurnId || sending ? "clock" : "arrow-right"} size={14} />}
           >
-            Gửi
+            {runningTurnId || sending ? "Xếp hàng" : "Gửi"}
           </Button>
         </div>
       </div>
@@ -1404,5 +1617,140 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
         }}
       />
     </div>
+  );
+};
+
+type UsageInfo = NonNullable<ThreadMessage["usage"]>;
+
+/** Per-turn token breakdown: total, cost, cache hit ratio and cache write (warm-up). */
+const UsageSummary: React.FC<{ usage: UsageInfo }> = ({ usage }) => {
+  const fmt = (n: number) => n.toLocaleString();
+  const promptTokens = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+  const total = promptTokens + usage.outputTokens;
+  const hitPct = promptTokens > 0 ? Math.round((usage.cacheReadTokens / promptTokens) * 100) : 0;
+
+  const head: string[] = [];
+  if (usage.costUsd != null) head.push(`$${usage.costUsd.toFixed(4)}`);
+  if (usage.estimatedCostUsd) head.push(`~$${usage.estimatedCostUsd.toFixed(2)} (ước tính)`);
+  if (total > 0) head.push(`${fmt(total)} tokens`);
+
+  const detail: string[] = [];
+  if (total > 0) {
+    detail.push(`${fmt(usage.inputTokens)} in`, `${fmt(usage.outputTokens)} out`);
+    if (usage.cacheReadTokens > 0) detail.push(`cache đọc ${fmt(usage.cacheReadTokens)} (${hitPct}%)`);
+    if (usage.cacheWriteTokens > 0) detail.push(`cache ghi ${fmt(usage.cacheWriteTokens)}`);
+    if (usage.reasoningTokens > 0) detail.push(`suy luận ${fmt(usage.reasoningTokens)}`);
+  }
+
+  const tooltip = [
+    `Input (không cache): ${fmt(usage.inputTokens)}`,
+    `Cache đọc (hit): ${fmt(usage.cacheReadTokens)}`,
+    `Cache ghi (warm-up): ${fmt(usage.cacheWriteTokens)}`,
+    `Output: ${fmt(usage.outputTokens)}`,
+    `Suy luận: ${fmt(usage.reasoningTokens)}`,
+    `Tỉ lệ cache hit: ${hitPct}%`,
+  ].join("\n");
+
+  return (
+    <div title={tooltip}>
+      {head.length > 0 && <div>{head.join(" · ")}</div>}
+      {detail.length > 0 && <div style={{ opacity: 0.8 }}>{detail.join(" · ")}</div>}
+    </div>
+  );
+};
+
+/** Seconds since `since`, ticking every second while mounted. */
+function useElapsedSeconds(since: number | undefined, active: boolean): number {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!active) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [active]);
+  return since === undefined ? 0 : Math.max(0, Math.round((now - since) / 1000));
+}
+
+/**
+ * Thinking slot of an agent message. Neither CLI hands over thinking text headless (Claude Code
+ * redacts it, agy does not report it), so absence is the normal case: show that the agent is
+ * working and for how long, and the text only when the engine actually sent some.
+ */
+const ThinkingIndicator: React.FC<{ msg: ThreadMessage }> = ({ msg }) => {
+  const working =
+    Boolean(msg.isStreaming) && (Boolean(msg.thinkingActive) || (!msg.text && !(msg.toolCalls?.length)));
+  const since = msg.thinkingActive ? msg.thinkingStartedAt ?? msg.startedAt : msg.startedAt;
+  const elapsed = useElapsedSeconds(since, working);
+
+  if (working) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          marginBottom: msg.text || msg.toolCalls?.length ? 8 : 0,
+          fontSize: "var(--cs-text-xs)",
+          color: "var(--cs-fg-secondary)",
+        }}
+      >
+        <span className="cs-thinking-dot" aria-hidden />
+        <span>{msg.thinkingActive || msg.thoughtSeen ? "Đang suy nghĩ" : "Đang xử lý"}…</span>
+        {since !== undefined && elapsed > 0 && <span style={{ color: "var(--cs-fg-muted)" }}>{elapsed}s</span>}
+        {msg.thinking && (
+          <span
+            style={{
+              flex: 1,
+              minWidth: 0,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              color: "var(--cs-fg-muted)",
+              fontStyle: "italic",
+            }}
+          >
+            {msg.thinking.trim().split("\n").pop()}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  if (!msg.thoughtSeen && !msg.thinking) return null;
+  const seconds = msg.thinkingMs ? Math.max(1, Math.round(msg.thinkingMs / 1000)) : 0;
+  const tokens = msg.usage?.reasoningTokens ?? 0;
+  const label = [
+    seconds ? `Đã suy nghĩ ${seconds}s` : "Đã suy nghĩ",
+    tokens ? `${tokens.toLocaleString()} token` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const summaryStyle: React.CSSProperties = {
+    fontSize: "var(--cs-text-xs)",
+    color: "var(--cs-fg-muted)",
+    marginBottom: 8,
+  };
+  if (!msg.thinking) {
+    return (
+      <div style={summaryStyle} title="Engine không gửi nội dung suy nghĩ ở chế độ chạy nền (Claude Code che nội dung này).">
+        {label}
+      </div>
+    );
+  }
+  return (
+    <details style={{ ...summaryStyle, color: "var(--cs-fg-secondary)" }}>
+      <summary style={{ cursor: "pointer", color: "var(--cs-fg-muted)" }}>{label}</summary>
+      <div
+        style={{
+          marginTop: 4,
+          padding: "6px 8px",
+          borderLeft: "2px solid var(--cs-border-strong)",
+          whiteSpace: "pre-wrap",
+          fontStyle: "italic",
+        }}
+      >
+        {msg.thinking}
+      </div>
+    </details>
   );
 };

@@ -250,7 +250,7 @@ export type EngineEvent =
   | { type: "FileChange"; path: string; op: "create" | "modify" | "delete" }
   | { type: "PermissionRequest"; requestId: string; tool: string; input: unknown }
   | { type: "PermissionDenied"; tool: string; input: unknown }
-  | { type: "Usage"; inputTokens: number; outputTokens: number; cacheReadTokens: number; costUsd?: number | null; estimatedCostUsd?: number | null }
+  | { type: "Usage"; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens?: number; reasoningTokens?: number; costUsd?: number | null; estimatedCostUsd?: number | null }
   | { type: "Done"; status: string; text?: string }
   | { type: "Error"; message: string };
 
@@ -376,6 +376,20 @@ export interface ScopeItem {
   path?: string;
   summary?: string;
   metadata?: Record<string, unknown>;
+  /** Channels only: output formats with their safe zones. */
+  formats?: ChannelFormat[];
+}
+
+export interface ChannelFormat {
+  name: string;
+  width: number;
+  height: number;
+  aspect: string;
+  fps?: number;
+  max_duration_s?: number;
+  min_duration_s?: number;
+  /** Fractional margins (0..1) from each edge that UI overlays may cover. */
+  safe_zone: { top: number; right: number; bottom: number; left: number };
 }
 
 // ==========================================
