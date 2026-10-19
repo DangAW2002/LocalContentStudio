@@ -22,7 +22,7 @@ pub struct CommandSpec {
 }
 
 /// How long Claude waits for a Studio MCP tool (incl. a permission dialog), in ms.
-pub const CLAUDE_MCP_TOOL_TIMEOUT_MS: &str = "600000";
+pub const CLAUDE_MCP_TOOL_TIMEOUT_MS: &str = "900000";
 
 /// Builds the CLI command and arguments for Claude Code.
 ///
@@ -66,6 +66,9 @@ pub fn claude_command(
                 "studio": {
                     "type": "http",
                     "url": mcp.url,
+                    // Studio tools (renders, image/video generation) can be silent for minutes;
+                    // Claude Code aborts silent MCP calls after 300 s without this.
+                    "timeout": CLAUDE_MCP_TOOL_TIMEOUT_MS.parse::<u64>().unwrap_or(600_000),
                     "headers": {
                         "Authorization": format!("Bearer {}", mcp.token)
                     }
@@ -133,10 +136,16 @@ pub fn claude_command(
         args,
         stdin_line,
         temp_files,
-        env: vec![(
-            "MCP_TOOL_TIMEOUT".to_string(),
-            CLAUDE_MCP_TOOL_TIMEOUT_MS.to_string(),
-        )],
+        env: vec![
+            (
+                "MCP_TOOL_TIMEOUT".to_string(),
+                CLAUDE_MCP_TOOL_TIMEOUT_MS.to_string(),
+            ),
+            (
+                "CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT".to_string(),
+                CLAUDE_MCP_TOOL_TIMEOUT_MS.to_string(),
+            ),
+        ],
     })
 }
 
