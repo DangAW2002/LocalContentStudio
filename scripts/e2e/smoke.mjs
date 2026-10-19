@@ -54,7 +54,7 @@ export async function runSmoke(options = {}) {
 
   try {
     console.log("=== BẮT ĐẦU E2E SMOKE TEST ===");
-    runData = await startApp({ noBuild: options.noBuild ?? true, port: options.port });
+    runData = await startApp({ noBuild: options.noBuild ?? false, port: options.port });
     console.log(`[smoke] App running with PID ${runData.pid} on CDP port ${runData.port}`);
 
     client = await CDPClient.connect({ port: runData.port });
@@ -230,7 +230,7 @@ export async function runSmoke(options = {}) {
 // CLI entrypoint
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve("scripts/e2e/smoke.mjs")) {
   const args = process.argv.slice(2);
-  const noBuild = !args.includes("--build");
+  const noBuild = args.includes("--no-build");
   const keepAlive = args.includes("--keep-alive");
   const portIdx = args.indexOf("--port");
   const port = portIdx !== -1 ? args[portIdx + 1] : null;
