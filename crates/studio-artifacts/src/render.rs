@@ -201,21 +201,13 @@ pub async fn render(
                 if exit_code == 0 {
                     job_success = true;
                 } else {
-                    let details = if !stderr_lines.is_empty() {
-                        stderr_lines.join("\n")
-                    } else {
-                        stdout_lines.join("\n")
-                    };
+                    let details = output_tail(&stderr_lines, &stdout_lines);
                     failure_reason = Some(format!("Exit code {}: {}", exit_code, details));
                 }
                 break;
             }
             TaskEvent::Failed { reason } => {
-                let details = if !stderr_lines.is_empty() {
-                    stderr_lines.join("\n")
-                } else {
-                    stdout_lines.join("\n")
-                };
+                let details = output_tail(&stderr_lines, &stdout_lines);
                 let reason_str = match reason {
                     FailedReason::OutOfMemory => {
                         format!("Vượt bộ nhớ (Out of Memory): {}", details)
@@ -316,5 +308,49 @@ mod timeline_hint_tests {
         let msg = super::timeline_schema_hint(&err);
         assert!(msg.contains("source"), "{msg}");
         assert!(msg.contains("bắt buộc"), "{msg}");
+    }
+}
+
+/// Last meaningful lines of a failed job's output. ffmpeg prints a long version/config banner
+/// first, which used to fill the whole error preview while the actual cause sat at the end.
+pub(crate) fn output_tail(stderr: &[String], stdout: &[String]) -> String {
+    const TAIL: usize = 15;
+    let lines = if stderr.is_empty() { stdout } else { stderr };
+    let meaningful: Vec<&str> = lines
+        .iter()
+        .map(|l| l.trim_end())
+        .filter(|l| {
+            let t = l.trim_start();
+            !(t.is_empty()
+                || t.starts_with("ffmpeg version")
+                || t.starts_with("ffprobe version")
+                || t.starts_with("built with")
+                || t.starts_with("configuration:")
+                || t.starts_with("lib"))
+        })
+        .collect();
+    let start = meaningful.len().saturating_sub(TAIL);
+    meaningful[start..].join("\n")
+}
+
+#[cfg(test)]
+mod output_tail_tests {
+    #[test]
+    fn drops_ffmpeg_banner_and_keeps_the_end() {
+        let lines: Vec<String> = [
+            "ffmpeg version 8.1.1 Copyright (c) 2000-2026",
+            "  built with gcc 15.2.0",
+            "  configuration: --enable-gpl",
+            "  libavutil      60.  8.100",
+            "Input #0, png_pipe",
+            "captions.srt: No such file or directory",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let tail = super::output_tail(&lines, &[]);
+        assert!(!tail.contains("ffmpeg version"));
+        assert!(!tail.contains("configuration"));
+        assert!(tail.ends_with("captions.srt: No such file or directory"));
     }
 }
