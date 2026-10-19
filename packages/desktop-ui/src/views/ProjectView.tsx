@@ -227,6 +227,48 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [togglePane]);
 
+  // Listen to palette commands and navigation events
+  React.useEffect(() => {
+    const handleTogglePaneEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ pane: "thread" | "outputs" }>;
+      if (custom.detail?.pane) {
+        togglePane(custom.detail.pane);
+      }
+    };
+    const handleCreateThreadEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ engine: EngineType }>;
+      if (custom.detail?.engine) {
+        handleCreateThread(custom.detail.engine);
+      }
+    };
+    const handleSelectFileEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ path: string }>;
+      if (custom.detail?.path) {
+        setSelectedFilePath(custom.detail.path);
+        if (isNarrow) setNarrowTab("stage");
+      }
+    };
+    const handleSelectThreadEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ threadId: string }>;
+      if (custom.detail?.threadId) {
+        setActiveThreadId(custom.detail.threadId);
+        if (isNarrow) setNarrowTab("thread");
+      }
+    };
+
+    window.addEventListener("studio:toggle-pane", handleTogglePaneEvent);
+    window.addEventListener("studio:create-thread", handleCreateThreadEvent);
+    window.addEventListener("studio:select-file", handleSelectFileEvent);
+    window.addEventListener("studio:select-thread", handleSelectThreadEvent);
+
+    return () => {
+      window.removeEventListener("studio:toggle-pane", handleTogglePaneEvent);
+      window.removeEventListener("studio:create-thread", handleCreateThreadEvent);
+      window.removeEventListener("studio:select-file", handleSelectFileEvent);
+      window.removeEventListener("studio:select-thread", handleSelectThreadEvent);
+    };
+  }, [togglePane, handleCreateThread, isNarrow]);
+
   const limitsFor = (pane: keyof ProjectLayout, other: PaneState) => {
     const width = panesRef.current?.clientWidth ?? window.innerWidth;
     const otherSize = other.visible ? other.size : 0;

@@ -236,6 +236,22 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
     }
   };
 
+  // Listen to command palette undo event
+  React.useEffect(() => {
+    const handleUndoLastTurnEvent = () => {
+      // Find the last agent turn with a turnId
+      const lastAgentTurn = [...messages].reverse().find((m) => m.role === "agent" && m.turnId);
+      if (lastAgentTurn && lastAgentTurn.turnId) {
+        setUndoTurnTarget(lastAgentTurn.turnId);
+      } else {
+        alert("Chưa có lượt agent nào để hoàn tác trong hội thoại này.");
+      }
+    };
+
+    window.addEventListener("studio:undo-last-turn", handleUndoLastTurnEvent);
+    return () => window.removeEventListener("studio:undo-last-turn", handleUndoLastTurnEvent);
+  }, [messages]);
+
   const handlePermissionRespond = async (requestId: string, allow: boolean) => {
     try {
       await studioApi.respondPermission({ requestId, allow });

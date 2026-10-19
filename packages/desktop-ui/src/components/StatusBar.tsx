@@ -8,8 +8,10 @@ export interface StatusBarProps {
   engines: EngineProbeResult[];
   jobs: JobSnapshot[];
   diskUsage?: DiskUsageReport;
+  todayCostUsd?: number;
   onOpenTaskCenter: () => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (tab?: string) => void;
+  onOpenWorkspaceFolder?: () => void;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
@@ -17,8 +19,10 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   engines,
   jobs,
   diskUsage,
+  todayCostUsd,
   onOpenTaskCenter,
   onOpenSettings,
+  onOpenWorkspaceFolder,
 }) => {
   const [windowWidth, setWindowWidth] = React.useState<number>(
     typeof window !== "undefined" ? window.innerWidth : 1024
@@ -58,20 +62,38 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         gap: "var(--cs-space-2)",
       }}
     >
-      {/* Left: Workspace directory */}
+      {/* Left: Workspace directory (clickable to open folder/switcher) */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-        <Icon name="folder" size={13} color="var(--cs-fg-muted)" />
-        <span
+        <button
+          type="button"
+          onClick={onOpenWorkspaceFolder}
           style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            background: "none",
+            border: "none",
+            color: "inherit",
+            cursor: "pointer",
+            fontSize: "inherit",
+            padding: "2px 4px",
+            borderRadius: "var(--cs-radius-control)",
+            minWidth: 0,
             maxWidth: 340,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
           }}
-          title={cleanDisplayPath(workspacePath) || "Chưa mở workspace"}
+          title={workspacePath ? `Thư mục: ${workspacePath} (Bấm để mở Explorer / Đổi thư mục)` : "Chưa chọn workspace"}
         >
-          {workspacePath ? `Thư mục: ${cleanDisplayPath(workspacePath)}` : "Chưa chọn workspace"}
-        </span>
+          <Icon name="folder" size={13} color="var(--cs-fg-muted)" />
+          <span
+            style={{
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {workspacePath ? `Thư mục: ${cleanDisplayPath(workspacePath)}` : "Chưa chọn workspace"}
+          </span>
+        </button>
       </div>
 
       {/* Center: Engines Probe status - hide under 600px */}
@@ -79,7 +101,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
             type="button"
-            onClick={onOpenSettings}
+            onClick={() => onOpenSettings("engines")}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -109,7 +131,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
           <button
             type="button"
-            onClick={onOpenSettings}
+            onClick={() => onOpenSettings("engines")}
             style={{
               display: "inline-flex",
               alignItems: "center",
@@ -137,13 +159,44 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         </div>
       )}
 
-      {/* Right: Jobs snapshot + Disk Usage */}
+      {/* Right: Cost (if M07 available) + Disk Usage + Jobs snapshot */}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        {!isUnder600 && typeof todayCostUsd === "number" && todayCostUsd > 0 && (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              color: "var(--cs-fg-secondary)",
+            }}
+            title="Chi phí ước tính hôm nay"
+          >
+            <Icon name="dollar-sign" size={12} color="var(--cs-fg-muted)" />
+            <span>${todayCostUsd.toFixed(2)} hôm nay</span>
+          </span>
+        )}
+
         {!isUnder600 && diskUsage && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <button
+            type="button"
+            onClick={() => onOpenSettings("disk")}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              background: "none",
+              border: "none",
+              color: "inherit",
+              cursor: "pointer",
+              fontSize: "inherit",
+              padding: "2px 4px",
+              borderRadius: "var(--cs-radius-control)",
+            }}
+            title="Xem chi tiết dung lượng đĩa"
+          >
             <Icon name="hard-drive" size={12} color="var(--cs-fg-muted)" />
             <span>Đĩa: {diskUsage.formatted.total}</span>
-          </span>
+          </button>
         )}
 
         <button

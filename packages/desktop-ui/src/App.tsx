@@ -4,7 +4,7 @@ import { TitleBar } from "./components/TitleBar";
 import { LeftRail, ShellArea } from "./components/LeftRail";
 import { StatusBar } from "./components/StatusBar";
 import { TaskCenter } from "./components/TaskCenter";
-import { CommandPalette, CommandItem } from "./components/CommandPalette";
+import { CommandPalette } from "./components/CommandPalette";
 import { WorkspaceSwitcherModal } from "./components/WorkspaceSwitcherModal";
 import { HomeView } from "./views/HomeView";
 import { ProjectView } from "./views/ProjectView";
@@ -13,12 +13,20 @@ import { LibraryView } from "./views/LibraryView";
 import { SettingsView } from "./views/SettingsView";
 import { WebAuthModal } from "./components/WebAuthModal";
 import { studioApi } from "./api/client";
+import {
+  globalCommandRegistry,
+  type CommandDefinition,
+  type CommandContext,
+} from "./runtime/commands";
 import type {
   WorkspaceSummary,
   EngineProbeResult,
   JobSnapshot,
   JobState,
   DiskUsageReport,
+  ProjectFileEntry,
+  ThreadSummary,
+  ProjectSummary,
 } from "./api/types";
 
 export const App: React.FC = () => {
@@ -41,22 +49,43 @@ export const App: React.FC = () => {
   const [jobs, setJobs] = React.useState<JobSnapshot[]>([]);
   const [diskUsage, setDiskUsage] = React.useState<DiskUsageReport | undefined>();
 
+  // Context for files and threads
+  const [projectList, setProjectList] = React.useState<ProjectSummary[]>([]);
+  const [projectFiles, setProjectFiles] = React.useState<ProjectFileEntry[]>([]);
+  const [threads, setThreads] = React.useState<ThreadSummary[]>([]);
+  const [hasSelectedArtifact, setHasSelectedArtifact] = React.useState(false);
+
+  // Settings tab state
+  const [settingsTab, setSettingsTab] = React.useState<
+    "engines" | "tools" | "voices" | "env" | "catalog" | "jobs" | "disk" | "api-keys" | "accounts" | "web"
+  >("engines");
+
   // Theme toggle
-  const toggleTheme = () => {
-    const next = theme === "light" ? "dark" : "light";
-    setTheme(next);
-    applyTheme(next);
-  };
+  const toggleTheme = React.useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === "light" ? "dark" : "light";
+      applyTheme(next);
+      return next;
+    });
+  }, []);
+
+  const handleNavigateSettings = React.useCallback((tab?: string) => {
+    if (tab) {
+      setSettingsTab(tab as any);
+    }
+    setActiveArea("settings");
+  }, []);
 
   // Initial data loading
   const loadWorkspaceAndCore = React.useCallback(async () => {
     try {
-      const [currWs, recents, engs, jobList, disk] = await Promise.all([
+      const [currWs, recents, engs, jobList, disk, projs] = await Promise.all([
         studioApi.getCurrentWorkspace().catch(() => null),
         studioApi.getRecentWorkspaces().catch(() => []),
         studioApi.probeEngines().catch(() => []),
         studioApi.getJobsSnapshot().catch(() => []),
         studioApi.getDiskUsage().catch(() => undefined),
+        studioApi.getProjects().catch(() => []),
       ]);
 
       if (currWs?.workspace) {
@@ -68,19 +97,57 @@ export const App: React.FC = () => {
       setEngines(engs);
       setJobs(jobList);
       setDiskUsage(disk);
+      setProjectList(projs);
+      if (!activeProjectSlug && projs.length > 0) {
+        setActiveProjectSlug(projs[0].slug);
+      }
     } catch {
       // Disconnected state
     }
-  }, []);
+  }, [activeProjectSlug]);
 
   React.useEffect(() => {
     loadWorkspaceAndCore();
   }, [loadWorkspaceAndCore]);
 
+  // Load project files and threads when activeProjectSlug changes
+  React.useEffect(() => {
+    if (!activeProjectSlug) return;
+    let cancelled = false;
+    Promise.all([
+      studioApi.getProjectFiles(activeProjectSlug).catch(() => []),
+      studioApi.getThreads(activeProjectSlug).catch(() => []),
+      studioApi.listArtifacts(activeProjectSlug).catch(() => []),
+    ]).then(([files, threadList, arts]) => {
+      if (cancelled) return;
+      setProjectFiles(files);
+      setThreads(threadList);
+      setHasSelectedArtifact(arts.length > 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectSlug]);
+
   React.useEffect(() => {
     const handleOpenSwitcher = () => setWorkspaceSwitcherOpen(true);
     window.addEventListener("studio:open-workspace-switcher", handleOpenSwitcher);
     return () => window.removeEventListener("studio:open-workspace-switcher", handleOpenSwitcher);
+  }, []);
+
+  // Listen to custom navigation events
+  React.useEffect(() => {
+    const handleNavEvent = (e: Event) => {
+      const customEvent = e as CustomEvent<{ area?: ShellArea; tab?: string }>;
+      if (customEvent.detail?.area) {
+        if (customEvent.detail.area === "settings" && customEvent.detail.tab) {
+          setSettingsTab(customEvent.detail.tab as any);
+        }
+        setActiveArea(customEvent.detail.area);
+      }
+    };
+    window.addEventListener("studio:navigate", handleNavEvent);
+    return () => window.removeEventListener("studio:navigate", handleNavEvent);
   }, []);
 
   // Subscribe to live job events
@@ -169,71 +236,262 @@ export const App: React.FC = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [cmdOpen, taskCenterOpen, workspaceSwitcherOpen]);
 
-  // Command palette items
-  const commands: CommandItem[] = [
-    {
-      id: "cmd-home",
-      title: "Về trang chủ (Home)",
-      category: "Điều hướng",
-      icon: "home",
-      shortcut: "Ctrl+1",
-      action: () => setActiveArea("home"),
-    },
-    {
-      id: "cmd-projects",
-      title: "Mở Dự án (Projects)",
-      category: "Điều hướng",
-      icon: "projects",
-      shortcut: "Ctrl+2",
-      action: () => setActiveArea("projects"),
-    },
-    {
-      id: "cmd-brand",
-      title: "Mở Brand, Channel & Playbook",
-      category: "Điều hướng",
-      icon: "brand",
-      shortcut: "Ctrl+3",
-      action: () => setActiveArea("brand"),
-    },
-    {
-      id: "cmd-library",
-      title: "Mở Thư viện tài nguyên (Library)",
-      category: "Điều hướng",
-      icon: "library",
-      shortcut: "Ctrl+4",
-      action: () => setActiveArea("library"),
-    },
-    {
-      id: "cmd-settings",
-      title: "Mở Tools & Cài đặt hệ thống",
-      category: "Điều hướng",
-      icon: "settings",
-      shortcut: "Ctrl+5",
-      action: () => setActiveArea("settings"),
-    },
-    {
-      id: "cmd-taskcenter",
-      title: "Mở / Đóng Trung tâm Tác vụ (Task Center)",
-      category: "Thao tác",
-      icon: "activity",
-      shortcut: "Ctrl+J",
-      action: () => setTaskCenterOpen((prev) => !prev),
-    },
-    {
-      id: "cmd-workspace",
-      title: "Chuyển hoặc tạo Workspace mới...",
-      category: "Workspace",
-      icon: "folder",
-      action: () => setWorkspaceSwitcherOpen(true),
-    },
-    {
-      id: "cmd-theme",
-      title: `Chuyển sang giao diện ${theme === "light" ? "Tối (Dark)" : "Sáng (Light)"}`,
-      category: "Giao diện",
-      icon: theme === "light" ? "moon" : "sun",
-      action: toggleTheme,
-    },
-  ];
+  // Command Context
+  const commandContext: CommandContext = React.useMemo(() => {
+    return {
+      activeArea,
+      currentSlug: activeProjectSlug,
+      activeThreadId,
+      hasSelectedArtifact,
+      hasRunningTurn: jobs.some((j) => j.state === "RUNNING"),
+    };
+  }, [activeArea, activeProjectSlug, activeThreadId, hasSelectedArtifact, jobs]);
+
+  // Register all system commands into globalCommandRegistry
+  React.useEffect(() => {
+    const definitions: CommandDefinition[] = [
+      // Navigation
+      {
+        id: "nav.home",
+        title: "Về trang chủ (Home)",
+        category: "Điều hướng",
+        icon: "home",
+        keybinding: "Ctrl+1",
+        run: () => setActiveArea("home"),
+      },
+      {
+        id: "nav.projects",
+        title: "Mở Dự án (Projects)",
+        category: "Điều hướng",
+        icon: "projects",
+        keybinding: "Ctrl+2",
+        run: () => setActiveArea("projects"),
+      },
+      {
+        id: "nav.brand",
+        title: "Mở Brand, Channel & Playbook",
+        category: "Điều hướng",
+        icon: "brand",
+        keybinding: "Ctrl+3",
+        run: () => setActiveArea("brand"),
+      },
+      {
+        id: "nav.library",
+        title: "Mở Thư viện tài nguyên (Library)",
+        category: "Điều hướng",
+        icon: "library",
+        keybinding: "Ctrl+4",
+        run: () => setActiveArea("library"),
+      },
+      {
+        id: "nav.settings",
+        title: "Mở Tools & Cài đặt hệ thống",
+        category: "Điều hướng",
+        icon: "settings",
+        keybinding: "Ctrl+5",
+        run: () => setActiveArea("settings"),
+      },
+      // Settings Tabs
+      {
+        id: "settings.engines",
+        title: "Cài đặt: Engines (Claude, agy)",
+        category: "Cài đặt",
+        icon: "settings",
+        run: () => handleNavigateSettings("engines"),
+      },
+      {
+        id: "settings.tools",
+        title: "Cài đặt: Công cụ ngoài (Tools)",
+        category: "Cài đặt",
+        icon: "settings",
+        run: () => handleNavigateSettings("tools"),
+      },
+      {
+        id: "settings.voices",
+        title: "Cài đặt: Giọng đọc (TTS)",
+        category: "Cài đặt",
+        icon: "mic",
+        run: () => handleNavigateSettings("voices"),
+      },
+      {
+        id: "settings.accounts",
+        title: "Cài đặt: Tài khoản đăng bài",
+        category: "Cài đặt",
+        icon: "share-2",
+        run: () => handleNavigateSettings("accounts"),
+      },
+      {
+        id: "settings.env",
+        title: "Cài đặt: Kiểm tra môi trường",
+        category: "Cài đặt",
+        icon: "check-circle",
+        run: () => handleNavigateSettings("env"),
+      },
+      {
+        id: "settings.api-keys",
+        title: "Cài đặt: Khoá API & Endpoints",
+        category: "Cài đặt",
+        icon: "key",
+        run: () => handleNavigateSettings("api-keys"),
+      },
+      {
+        id: "settings.catalog",
+        title: "Cài đặt: Catalog Modules & Kits",
+        category: "Cài đặt",
+        icon: "package",
+        run: () => handleNavigateSettings("catalog"),
+      },
+      {
+        id: "settings.jobs",
+        title: "Cài đặt: Cấu hình tác vụ",
+        category: "Cài đặt",
+        icon: "activity",
+        run: () => handleNavigateSettings("jobs"),
+      },
+      {
+        id: "settings.disk",
+        title: "Cài đặt: Dung lượng đĩa",
+        category: "Cài đặt",
+        icon: "hard-drive",
+        run: () => handleNavigateSettings("disk"),
+      },
+      {
+        id: "settings.web",
+        title: "Cài đặt: Truy cập Web cá nhân",
+        category: "Cài đặt",
+        icon: "globe",
+        run: () => handleNavigateSettings("web"),
+      },
+      // New conversation threads
+      {
+        id: "thread.new.claude",
+        title: "Hội thoại mới với Claude Code CLI",
+        category: "Hội thoại",
+        icon: "message-square",
+        run: async () => {
+          if (!activeProjectSlug) setActiveArea("projects");
+          window.dispatchEvent(new CustomEvent("studio:create-thread", { detail: { engine: "claude" } }));
+        },
+      },
+      {
+        id: "thread.new.agy",
+        title: "Hội thoại mới với Antigravity CLI (agy)",
+        category: "Hội thoại",
+        icon: "message-square",
+        run: async () => {
+          if (!activeProjectSlug) setActiveArea("projects");
+          window.dispatchEvent(new CustomEvent("studio:create-thread", { detail: { engine: "agy" } }));
+        },
+      },
+      // Layout & Panes
+      {
+        id: "pane.thread.toggle",
+        title: "Ẩn / Hiện khung hội thoại",
+        category: "Giao diện",
+        icon: "panel-left",
+        keybinding: "Ctrl+B",
+        run: () => {
+          window.dispatchEvent(new CustomEvent("studio:toggle-pane", { detail: { pane: "thread" } }));
+        },
+      },
+      {
+        id: "pane.outputs.toggle",
+        title: "Ẩn / Hiện khung Outputs & Checkpoints",
+        category: "Giao diện",
+        icon: "panel-right",
+        keybinding: "Ctrl+Alt+B",
+        run: () => {
+          window.dispatchEvent(new CustomEvent("studio:toggle-pane", { detail: { pane: "outputs" } }));
+        },
+      },
+      // Theme & Interface
+      {
+        id: "theme.toggle",
+        title: `Chuyển sang giao diện ${theme === "light" ? "Tối (Dark)" : "Sáng (Light)"}`,
+        category: "Giao diện",
+        icon: theme === "light" ? "moon" : "sun",
+        run: toggleTheme,
+      },
+      // Task Center
+      {
+        id: "taskcenter.toggle",
+        title: "Mở / Đóng Trung tâm Tác vụ (Task Center)",
+        category: "Thao tác",
+        icon: "activity",
+        keybinding: "Ctrl+J",
+        run: () => setTaskCenterOpen((prev) => !prev),
+      },
+      // Workspace Actions
+      {
+        id: "workspace.switch",
+        title: "Chuyển hoặc tạo Workspace mới...",
+        category: "Workspace",
+        icon: "folder",
+        run: () => setWorkspaceSwitcherOpen(true),
+      },
+      {
+        id: "workspace.open_folder",
+        title: "Mở thư mục Workspace",
+        category: "Workspace",
+        icon: "folder",
+        run: () => {
+          setWorkspaceSwitcherOpen(true);
+        },
+      },
+      // Stage & Artifact Operations
+      {
+        id: "stage.save",
+        title: "Lưu thay đổi tệp trên Stage",
+        category: "Biên tập",
+        icon: "save",
+        keybinding: "Ctrl+S",
+        run: () => {
+          window.dispatchEvent(new CustomEvent("studio:stage-save"));
+        },
+      },
+      {
+        id: "artifact.render",
+        title: "Render Artifact đang chọn",
+        category: "Artifact",
+        icon: "play",
+        when: (ctx) => Boolean(ctx.hasSelectedArtifact),
+        run: () => {
+          window.dispatchEvent(new CustomEvent("studio:render-artifact"));
+        },
+      },
+      {
+        id: "artifact.check",
+        title: "Kiểm tra Tiêu chuẩn Brand cho Artifact",
+        category: "Artifact",
+        icon: "check-circle",
+        when: (ctx) => Boolean(ctx.hasSelectedArtifact),
+        run: () => {
+          window.dispatchEvent(new CustomEvent("studio:check-artifact"));
+        },
+      },
+      {
+        id: "thread.undo_turn",
+        title: "Hoàn tác lượt agent gần nhất...",
+        category: "Hội thoại",
+        icon: "rotate-ccw",
+        run: () => {
+          window.dispatchEvent(new CustomEvent("studio:undo-last-turn"));
+        },
+      },
+      // Shortcuts listing
+      {
+        id: "help.shortcuts",
+        title: "Danh sách phím tắt hệ thống",
+        category: "Trợ giúp",
+        icon: "command",
+        run: () => {
+          setCmdOpen(true);
+        },
+      },
+    ];
+
+    return globalCommandRegistry.registerMany(definitions);
+  }, [activeArea, activeProjectSlug, theme, toggleTheme, handleNavigateSettings]);
 
   const runningJobsCount = jobs.filter((j) => j.state === "RUNNING").length;
 
@@ -270,28 +528,16 @@ export const App: React.FC = () => {
     await loadWorkspaceAndCore();
   };
 
-  const [settingsTab, setSettingsTab] = React.useState<"engines" | "tools" | "env" | "catalog" | "jobs" | "disk" | "api-keys">("engines");
+  const handleSelectFileFromPalette = (filePath: string) => {
+    setActiveArea("projects");
+    window.dispatchEvent(new CustomEvent("studio:select-file", { detail: { path: filePath } }));
+  };
 
-  const handleNavigateSettings = React.useCallback((tab?: string) => {
-    if (tab) {
-      setSettingsTab(tab as any);
-    }
-    setActiveArea("settings");
-  }, []);
-
-  React.useEffect(() => {
-    const handleNavEvent = (e: Event) => {
-      const customEvent = e as CustomEvent<{ area?: ShellArea; tab?: string }>;
-      if (customEvent.detail?.area) {
-        if (customEvent.detail.area === "settings" && customEvent.detail.tab) {
-          setSettingsTab(customEvent.detail.tab as any);
-        }
-        setActiveArea(customEvent.detail.area);
-      }
-    };
-    window.addEventListener("studio:navigate", handleNavEvent);
-    return () => window.removeEventListener("studio:navigate", handleNavEvent);
-  }, []);
+  const handleSelectThreadFromPalette = (threadId: string) => {
+    setActiveArea("projects");
+    setActiveThreadId(threadId);
+    window.dispatchEvent(new CustomEvent("studio:select-thread", { detail: { threadId } }));
+  };
 
   const renderActiveView = () => {
     switch (activeArea) {
@@ -390,14 +636,19 @@ export const App: React.FC = () => {
         jobs={jobs}
         diskUsage={diskUsage}
         onOpenTaskCenter={() => setTaskCenterOpen(true)}
-        onOpenSettings={() => setActiveArea("settings")}
+        onOpenSettings={handleNavigateSettings}
+        onOpenWorkspaceFolder={() => setWorkspaceSwitcherOpen(true)}
       />
 
       {/* Command Palette Modal (Ctrl+K) */}
       <CommandPalette
         open={cmdOpen}
         onClose={() => setCmdOpen(false)}
-        commands={commands}
+        context={commandContext}
+        projectFiles={projectFiles}
+        threads={threads}
+        onSelectFile={handleSelectFileFromPalette}
+        onSelectThread={handleSelectThreadFromPalette}
       />
 
       {/* Workspace Switcher Modal */}
