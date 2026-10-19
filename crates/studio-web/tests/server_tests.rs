@@ -81,7 +81,7 @@ fn setup_test_app() -> (
         dispatcher: dispatcher.clone(),
         sessions: Arc::new(studio_web::auth::SessionStore::new()),
         rate_limiter: Arc::new(studio_web::auth::LoginRateLimiter::new()),
-        events_tx: tx.clone(),
+        journal: studio_web::events::EventJournal::attach(&tx),
         lan_allowed: false,
         port: 3000,
     });

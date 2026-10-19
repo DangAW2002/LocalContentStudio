@@ -17,7 +17,7 @@ use tokio::sync::broadcast;
 use crate::allowlist;
 use crate::auth::{verify_password, LoginRateLimiter, SessionStore};
 use crate::dispatcher::WebDispatcher;
-use crate::events::{create_event_stream, WebEvent};
+use crate::events::{create_event_stream, parse_last_event_id, EventJournal, WebEvent};
 use crate::file::{self, FileQuery};
 use crate::lan::format_lan_url;
 use crate::qr::generate_qr_svg;
@@ -51,7 +51,8 @@ pub struct WebServerState {
     pub dispatcher: Arc<dyn WebDispatcher>,
     pub sessions: Arc<SessionStore>,
     pub rate_limiter: Arc<LoginRateLimiter>,
-    pub events_tx: broadcast::Sender<WebEvent>,
+    /// Journaled events for SSE clients (replayed on reconnect).
+    pub journal: Arc<EventJournal>,
     pub lan_allowed: bool,
     pub port: u16,
 }
@@ -78,7 +79,7 @@ pub async fn start(
         dispatcher,
         sessions: Arc::new(SessionStore::new()),
         rate_limiter: Arc::new(LoginRateLimiter::new()),
-        events_tx,
+        journal: EventJournal::attach(&events_tx),
         lan_allowed: config.lan_allowed,
         port: config.port,
     });
@@ -494,7 +495,9 @@ async fn events_handler(State(state): State<Arc<WebServerState>>, headers: Heade
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
-    create_event_stream(state.events_tx.subscribe()).into_response()
+    let last_event_id =
+        parse_last_event_id(headers.get("last-event-id").and_then(|v| v.to_str().ok()));
+    create_event_stream(&state.journal, last_event_id).into_response()
 }
 
 // ──────────────────────────────── Upload Route ───────────────────────────────
