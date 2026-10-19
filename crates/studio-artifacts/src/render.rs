@@ -159,7 +159,8 @@ pub async fn render(
 
             let timeline_file = artifact.source_path(project);
             let content = fs::read_to_string(&timeline_file)?;
-            let timeline_doc: crate::timeline::TimelineDoc = serde_json::from_str(&content)?;
+            let timeline_doc: crate::timeline::TimelineDoc = serde_json::from_str(&content)
+                .map_err(|e| ArtifactError::InvalidConfig(timeline_schema_hint(&e)))?;
 
             let out_file = output_dir.join("output.mp4");
             expected_outputs.push(out_file.clone());
@@ -288,4 +289,32 @@ fn artboard_size(artifact: &Artifact, project: &Project) -> Option<(u32, u32)> {
     }
     let html = fs::read_to_string(artifact.source_path(project)).ok()?;
     detect_artboard_size(&html)
+}
+
+/// Explains a `timeline.json` parse error together with the expected shape, so an agent can fix
+/// the file in one go instead of guessing field by field.
+pub(crate) fn timeline_schema_hint(err: &serde_json::Error) -> String {
+    format!(
+        "timeline.json không hợp lệ (dòng {}, cột {}): {err}. Cấu trúc đúng: \
+         {{\"width\":1920,\"height\":1080,\"fps\":30,\"tracks\":[{{\"id\":\"v1\",\"kind\":\"video\"|\"audio\"|\"captions\",\
+         \"clips\":[{{\"id\":\"c1\",\"source\":\"<đường dẫn tương đối từ thư mục artifact, hoặc color:#RRGGBB, \
+         hoặc chữ phụ đề>\",\"start\":0,\"duration\":5,\"in_point\":0,\"transition\":\"none\"|\"fade\"}}]}}]}}. \
+         Mỗi track và mỗi clip bắt buộc có \"id\"; mỗi clip bắt buộc có \"source\" và \"duration\".",
+        err.line(),
+        err.column()
+    )
+}
+
+#[cfg(test)]
+mod timeline_hint_tests {
+    #[test]
+    fn hint_names_missing_field_and_required_keys() {
+        let err = serde_json::from_str::<crate::timeline::TimelineDoc>(
+            r#"{"tracks":[{"id":"v","kind":"video","clips":[{"id":"c","duration":1}]}]}"#,
+        )
+        .unwrap_err();
+        let msg = super::timeline_schema_hint(&err);
+        assert!(msg.contains("source"), "{msg}");
+        assert!(msg.contains("bắt buộc"), "{msg}");
+    }
 }

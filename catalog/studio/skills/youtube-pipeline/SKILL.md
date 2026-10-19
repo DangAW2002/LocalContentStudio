@@ -49,7 +49,27 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
   - **Track video:** Danh sách clips hình ảnh và video B-roll, gán đúng `start` và `duration`.
   - **Track audio:** Ghép các đoạn voiceover từ bước 2 và nhạc nền nhẹ nhàng (nếu có).
   - **Track caption (phụ đề):** Đặt lời thoại khớp với âm thanh hiển thị theo mốc thời gian.
-- Kiểm tra tính hợp lệ của cấu trúc `timeline.json`.
+- Kiểm tra tính hợp lệ của cấu trúc `timeline.json`. Mẫu tối thiểu hợp lệ (đường dẫn `source` tính từ thư mục
+  artifact `projects/<slug>/artifacts/<id>/`; mỗi track/clip bắt buộc có `id`, mỗi clip bắt buộc có `source` + `duration`):
+
+  ```json
+  {
+    "width": 1920, "height": 1080, "fps": 30,
+    "tracks": [
+      { "id": "video", "kind": "video", "clips": [
+        { "id": "s1", "source": "../../renders/scene-01/<hash>/output.png", "start": 0, "duration": 8.2, "transition": "fade", "transition_duration": 0.5 },
+        { "id": "s2", "source": "color:#1E88E5", "start": 8.2, "duration": 3 }
+      ]},
+      { "id": "voice", "kind": "audio", "clips": [
+        { "id": "vo1", "source": "../../assets/vo/vo-01.wav", "start": 0, "duration": 8.2 }
+      ]},
+      { "id": "subs", "kind": "captions", "clips": [
+        { "id": "t1", "source": "Vì sao một ly cà phê nhỏ giọt chậm…", "start": 0, "duration": 8.2 }
+      ]}
+    ]
+  }
+  ```
+- Thời lượng giọng đọc: `tts.synthesize@1` trả `duration_seconds` cho tệp WAV — dùng số này, không cần chạy ffprobe.
 
 ### 5. Kết xuất & Kiểm tra chất lượng (Render & Validation)
 - Thực hiện kết xuất video qua `artifact_render` cho artifact timeline:
