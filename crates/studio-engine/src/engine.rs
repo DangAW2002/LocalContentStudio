@@ -118,20 +118,21 @@ pub async fn kill_process_tree(pid: u32) -> Result<(), EngineError> {
 #[derive(Debug, Clone)]
 pub struct ClaudeEngine {
     program_path: PathBuf,
+    /// Whether this CLI accepts the hidden `--thinking-display` option (probed once).
+    thinking_display: Arc<tokio::sync::OnceCell<bool>>,
 }
 
 impl ClaudeEngine {
     /// Creates a new ClaudeEngine with the default executable name ("claude").
     pub fn new() -> Self {
-        Self {
-            program_path: PathBuf::from("claude"),
-        }
+        Self::with_path("claude")
     }
 
     /// Creates a ClaudeEngine with a custom path to the executable.
     pub fn with_path(path: impl Into<PathBuf>) -> Self {
         Self {
             program_path: path.into(),
+            thinking_display: Arc::default(),
         }
     }
 }
@@ -149,7 +150,17 @@ impl Engine for ClaudeEngine {
 
     async fn start_turn(&self, req: TurnRequest) -> Result<Turn, EngineError> {
         let tmp_dir = std::env::temp_dir();
-        let spec = claude_command(&req, &tmp_dir, Some(&self.program_path))?;
+        let mut spec = claude_command(&req, &tmp_dir, Some(&self.program_path))?;
+        // Headless `-p` sessions redact thinking (every `thinking_delta` is empty) unless a
+        // display mode is requested explicitly.
+        let thinking_display = *self
+            .thinking_display
+            .get_or_init(|| supports_thinking_display(&self.program_path))
+            .await;
+        if thinking_display {
+            spec.args.push("--thinking-display".to_string());
+            spec.args.push("summarized".to_string());
+        }
         spawn_turn_process(spec, req.workspace_dir, true).await
     }
 }
@@ -264,6 +275,29 @@ pub fn parse_agy_models(raw: &str) -> Vec<ModelInfo> {
             })
         })
         .collect()
+}
+
+/// `--thinking-display` is hidden from `--help`, so probe it by value rejection: a CLI that
+/// knows the option lists its allowed choices for a bogus value (and exits before any API call).
+async fn supports_thinking_display(program: &Path) -> bool {
+    let run = Command::new(program)
+        .args(["-p", "--thinking-display", "bogus", "x"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .output();
+    match tokio::time::timeout(std::time::Duration::from_secs(15), run).await {
+        Ok(Ok(out)) => {
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            text.contains("summarized")
+        }
+        _ => false,
+    }
 }
 
 async fn probe_cli(program: &Path, expected_version: &str) -> Probe {
