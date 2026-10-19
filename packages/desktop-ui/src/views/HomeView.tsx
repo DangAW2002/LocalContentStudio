@@ -8,6 +8,7 @@ import type {
   CatalogKit,
   EngineType,
   EngineModelOption,
+  ScopeItem,
 } from "../api/types";
 
 export interface HomeViewProps {
@@ -65,6 +66,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const [selectedKit, setSelectedKit] = React.useState<string | null>(null);
   const [suggestedKits, setSuggestedKits] = React.useState<CatalogKit[]>([]);
 
+  // Brand and Playbook scope items
+  const [brands, setBrands] = React.useState<ScopeItem[]>([]);
+  const [playbooks, setPlaybooks] = React.useState<ScopeItem[]>([]);
+  const [selectedBrand, setSelectedBrand] = React.useState<string>("");
+  const [selectedPlaybook, setSelectedPlaybook] = React.useState<string>("");
+
   const [projects, setProjects] = React.useState<ProjectSummary[]>([]);
   const [jobs, setJobs] = React.useState<JobSnapshot[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -76,12 +83,16 @@ export const HomeView: React.FC<HomeViewProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const [projList, jobList] = await Promise.all([
+      const [projList, jobList, brandList, pbList] = await Promise.all([
         studioApi.getProjects(),
         studioApi.getJobsSnapshot(),
+        studioApi.getScopeItems("brands").catch(() => []),
+        studioApi.getScopeItems("playbooks").catch(() => []),
       ]);
       setProjects(projList);
       setJobs(jobList);
+      setBrands(brandList);
+      setPlaybooks(pbList);
     } catch (err: any) {
       setError(err?.message || "Chưa kết nối Studio core");
     } finally {
@@ -158,10 +169,24 @@ export const HomeView: React.FC<HomeViewProps> = ({
         model: model || undefined,
       });
 
-      // 3. Start first turn
+      // 3. Compose initial turn prompt with brand/playbook context if selected
+      const contextPrefixes: string[] = [];
+      if (selectedPlaybook) {
+        contextPrefixes.push(`/${selectedPlaybook}`);
+      }
+      if (selectedBrand) {
+        const brandName = brands.find((b) => b.id === selectedBrand)?.name ?? selectedBrand;
+        contextPrefixes.push(`[Áp dụng Brand: ${brandName} (id: ${selectedBrand})]`);
+      }
+      const initialPrompt =
+        contextPrefixes.length > 0
+          ? `${contextPrefixes.join(" ")} ${prompt.trim()}`
+          : prompt.trim();
+
+      // Start first turn
       await studioApi.startTurn({
         threadId: thread.id,
-        prompt: prompt.trim(),
+        prompt: initialPrompt,
       });
 
       // 4. Open project view with the new thread
@@ -233,9 +258,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </div>
 
           <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-3)" }}>
-            {/* Engine & Model Selectors */}
-            <div style={{ display: "flex", gap: "var(--cs-space-3)", alignItems: "center" }}>
-              <div style={{ width: 180 }}>
+            {/* Engine, Model, Brand & Playbook Selectors */}
+            <div style={{ display: "flex", gap: "var(--cs-space-3)", alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ width: 170 }}>
                 <Select
                   size="sm"
                   label="Agent Engine"
@@ -251,7 +276,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 />
               </div>
 
-              <div style={{ width: 220 }}>
+              <div style={{ width: 190 }}>
                 <Select
                   size="sm"
                   label="Mô hình (Model)"
@@ -278,6 +303,32 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     Không lấy được model — dùng mặc định của engine
                   </div>
                 )}
+              </div>
+
+              <div style={{ width: 180 }}>
+                <Select
+                  size="sm"
+                  label="Brand áp dụng"
+                  value={selectedBrand}
+                  onChange={(e) => setSelectedBrand(e.target.value)}
+                  options={[
+                    { value: "", label: "Mặc định (Không chọn)" },
+                    ...brands.map((b) => ({ value: b.id, label: b.name })),
+                  ]}
+                />
+              </div>
+
+              <div style={{ width: 180 }}>
+                <Select
+                  size="sm"
+                  label="Quy trình (Playbook)"
+                  value={selectedPlaybook}
+                  onChange={(e) => setSelectedPlaybook(e.target.value)}
+                  options={[
+                    { value: "", label: "Không áp dụng" },
+                    ...playbooks.map((pb) => ({ value: pb.name, label: pb.name })),
+                  ]}
+                />
               </div>
 
               {selectedKit && (
@@ -337,16 +388,26 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
                 Nhấn Enter hoặc bấm nút để tạo dự án và bắt đầu hội thoại
               </span>
-              <Button
-                type="submit"
-                variant="primary"
-                disabled={!prompt.trim() || submitting}
-                busy={submitting}
-                busyText="Đang khởi tạo dự án..."
-                leftIcon={<Icon name="sparkles" size={16} />}
+              <div
+                title={
+                  !prompt.trim()
+                    ? "Vui lòng nhập nội dung yêu cầu dự án để bắt đầu"
+                    : submitting
+                    ? "Đang khởi tạo dự án..."
+                    : "Bắt đầu dự án mới cùng agent"
+                }
               >
-                Bắt đầu dự án
-              </Button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={!prompt.trim() || submitting}
+                  busy={submitting}
+                  busyText="Đang khởi tạo dự án..."
+                  leftIcon={<Icon name="sparkles" size={16} />}
+                >
+                  Bắt đầu dự án
+                </Button>
+              </div>
             </div>
           </form>
         </section>

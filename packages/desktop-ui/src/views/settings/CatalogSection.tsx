@@ -1,28 +1,73 @@
 import React from "react";
-import { Badge } from "@studio/design-system";
+import { Badge, Button, EmptyState } from "@studio/design-system";
+import { Icon } from "../../components/Icon";
 import { studioApi } from "../../api/client";
 import type { CatalogKit, CatalogModule } from "../../api/types";
 
 export const CatalogSection: React.FC = () => {
   const [kits, setKits] = React.useState<CatalogKit[]>([]);
   const [modules, setModules] = React.useState<CatalogModule[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
 
   const loadCatalog = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
       const [kitList, modList] = await Promise.all([
-        studioApi.getCatalogKits().catch(() => []),
-        studioApi.getCatalogModules().catch(() => []),
+        studioApi.getCatalogKits(),
+        studioApi.getCatalogModules(),
       ]);
       setKits(kitList);
       setModules(modList);
-    } catch {
-      // ignore
+    } catch (err: any) {
+      setError(err?.message || "Không thể tải danh sách Catalog Modules & Kits.");
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   React.useEffect(() => {
     loadCatalog();
   }, [loadCatalog]);
+
+  if (loading) {
+    return (
+      <div style={{ padding: "var(--cs-space-6)", textAlign: "center", color: "var(--cs-fg-muted)" }}>
+        Đang tải Catalog Modules & Kits...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <EmptyState
+        icon={<Icon name="package" size={28} />}
+        title="Lỗi tải Catalog"
+        description={error}
+        action={
+          <Button size="sm" variant="secondary" onClick={loadCatalog}>
+            Thử lại
+          </Button>
+        }
+      />
+    );
+  }
+
+  if (kits.length === 0 && modules.length === 0) {
+    return (
+      <EmptyState
+        icon={<Icon name="package" size={28} />}
+        title="Chưa có Catalog Modules & Kits"
+        description="Không tìm thấy module hoặc kit nào trong catalog hệ thống."
+        action={
+          <Button size="sm" variant="secondary" onClick={loadCatalog}>
+            Tải lại
+          </Button>
+        }
+      />
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-5)" }}>

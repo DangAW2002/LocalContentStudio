@@ -2,7 +2,7 @@
 // Automated E2E smoke test suite for Local Content Studio.
 // Tests all views (Home, Projects, Brand, Library, Settings), tabs, themes (light/dark),
 // and window widths (1440 and 900), capturing screenshots and verifying error-free rendering.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, cpSync } from "node:fs";
 import path from "node:path";
 import { startApp } from "./start.mjs";
 import { CDPClient } from "./cdp.mjs";
@@ -44,6 +44,7 @@ const OUTPUTS_TABS = [
 const VIEWPORTS = [
   { width: 1440, height: 900, name: "1440" },
   { width: 900, height: 750, name: "900" },
+  { width: 768, height: 700, name: "768" },
 ];
 
 export async function runSmoke(options = {}) {
@@ -60,10 +61,25 @@ export async function runSmoke(options = {}) {
     const shotsDir = runData.shotsDir;
     mkdirSync(shotsDir, { recursive: true });
 
+    // Wait until no active spinner or "Đang…" loading label is visible
+    async function waitSettled(maxWaitMs = 5000) {
+      const start = Date.now();
+      while (Date.now() - start < maxWaitMs) {
+        const isBusy = await client.eval(`(() => {
+          const bodyText = document.body.innerText || "";
+          if (document.querySelector('.cs-spin, [role="progressbar"], .cs-thinking-dot')) return true;
+          if (bodyText.includes("Đang tải danh sách") || bodyText.includes("Đang quét…") || bodyText.includes("Đang quét công cụ")) return true;
+          return false;
+        })()`);
+        if (!isBusy) break;
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
     // Helper to evaluate checkErrors and throw if failed
     async function assertCleanState(stepName) {
-      // Small pause to let DOM settle
-      await new Promise((r) => setTimeout(r, 200));
+      await waitSettled();
       const res = await client.checkErrors();
       if (!res.ok) {
         const msg = `[LỖI TẠI ${stepName}] ${res.reason}`;
@@ -180,6 +196,16 @@ export async function runSmoke(options = {}) {
 
     console.log("\n=== KẾT THÚC DUYỆT CÁC MÀN HÌNH ===");
     console.log(`Ảnh chụp đã lưu tại: ${shotsDir}`);
+
+    // Copy screenshots to task evidence directory
+    const evidenceDir = path.resolve("D:/Users/Dang/LocalContentStudio/.aw/tasks/2026-10-18-m03-ra-ui-vong-2/evidence");
+    try {
+      mkdirSync(evidenceDir, { recursive: true });
+      cpSync(shotsDir, evidenceDir, { recursive: true });
+      console.log(`[smoke] Đã đồng bộ ảnh chụp bằng chứng vào: ${evidenceDir}`);
+    } catch (e) {
+      console.warn(`[smoke] Không thể sao chép bằng chứng vào task folder: ${e.message}`);
+    }
 
     if (failureReasons.length > 0) {
       console.error(`\n❌ SMOKE TEST THẤT BẠI với ${failureReasons.length} lỗi:`);

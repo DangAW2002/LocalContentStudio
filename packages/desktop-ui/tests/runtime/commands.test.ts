@@ -87,4 +87,20 @@ describe("commands.ts", () => {
     const mruVisible = registry.getMruCommands({ hasSelectedArtifact: true });
     expect(mruVisible.map((c) => c.id)).toEqual(["cmd.always", "cmd.conditional"]);
   });
+
+  it("hides undo turn command when no undoable turn exists in context", () => {
+    registry.register({
+      id: "thread.undo_turn",
+      title: "Hoàn tác lượt agent gần nhất...",
+      category: "Hội thoại",
+      when: (ctx) => Boolean(ctx.hasUndoableTurn),
+      run: () => {},
+    });
+
+    const withoutUndo = registry.getVisible({ hasUndoableTurn: false });
+    expect(withoutUndo.some((c) => c.id === "thread.undo_turn")).toBe(false);
+
+    const withUndo = registry.getVisible({ hasUndoableTurn: true });
+    expect(withUndo.some((c) => c.id === "thread.undo_turn")).toBe(true);
+  });
 });

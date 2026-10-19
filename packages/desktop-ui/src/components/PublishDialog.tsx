@@ -176,6 +176,26 @@ export const PublishDialog: React.FC<PublishDialogProps> = ({
     }
   }, [open, initialRequest, artifact]);
 
+  const prevActiveElementRef = React.useRef<HTMLElement | null>(null);
+
+  React.useEffect(() => {
+    if (open) {
+      if (document.activeElement instanceof HTMLElement) {
+        prevActiveElementRef.current = document.activeElement;
+      }
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          handleCancel();
+        }
+      };
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
+    } else if (prevActiveElementRef.current) {
+      prevActiveElementRef.current.focus?.();
+      prevActiveElementRef.current = null;
+    }
+  }, [open]);
+
   // Subscribe to job events to track publish progress
   React.useEffect(() => {
     let unlisten: (() => void) | undefined;

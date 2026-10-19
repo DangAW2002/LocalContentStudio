@@ -29,6 +29,25 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const prevActiveElementRef = React.useRef<HTMLElement | null>(null);
+
+  React.useEffect(() => {
+    if (open) {
+      if (document.activeElement instanceof HTMLElement) {
+        prevActiveElementRef.current = document.activeElement;
+      }
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          onClose();
+        }
+      };
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
+    } else if (prevActiveElementRef.current) {
+      prevActiveElementRef.current.focus?.();
+      prevActiveElementRef.current = null;
+    }
+  }, [open, onClose]);
 
   if (!open) return null;
 

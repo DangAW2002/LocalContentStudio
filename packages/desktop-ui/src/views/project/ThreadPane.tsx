@@ -243,14 +243,19 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
       const lastAgentTurn = [...messages].reverse().find((m) => m.role === "agent" && m.turnId);
       if (lastAgentTurn && lastAgentTurn.turnId) {
         setUndoTurnTarget(lastAgentTurn.turnId);
-      } else {
-        alert("Chưa có lượt agent nào để hoàn tác trong hội thoại này.");
       }
     };
 
+    const hasUndoableTurn = messages.some((m) => m.role === "agent" && Boolean(m.turnId));
+    window.dispatchEvent(
+      new CustomEvent("studio:thread-state", {
+        detail: { hasUndoableTurn, threadId: activeThread?.id },
+      })
+    );
+
     window.addEventListener("studio:undo-last-turn", handleUndoLastTurnEvent);
     return () => window.removeEventListener("studio:undo-last-turn", handleUndoLastTurnEvent);
-  }, [messages]);
+  }, [messages, activeThread?.id]);
 
   const handlePermissionRespond = async (requestId: string, allow: boolean) => {
     try {

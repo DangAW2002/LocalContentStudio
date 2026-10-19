@@ -395,6 +395,7 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
                 key={i}
                 type="button"
                 onClick={() => onSelectFile(fc.path)}
+                aria-label={`Xem tệp ${fc.path} trên Stage`}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -529,6 +530,7 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
             type="button"
             disabled={isAnyTurnRunning}
             onClick={() => onUndoClick?.(msg.turnId!)}
+            aria-label="Hoàn tác các file đã sửa trong lượt này"
             style={{
               background: "none",
               border: "none",

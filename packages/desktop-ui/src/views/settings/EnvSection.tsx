@@ -5,14 +5,22 @@ import { studioApi } from "../../api/client";
 import { cleanDisplayPath } from "../../utils/path";
 import type { EnvProbeItem } from "../../api/types";
 
-export const EnvSection: React.FC = () => {
-  const [envItems, setEnvItems] = React.useState<EnvProbeItem[]>([]);
-  const [loading, setLoading] = React.useState(true);
+let cachedEnvItems: EnvProbeItem[] | null = null;
 
-  const loadEnv = React.useCallback(async () => {
+export const EnvSection: React.FC = () => {
+  const [envItems, setEnvItems] = React.useState<EnvProbeItem[]>(cachedEnvItems || []);
+  const [loading, setLoading] = React.useState(cachedEnvItems === null);
+
+  const loadEnv = React.useCallback(async (force = false) => {
+    if (!force && cachedEnvItems !== null) {
+      setEnvItems(cachedEnvItems);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const list = await studioApi.envProbe();
+      cachedEnvItems = list;
       setEnvItems(list);
     } catch {
       // ignore
@@ -22,7 +30,9 @@ export const EnvSection: React.FC = () => {
   }, []);
 
   React.useEffect(() => {
-    loadEnv();
+    if (cachedEnvItems === null) {
+      loadEnv();
+    }
   }, [loadEnv]);
 
   return (
@@ -39,7 +49,7 @@ export const EnvSection: React.FC = () => {
         <Button
           size="sm"
           variant="secondary"
-          onClick={loadEnv}
+          onClick={() => loadEnv(true)}
           busy={loading}
           leftIcon={<Icon name="refresh" size={13} />}
         >
