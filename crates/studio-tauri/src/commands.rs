@@ -430,9 +430,37 @@ pub fn resolve_path(ws: &Workspace, project: Option<&str>, path: &str) -> CmdRes
     Ok(ws.scoped_path(p)?)
 }
 
+/// Like [`resolve_path`], but additionally lets absolute paths into the App/Org shared layers
+/// through, read-only, so the scope chain's inherited brands/channels/playbooks can be viewed.
+fn resolve_read_path(
+    state: &AppState,
+    ws: &Workspace,
+    project: Option<&str>,
+    path: &str,
+) -> CmdResult<PathBuf> {
+    let err = match resolve_path(ws, project, path) {
+        Ok(p) => return Ok(p),
+        Err(e) => e,
+    };
+    let p = Path::new(path);
+    if p.is_absolute() {
+        if let Ok(target) = std::fs::canonicalize(p) {
+            let layers = [state.app_paths.shared_dir(), ws.org().shared_dir()];
+            if layers
+                .iter()
+                .filter_map(|dir| std::fs::canonicalize(dir).ok())
+                .any(|dir| target.starts_with(dir))
+            {
+                return Ok(target);
+            }
+        }
+    }
+    Err(err)
+}
+
 pub fn file_read_impl(state: &AppState, project: Option<String>, path: String) -> CmdResult<Value> {
     let ws = state.workspace()?;
-    let full = resolve_path(&ws, project.as_deref(), &path)?;
+    let full = resolve_read_path(state, &ws, project.as_deref(), &path)?;
     let size = std::fs::metadata(&full)?.len();
     let (kind, mime) = kind_of(&full);
     let textual = matches!(kind, "markdown" | "text" | "html" | "json" | "code");
@@ -863,7 +891,14 @@ pub fn scope_list_impl(state: &AppState, kind: String) -> CmdResult<Vec<Value>> 
                 ("playbooks", Some(s)) => s.get_playbook(&item.id).map(|p| (p.frontmatter.name.clone(), Some(p.frontmatter.description.clone()))).unwrap_or((item.id.clone(), None)),
                 _ => (item.id.clone(), None),
             };
-            json!({ "id": item.id, "name": name, "kind": kind, "layer": layer, "path": strip_verbatim(&item.path), "summary": summary })
+            let mut out = json!({ "id": item.id, "name": name, "kind": kind, "layer": layer, "path": strip_verbatim(&item.path), "summary": summary });
+            // Channel formats (sizes + safe zones) drive the safe-zone preview in the Brand view.
+            if let ("channels", Some(s)) = (kind.as_str(), &set) {
+                if let Some(c) = s.get_channel(&item.id) {
+                    out["formats"] = json!(c.formats);
+                }
+            }
+            out
         })
         .collect())
 }
@@ -1765,9 +1800,23 @@ pub async fn web_configure_impl(state: &AppState, req: WebConfigureRequest) -> C
 #[tauri::command]
 pub async fn web_configure(
     state: State<'_, AppState>,
-    req: WebConfigureRequest,
+    req: Option<WebConfigureRequest>,
+    enabled: Option<bool>,
+    lan_allowed: Option<bool>,
+    port: Option<u16>,
+    password: Option<String>,
 ) -> CmdResult<Value> {
-    web_configure_impl(&state, req).await
+    let final_req = if let Some(r) = req {
+        r
+    } else {
+        WebConfigureRequest {
+            enabled,
+            lan_allowed,
+            port,
+            password,
+        }
+    };
+    web_configure_impl(&state, final_req).await
 }
 
 /// Individual voice entry for TTS settings.
@@ -2473,6 +2522,21 @@ pub fn tts_set_config_impl(state: &AppState, req: TtsSetConfigRequest) -> CmdRes
 #[tauri::command]
 pub fn tts_set_config(state: State<'_, AppState>, req: TtsSetConfigRequest) -> CmdResult<()> {
     tts_set_config_impl(&state, req)
+}
+
+/// Native folder picker dialog. Returns the selected directory path, or None if cancelled.
+pub async fn dialog_pick_folder_impl() -> CmdResult<Option<String>> {
+    let handle = rfd::AsyncFileDialog::new()
+        .set_title("Chọn thư mục Workspace")
+        .pick_folder()
+        .await;
+    Ok(handle.map(|h| strip_verbatim(h.path())))
+}
+
+/// Native folder picker dialog command.
+#[tauri::command]
+pub async fn dialog_pick_folder() -> CmdResult<Option<String>> {
+    dialog_pick_folder_impl().await
 }
 
 #[cfg(test)]

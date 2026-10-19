@@ -211,6 +211,7 @@ fn main() {
             commands::tts_synthesize_preview,
             commands::tts_get_config,
             commands::tts_set_config,
+            commands::dialog_pick_folder,
             publish::publish_prepare,
             publish::publish_list,
             publish::publish_get,

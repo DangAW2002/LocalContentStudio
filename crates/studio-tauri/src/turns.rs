@@ -52,7 +52,7 @@ pub fn to_ui_event(ev: &Event, ws_root: &Path) -> Option<Value> {
         Event::Session { id } => json!({ "type": "Session", "id": id }),
         Event::TextDelta(t) => json!({ "type": "TextDelta", "text": t }),
         Event::Text(t) => json!({ "type": "Text", "text": t }),
-        Event::Thinking => json!({ "type": "Thinking", "text": "" }),
+        Event::Thinking(text) => json!({ "type": "Thinking", "text": text }),
         Event::ToolCall { id, name, input } => {
             json!({ "type": "ToolCall", "id": id, "name": name, "input": input })
         }
@@ -86,10 +86,13 @@ pub fn to_ui_event(ev: &Event, ws_root: &Path) -> Option<Value> {
             input_tokens,
             output_tokens,
             cache_read_tokens,
+            cache_write_tokens,
+            reasoning_tokens,
             cost_usd,
         } => json!({
             "type": "Usage", "inputTokens": input_tokens, "outputTokens": output_tokens,
-            "cacheReadTokens": cache_read_tokens, "costUsd": cost_usd
+            "cacheReadTokens": cache_read_tokens, "cacheWriteTokens": cache_write_tokens,
+            "reasoningTokens": reasoning_tokens, "costUsd": cost_usd
         }),
         Event::Done { status, text } => {
             json!({ "type": "Done", "status": status_str(status), "text": text })
@@ -180,6 +183,24 @@ fn build_context(
     lines.join("\n")
 }
 
+/// First line of a prompt, shortened to a thread title.
+fn thread_title_from_prompt(prompt: &str) -> String {
+    const MAX_CHARS: usize = 48;
+    let line = prompt
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("Hội thoại mới");
+    if line.chars().count() <= MAX_CHARS {
+        line.to_string()
+    } else {
+        format!(
+            "{}…",
+            line.chars().take(MAX_CHARS).collect::<String>().trim_end()
+        )
+    }
+}
+
 /// Thread row needed to run a turn.
 struct ThreadRow {
     project: Option<String>,
@@ -209,16 +230,32 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
     let ws = state.workspace()?;
     let db = WorkspaceDb::open(&ws)?;
     let thread = load_thread(&db, &thread_id)?;
-    let busy = state
-        .turns
-        .lock()
-        .map(|t| t.values().any(|r| r.thread_id == thread_id))
-        .unwrap_or(false);
-    if busy {
-        return Err(CmdError::msg("Hội thoại này đang có một lượt chạy."));
-    }
 
+    // Check-and-reserve under one lock so two concurrent sends cannot both start a turn.
     let turn_id = uuid::Uuid::new_v4().to_string();
+    let cancel = Arc::new(Notify::new());
+    {
+        let mut turns = state
+            .turns
+            .lock()
+            .map_err(|_| CmdError::msg("Trạng thái lượt chạy bị khoá hỏng."))?;
+        if turns.values().any(|r| r.thread_id == thread_id) {
+            return Err(CmdError::msg("Hội thoại này đang có một lượt chạy."));
+        }
+        turns.insert(
+            turn_id.clone(),
+            RunningTurn {
+                thread_id: thread_id.clone(),
+                cancel: cancel.clone(),
+            },
+        );
+    }
+    let mut reservation = TurnReservation {
+        state: &state,
+        turn_id: &turn_id,
+        armed: true,
+    };
+
     let index: i64 = db.conn().query_row(
         "SELECT COUNT(*) FROM turns WHERE thread_id = ?1",
         [&thread_id],
@@ -233,6 +270,21 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
         &format!("Trước lượt {}", index + 1),
         Some(turn_id.clone()),
     )?;
+    // Name an untitled thread after its first prompt (like chat apps do), so threads are
+    // distinguishable in the switcher.
+    if index == 0 {
+        let title = thread_title_from_prompt(&prompt);
+        let renamed = db.conn().execute(
+            "UPDATE threads SET title = ?2 WHERE id = ?1 AND (title IS NULL OR title = 'Hội thoại mới')",
+            params![thread_id, title],
+        )?;
+        if renamed > 0 {
+            state.emit(
+                "thread-updated",
+                json!({ "threadId": thread_id, "title": title }),
+            );
+        }
+    }
     let prompt_event = json!({ "type": "UserPrompt", "text": prompt });
     persist(&db, &turn_id, &prompt_event)?;
     emit(&state, &thread_id, &turn_id, &prompt_event);
@@ -337,16 +389,9 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
         }
     };
 
-    let cancel = Arc::new(Notify::new());
-    if let Ok(mut turns) = state.turns.lock() {
-        turns.insert(
-            turn_id.clone(),
-            RunningTurn {
-                thread_id: thread_id.clone(),
-                cancel: cancel.clone(),
-            },
-        );
-    }
+    // run_turn owns the slot from here and releases it when the turn ends.
+    reservation.armed = false;
+    drop(reservation);
     let ctx = TurnTask {
         state: state.clone(),
         ws_root: ws.root().to_path_buf(),
@@ -360,6 +405,23 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
     };
     tauri::async_runtime::spawn(run_turn(ctx, turn, cancel));
     Ok(turn_id)
+}
+
+/// Releases a reserved turn slot if `start_turn` bails out before the turn task takes over.
+struct TurnReservation<'a> {
+    state: &'a AppState,
+    turn_id: &'a str,
+    armed: bool,
+}
+
+impl Drop for TurnReservation<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            if let Ok(mut turns) = self.state.turns.lock() {
+                turns.remove(self.turn_id);
+            }
+        }
+    }
 }
 
 fn materialize_skills(
@@ -531,6 +593,8 @@ async fn run_turn(t: TurnTask, mut turn: Turn, cancel: Arc<Notify>) {
                     "inputTokens": 0,
                     "outputTokens": 0,
                     "cacheReadTokens": 0,
+                    "cacheWriteTokens": 0,
+                    "reasoningTokens": 0,
                     "costUsd": null,
                     "estimatedCostUsd": cap_cost,
                 });
@@ -570,6 +634,19 @@ pub fn undo_turn(state: &AppState, turn_id: &str) -> CmdResult<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thread_title_is_first_line_shortened() {
+        assert_eq!(
+            thread_title_from_prompt("  \n  Viết kịch bản video\nchi tiết"),
+            "Viết kịch bản video"
+        );
+        let long = "á".repeat(60);
+        let t = thread_title_from_prompt(&long);
+        assert_eq!(t.chars().count(), 49);
+        assert!(t.ends_with('…'));
+        assert_eq!(thread_title_from_prompt("   "), "Hội thoại mới");
+    }
 
     #[test]
     fn test_build_context_for_agy_and_claude() {

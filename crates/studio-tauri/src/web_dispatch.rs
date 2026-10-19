@@ -414,8 +414,11 @@ pub async fn dispatch_invoke(
             Ok(serde_json::to_value(res)?)
         }
         "web_configure" => {
-            let req =
-                serde_json::from_value(args.clone()).map_err(|e| CmdError::msg(e.to_string()))?;
+            let req: commands::WebConfigureRequest = if let Some(nested) = args.get("req") {
+                serde_json::from_value(nested.clone()).map_err(|e| CmdError::msg(e.to_string()))?
+            } else {
+                serde_json::from_value(args.clone()).map_err(|e| CmdError::msg(e.to_string()))?
+            };
             let res = commands::web_configure_impl(state, req).await?;
             Ok(serde_json::to_value(res)?)
         }
@@ -452,6 +455,10 @@ pub async fn dispatch_invoke(
             })?;
             commands::tts_set_config_impl(state, req)?;
             Ok(json!({ "ok": true }))
+        }
+        "dialog_pick_folder" => {
+            let res = commands::dialog_pick_folder_impl().await?;
+            Ok(serde_json::to_value(res)?)
         }
         unhandled => Err(CmdError::msg(format!(
             "Lệnh '{unhandled}' chưa được định tuyến trong bộ điều phối web."

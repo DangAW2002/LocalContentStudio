@@ -4,10 +4,12 @@
   "version": "0.1.0",
   "identifier": "studio.localcontent.app",
   "build": {
+    "beforeDevCommand": "pnpm --filter @studio/desktop-ui dev",
     "frontendDist": "../../packages/desktop-ui/dist",
-    "devUrl": "http://localhost:5173"
+    "devUrl": "http://localhost:3001"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Local Content Studio",
