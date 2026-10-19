@@ -15,14 +15,22 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({
   jobs,
 }) => {
   const [activeTab, setActiveTab] = React.useState<string>("running");
+  const prevActiveElementRef = React.useRef<HTMLElement | null>(null);
 
   React.useEffect(() => {
-    if (!open) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    if (open) {
+      if (document.activeElement instanceof HTMLElement) {
+        prevActiveElementRef.current = document.activeElement;
+      }
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") onClose();
+      };
+      window.addEventListener("keydown", onKeyDown);
+      return () => window.removeEventListener("keydown", onKeyDown);
+    } else if (prevActiveElementRef.current) {
+      prevActiveElementRef.current.focus?.();
+      prevActiveElementRef.current = null;
+    }
   }, [open, onClose]);
 
   if (!open) return null;

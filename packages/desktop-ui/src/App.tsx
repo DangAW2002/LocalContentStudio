@@ -129,6 +129,19 @@ export const App: React.FC = () => {
     };
   }, [activeProjectSlug]);
 
+  const [hasUndoableTurn, setHasUndoableTurn] = React.useState(false);
+
+  React.useEffect(() => {
+    const handleThreadState = (e: Event) => {
+      const custom = e as CustomEvent<{ hasUndoableTurn?: boolean }>;
+      if (typeof custom.detail?.hasUndoableTurn === "boolean") {
+        setHasUndoableTurn(custom.detail.hasUndoableTurn);
+      }
+    };
+    window.addEventListener("studio:thread-state", handleThreadState);
+    return () => window.removeEventListener("studio:thread-state", handleThreadState);
+  }, []);
+
   React.useEffect(() => {
     const handleOpenSwitcher = () => setWorkspaceSwitcherOpen(true);
     window.addEventListener("studio:open-workspace-switcher", handleOpenSwitcher);
@@ -244,8 +257,9 @@ export const App: React.FC = () => {
       activeThreadId,
       hasSelectedArtifact,
       hasRunningTurn: jobs.some((j) => j.state === "RUNNING"),
+      hasUndoableTurn,
     };
-  }, [activeArea, activeProjectSlug, activeThreadId, hasSelectedArtifact, jobs]);
+  }, [activeArea, activeProjectSlug, activeThreadId, hasSelectedArtifact, jobs, hasUndoableTurn]);
 
   // Register all system commands into globalCommandRegistry
   React.useEffect(() => {
@@ -474,6 +488,7 @@ export const App: React.FC = () => {
         title: "Hoàn tác lượt agent gần nhất...",
         category: "Hội thoại",
         icon: "rotate-ccw",
+        when: (ctx) => Boolean(ctx.hasUndoableTurn),
         run: () => {
           window.dispatchEvent(new CustomEvent("studio:undo-last-turn"));
         },

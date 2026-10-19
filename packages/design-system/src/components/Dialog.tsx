@@ -18,6 +18,19 @@ export const Dialog: React.FC<DialogProps> = ({
   actions,
   footer,
 }) => {
+  const prevActiveElementRef = React.useRef<HTMLElement | null>(null);
+
+  React.useEffect(() => {
+    if (open) {
+      if (document.activeElement instanceof HTMLElement) {
+        prevActiveElementRef.current = document.activeElement;
+      }
+    } else if (prevActiveElementRef.current) {
+      prevActiveElementRef.current.focus?.();
+      prevActiveElementRef.current = null;
+    }
+  }, [open]);
+
   React.useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && open) {

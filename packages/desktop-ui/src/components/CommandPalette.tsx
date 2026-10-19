@@ -45,12 +45,19 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement>(null);
   const listRef = React.useRef<HTMLDivElement>(null);
+  const prevActiveElementRef = React.useRef<HTMLElement | null>(null);
 
   React.useEffect(() => {
     if (open) {
+      if (document.activeElement instanceof HTMLElement) {
+        prevActiveElementRef.current = document.activeElement;
+      }
       setQuery("");
       setSelectedIndex(0);
       setTimeout(() => inputRef.current?.focus(), 50);
+    } else if (prevActiveElementRef.current) {
+      prevActiveElementRef.current.focus?.();
+      prevActiveElementRef.current = null;
     }
   }, [open]);
 
@@ -233,7 +240,17 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         return { c, res: best };
       })
       .filter((item): item is { c: CommandDefinition; res: FuzzyScoreResult } => item.res !== null)
-      .sort((a, b) => b.res.score - a.res.score)
+      .sort((a, b) => {
+        if (b.res.score !== a.res.score) {
+          return b.res.score - a.res.score;
+        }
+        // On tie: prioritize navigation commands (Điều hướng) first
+        const aIsNav = a.c.category === "Điều hướng";
+        const bIsNav = b.c.category === "Điều hướng";
+        if (aIsNav && !bIsNav) return -1;
+        if (!aIsNav && bIsNav) return 1;
+        return a.c.title.localeCompare(b.c.title);
+      })
       .map(({ c, res }) => ({
         id: `cmd:${c.id}`,
         type: "command",

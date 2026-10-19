@@ -781,7 +781,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                             top: 4,
                             bottom: 4,
                             backgroundColor: colors.bg,
-                            border: `1px solid ${isSelected ? "var(--cs-focus, #3b82f6)" : colors.border}`,
+                            border: `1px solid ${isSelected ? "var(--cs-focus)" : colors.border}`,
                             borderRadius: "var(--cs-radius-control)",
                             padding: "4px 8px",
                             cursor: "pointer",
@@ -789,7 +789,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
                             display: "flex",
                             flexDirection: "column",
                             justifyContent: "center",
-                            boxShadow: isSelected ? "0 0 0 2px var(--cs-focus, #3b82f6)" : "none",
+                            boxShadow: isSelected ? "0 0 0 2px var(--cs-focus)" : "none",
                             userSelect: "none",
                             zIndex: isSelected ? 3 : 2,
                           }}

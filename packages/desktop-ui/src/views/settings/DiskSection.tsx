@@ -6,13 +6,19 @@ import type { DiskUsageReport } from "../../api/types";
 
 export const DiskSection: React.FC = () => {
   const [diskUsage, setDiskUsage] = React.useState<DiskUsageReport | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
 
   const loadDiskUsage = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
       const disk = await studioApi.getDiskUsage();
       setDiskUsage(disk);
-    } catch {
-      // ignore
+    } catch (err: any) {
+      setError(err?.message || "Không thể kết nối đến backend để lấy dung lượng đĩa.");
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -22,7 +28,22 @@ export const DiskSection: React.FC = () => {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-4)" }}>
-      {diskUsage ? (
+      {loading ? (
+        <div style={{ padding: "var(--cs-space-6)", textAlign: "center", color: "var(--cs-fg-muted)" }}>
+          Đang quét dung lượng lưu trữ trên đĩa...
+        </div>
+      ) : error ? (
+        <EmptyState
+          icon={<Icon name="hard-drive" size={28} />}
+          title="Lỗi tải dữ liệu dung lượng"
+          description={error}
+          action={
+            <Button size="sm" variant="secondary" onClick={loadDiskUsage}>
+              Thử lại
+            </Button>
+          }
+        />
+      ) : diskUsage ? (
         <div
           style={{
             padding: "var(--cs-space-4)",

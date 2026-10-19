@@ -5,18 +5,26 @@ import { studioApi } from "../../api/client";
 import { cleanDisplayPath } from "../../utils/path";
 import type { EngineProbeResult } from "../../api/types";
 
+let cachedEngines: EngineProbeResult[] | null = null;
+
 export const EnginesSection: React.FC = () => {
-  const [engines, setEngines] = React.useState<EngineProbeResult[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const [engines, setEngines] = React.useState<EngineProbeResult[]>(cachedEngines || []);
+  const [loading, setLoading] = React.useState(cachedEngines === null);
   const [error, setError] = React.useState<string | null>(null);
   const [agyBusy, setAgyBusy] = React.useState(false);
   const [agyStatus, setAgyStatus] = React.useState<{ type: "success" | "danger"; message: string } | null>(null);
 
-  const loadEngines = React.useCallback(async () => {
+  const loadEngines = React.useCallback(async (force = false) => {
+    if (!force && cachedEngines !== null) {
+      setEngines(cachedEngines);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       const list = await studioApi.probeEngines();
+      cachedEngines = list;
       setEngines(list);
     } catch (err: any) {
       setError(err?.message || "Không thể quét công cụ trên máy.");
@@ -26,7 +34,9 @@ export const EnginesSection: React.FC = () => {
   }, []);
 
   React.useEffect(() => {
-    loadEngines();
+    if (cachedEngines === null) {
+      loadEngines();
+    }
   }, [loadEngines]);
 
   const handleAgyConnect = async () => {
@@ -38,7 +48,7 @@ export const EnginesSection: React.FC = () => {
         type: "success",
         message: `Đã kết nối thành công agy với Studio MCP entry 'studio' (shim: ${cleanDisplayPath(res.shim) || "studio-mcp"}).`,
       });
-      loadEngines();
+      loadEngines(true);
     } catch (err: any) {
       setAgyStatus({
         type: "danger",
@@ -58,7 +68,7 @@ export const EnginesSection: React.FC = () => {
         type: "success",
         message: "Đã ngắt kết nối agy khỏi Studio MCP thành công.",
       });
-      loadEngines();
+      loadEngines(true);
     } catch (err: any) {
       setAgyStatus({
         type: "danger",
@@ -90,7 +100,7 @@ export const EnginesSection: React.FC = () => {
           title={loading ? "Đang quét công cụ trên máy…" : "Chưa có kết quả probe"}
           description={loading ? undefined : "Bấm 'Kiểm tra lại' để quét các công cụ CLI đã cài trên máy."}
           action={
-            <Button variant="secondary" onClick={loadEngines} busy={loading} busyText="Đang quét...">
+            <Button variant="secondary" onClick={() => loadEngines(true)} busy={loading} busyText="Đang quét...">
               Kiểm tra lại
             </Button>
           }
@@ -106,7 +116,7 @@ export const EnginesSection: React.FC = () => {
               <Button
                 size="sm"
                 variant="secondary"
-                onClick={loadEngines}
+                onClick={() => loadEngines(true)}
                 leftIcon={<Icon name="refresh" size={13} />}
               >
                 Quét lại

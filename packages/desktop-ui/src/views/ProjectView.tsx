@@ -94,15 +94,39 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
     }
   }, [isNarrow]);
 
-  // Track window width for responsive tabs
+  // Track window width for responsive auto-collapse and tabs
   React.useEffect(() => {
+    let prevWidth = typeof window !== "undefined" ? window.innerWidth : 1200;
+
     const handleResize = () => {
-      setIsNarrow(window.innerWidth < 960);
+      const w = window.innerWidth;
+      setIsNarrow(w < 768);
+
+      // Under ~1100px: auto-collapse Outputs if crossing down
+      if (w < 1100 && prevWidth >= 1100) {
+        setLayout((prev) => (prev.outputs.visible ? { ...prev, outputs: { ...prev.outputs, visible: false } } : prev));
+      }
+      // Under ~900px: auto-collapse Thread if crossing down
+      if (w < 900 && prevWidth >= 900) {
+        setLayout((prev) => (prev.thread.visible ? { ...prev, thread: { ...prev.thread, visible: false } } : prev));
+      }
+
+      prevWidth = w;
     };
-    handleResize();
+
+    // Run initial auto-collapse checks on mount
+    const initW = window.innerWidth;
+    if (initW < 1100) {
+      setLayout((prev) => (prev.outputs.visible ? { ...prev, outputs: { ...prev.outputs, visible: false } } : prev));
+    }
+    if (initW < 900) {
+      setLayout((prev) => (prev.thread.visible ? { ...prev, thread: { ...prev.thread, visible: false } } : prev));
+    }
+    setIsNarrow(initW < 768);
+
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, []);
+  }, [setLayout]);
 
   // Load project list
   const loadProjects = React.useCallback(async () => {
@@ -410,6 +434,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
               type="button"
               className="cs-icon-btn"
               aria-pressed={layout.thread.visible}
+              aria-label={(layout.thread.visible ? "Ẩn" : "Hiện") + " khung hội thoại (Ctrl+B)"}
               title={(layout.thread.visible ? "Ẩn" : "Hiện") + " khung hội thoại (Ctrl+B)"}
               onClick={() => togglePane("thread")}
             >
@@ -419,6 +444,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
               type="button"
               className="cs-icon-btn"
               aria-pressed={layout.outputs.visible}
+              aria-label={(layout.outputs.visible ? "Ẩn" : "Hiện") + " khung Outputs (Ctrl+Alt+B)"}
               title={(layout.outputs.visible ? "Ẩn" : "Hiện") + " khung Outputs (Ctrl+Alt+B)"}
               onClick={() => togglePane("outputs")}
             >
