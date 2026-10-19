@@ -5,13 +5,34 @@ import { StagePane } from "./project/StagePane";
 import { OutputsPane } from "./project/OutputsPane";
 import { Tabs, Button, Select, ErrorState } from "@studio/design-system";
 import { studioApi } from "../api/client";
+import { Icon } from "../components/Icon";
+import { Sash } from "../components/Sash";
+import { useDismiss } from "../components/useDismiss";
+import {
+  DEFAULT_PROJECT_LAYOUT,
+  dragPane,
+  loadProjectLayout,
+  paneMax,
+  saveProjectLayout,
+  stepPane,
+  type PaneState,
+  type ProjectLayout,
+} from "../runtime/layout/split";
 import type {
+  EngineType,
   ProjectSummary,
   ProjectFileEntry,
   ThreadSummary,
   ScopeItem,
   ArtifactSummary,
 } from "../api/types";
+
+const PANE_LIMITS = { thread: { min: 280, max: 720 }, outputs: { min: 240, max: 560 } } as const;
+const CENTER_MIN = 320;
+const NEW_THREAD_ENGINES = [
+  ["claude", "Claude Code CLI"],
+  ["agy", "Antigravity CLI (agy)"],
+] as const;
 
 export interface ProjectViewProps {
   initialSlug?: string;
@@ -50,9 +71,17 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
     }
   }, [currentSlug]);
 
-  // Layout states: resizable & narrow tab mode
-  const [threadWidth, setThreadWidth] = React.useState(380);
-  const [outputsWidth, setOutputsWidth] = React.useState(320);
+  // Side panes: VS Code split-view behaviour (drag, snap to hide, double-click reset), persisted.
+  const [layout, setLayoutState] = React.useState<ProjectLayout>(loadProjectLayout);
+  const setLayout = React.useCallback((update: (prev: ProjectLayout) => ProjectLayout) => {
+    setLayoutState((prev) => {
+      const next = update(prev);
+      saveProjectLayout(next);
+      return next;
+    });
+  }, []);
+  const panesRef = React.useRef<HTMLDivElement>(null);
+  const dragStartRef = React.useRef<ProjectLayout>(layout);
   const [narrowTab, setNarrowTab] = React.useState<"thread" | "stage" | "outputs">("thread");
   const [isNarrow, setIsNarrow] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
@@ -119,9 +148,10 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
           if (!activeThreadId && threadList.length > 0) {
             setActiveThreadId(threadList[0].id);
           }
-          if (fileList.length > 0 && !selectedFilePath) {
-            // Auto-select first main source if exists (e.g. index.html or script.md)
-            const mainFile = fileList.find((f) => f.name.includes("index") || f.name.includes("main")) || fileList[0];
+          // Auto-select a main source (e.g. index.html or script.md); never a directory.
+          const files = fileList.filter((f) => !f.isDir);
+          if (files.length > 0 && !selectedFilePath) {
+            const mainFile = files.find((f) => f.name.includes("index") || f.name.includes("main")) || files[0];
             setSelectedFilePath(mainFile.path);
           }
         }
@@ -136,20 +166,98 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
     };
   }, [currentSlug]);
 
+  // Auto-titled threads: patch the switcher label without reloading the project.
+  React.useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    studioApi
+      .onThreadUpdated(({ threadId, title }) =>
+        setThreads((prev) => prev.map((t) => (t.id === threadId ? { ...t, title } : t))),
+      )
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
   const activeThread = threads.find((t) => t.id === activeThreadId) || threads[0];
 
-  const handleCreateThread = async () => {
+  const handleCreateThread = async (engine: EngineType) => {
     if (!currentSlug) return;
+    setNewThreadMenuOpen(false);
     try {
+      // Same per-engine model choice the Home screen remembers.
+      const model = localStorage.getItem(`lcs.model.${engine}`) || undefined;
       const newThread = await studioApi.createThread({
         project: currentSlug,
-        engine: "claude",
+        engine,
+        model,
       });
       setThreads((prev) => [newThread, ...prev]);
       setActiveThreadId(newThread.id);
     } catch (err: any) {
       setError(err?.message || "Không thể tạo hội thoại mới.");
     }
+  };
+
+  const [newThreadMenuOpen, setNewThreadMenuOpen] = React.useState(false);
+  const newThreadButtonRef = React.useRef<HTMLDivElement>(null);
+  const newThreadMenuRef = React.useRef<HTMLDivElement>(null);
+  useDismiss(newThreadMenuOpen, () => setNewThreadMenuOpen(false), [newThreadButtonRef, newThreadMenuRef]);
+
+  const togglePane = React.useCallback(
+    (pane: keyof ProjectLayout) =>
+      setLayout((prev) => ({ ...prev, [pane]: { ...prev[pane], visible: !prev[pane].visible } })),
+    [setLayout],
+  );
+
+  // VS Code shortcuts: Ctrl+B primary side bar (thread), Ctrl+Alt+B secondary side bar (outputs).
+  React.useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.key.toLowerCase() !== "b") return;
+      e.preventDefault();
+      togglePane(e.altKey ? "outputs" : "thread");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [togglePane]);
+
+  const limitsFor = (pane: keyof ProjectLayout, other: PaneState) => {
+    const width = panesRef.current?.clientWidth ?? window.innerWidth;
+    const otherSize = other.visible ? other.size : 0;
+    return { min: PANE_LIMITS[pane].min, max: paneMax(PANE_LIMITS[pane].max, width, otherSize, CENTER_MIN) };
+  };
+  const otherOf = (l: ProjectLayout, pane: keyof ProjectLayout) => (pane === "thread" ? l.outputs : l.thread);
+  // The thread pane grows to the right of its sash; the outputs pane grows to the left.
+  const direction = (pane: keyof ProjectLayout) => (pane === "thread" ? 1 : -1);
+  const sashHandlers = (pane: keyof ProjectLayout, label: string) => ({
+    label,
+    onDragStart: () => {
+      dragStartRef.current = layout;
+    },
+    onDrag: (dx: number) => {
+      const start = dragStartRef.current;
+      const startPane = start[pane];
+      const startSize = startPane.visible ? startPane.size : 0;
+      const next = dragPane(startPane, startSize + direction(pane) * dx, limitsFor(pane, otherOf(start, pane)));
+      setLayout((prev) => ({ ...prev, [pane]: next }));
+    },
+    onReset: () => setLayout((prev) => ({ ...prev, [pane]: DEFAULT_PROJECT_LAYOUT[pane] })),
+    onStep: (dx: number) =>
+      setLayout((prev) => ({
+        ...prev,
+        [pane]: stepPane(prev[pane], direction(pane) * dx, limitsFor(pane, otherOf(prev, pane))),
+      })),
+  });
+
+  const threadLabel = (t: ThreadSummary, index: number) => {
+    const title = t.title?.trim() || `Hội thoại ${threads.length - index}`;
+    return `${title} · ${t.engine === "claude" ? "Claude" : "agy"}`;
   };
 
   if (error) {
@@ -214,10 +322,68 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
             />
           </div>
 
-          <Button size="sm" variant="quiet" onClick={handleCreateThread}>
-            + Hội thoại mới
-          </Button>
+          {threads.length > 0 && (
+            <div style={{ width: 240 }}>
+              <Select
+                size="sm"
+                aria-label="Chọn hội thoại"
+                value={activeThread?.id ?? ""}
+                onChange={(e) => setActiveThreadId(e.target.value)}
+                options={threads.map((t, i) => ({ value: t.id, label: threadLabel(t, i) }))}
+              />
+            </div>
+          )}
+
+          <div ref={newThreadButtonRef} style={{ position: "relative" }}>
+            <Button
+              size="sm"
+              variant="quiet"
+              aria-haspopup="menu"
+              aria-expanded={newThreadMenuOpen}
+              onClick={() => setNewThreadMenuOpen((o) => !o)}
+            >
+              + Hội thoại mới ▾
+            </Button>
+            {newThreadMenuOpen && (
+              <div ref={newThreadMenuRef} role="menu" className="cs-menu" style={{ top: "calc(100% + 4px)", left: 0 }}>
+                {NEW_THREAD_ENGINES.map(([engine, label]) => (
+                  <button
+                    key={engine}
+                    type="button"
+                    role="menuitem"
+                    className="cs-menu-item"
+                    onClick={() => handleCreateThread(engine)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
+
+        {!isNarrow && (
+          <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+            <button
+              type="button"
+              className="cs-icon-btn"
+              aria-pressed={layout.thread.visible}
+              title={(layout.thread.visible ? "Ẩn" : "Hiện") + " khung hội thoại (Ctrl+B)"}
+              onClick={() => togglePane("thread")}
+            >
+              <Icon name="panel-left" size={16} />
+            </button>
+            <button
+              type="button"
+              className="cs-icon-btn"
+              aria-pressed={layout.outputs.visible}
+              title={(layout.outputs.visible ? "Ẩn" : "Hiện") + " khung Outputs (Ctrl+Alt+B)"}
+              onClick={() => togglePane("outputs")}
+            >
+              <Icon name="panel-right" size={16} />
+            </button>
+          </div>
+        )}
 
         {/* Tab switcher for narrow screens */}
         {isNarrow && (
@@ -236,6 +402,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
 
       {/* Three Panes Container */}
       <div
+        ref={panesRef}
         style={{
           flex: 1,
           display: "flex",
@@ -298,7 +465,14 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
           // Three resizable panes side-by-side
           <>
             {/* Thread Pane */}
-            <div style={{ width: threadWidth, height: "100%", minWidth: 280, maxWidth: 600, flexShrink: 0 }}>
+            <div
+              style={{
+                width: layout.thread.size,
+                height: "100%",
+                flexShrink: 0,
+                display: layout.thread.visible ? undefined : "none",
+              }}
+            >
               <PaneBoundary name="Hội thoại">
                 <ThreadPane
                   projectSlug={currentSlug}
@@ -314,8 +488,10 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
               </PaneBoundary>
             </div>
 
+            <Sash {...sashHandlers("thread", "Đổi độ rộng khung hội thoại")} />
+
             {/* Stage Center Pane */}
-            <div style={{ flex: 1, height: "100%", minWidth: 320, overflow: "hidden" }}>
+            <div style={{ flex: 1, height: "100%", minWidth: CENTER_MIN, overflow: "hidden" }}>
               <PaneBoundary name="Stage">
                 <StagePane
                   projectSlug={currentSlug}
@@ -330,8 +506,17 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
               </PaneBoundary>
             </div>
 
+            <Sash {...sashHandlers("outputs", "Đổi độ rộng khung Outputs")} />
+
             {/* Outputs Pane */}
-            <div style={{ width: outputsWidth, height: "100%", minWidth: 260, maxWidth: 500, flexShrink: 0 }}>
+            <div
+              style={{
+                width: layout.outputs.size,
+                height: "100%",
+                flexShrink: 0,
+                display: layout.outputs.visible ? undefined : "none",
+              }}
+            >
               <PaneBoundary name="Outputs">
                 <OutputsPane
                   projectSlug={currentSlug}

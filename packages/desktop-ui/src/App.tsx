@@ -61,6 +61,8 @@ export const App: React.FC = () => {
 
       if (currWs?.workspace) {
         setCurrentWorkspace(currWs.workspace);
+      } else if (recents.length === 0) {
+        setWorkspaceSwitcherOpen(true);
       }
       setRecentWorkspaces(recents);
       setEngines(engs);
@@ -74,6 +76,12 @@ export const App: React.FC = () => {
   React.useEffect(() => {
     loadWorkspaceAndCore();
   }, [loadWorkspaceAndCore]);
+
+  React.useEffect(() => {
+    const handleOpenSwitcher = () => setWorkspaceSwitcherOpen(true);
+    window.addEventListener("studio:open-workspace-switcher", handleOpenSwitcher);
+    return () => window.removeEventListener("studio:open-workspace-switcher", handleOpenSwitcher);
+  }, []);
 
   // Subscribe to live job events
   React.useEffect(() => {

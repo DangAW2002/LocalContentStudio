@@ -3,6 +3,7 @@ import { Icon } from "./Icon";
 import { Button, Input, Callout } from "@studio/design-system";
 import { cleanDisplayPath } from "../utils/path";
 import type { WorkspaceSummary } from "../api/types";
+import { studioApi } from "../api/client";
 
 export interface WorkspaceSwitcherModalProps {
   open: boolean;
@@ -26,18 +27,34 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
   const [createPath, setCreatePath] = React.useState("");
   const [createName, setCreateName] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
 
   if (!open) return null;
+
+  const folderName = (path: string) => {
+    const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
+    return parts[parts.length - 1] ?? "";
+  };
 
   const handleOpen = async (path: string) => {
     try {
       setBusy(true);
       setError(null);
+      setNotice(null);
       await onOpenWorkspace(path);
       onClose();
     } catch (err: any) {
-      setError(err?.message || "Không thể mở workspace.");
+      const message: string = err?.message || "";
+      if (message.includes("Workspace not found")) {
+        // Folder exists (or not) but has no studio.yaml: offer to initialise it.
+        setCreatePath(path);
+        if (!createName.trim()) setCreateName(folderName(path));
+        setTab("create");
+        setNotice("Thư mục này chưa phải workspace. Đặt tên rồi bấm \"Tạo và mở\" để khởi tạo workspace tại đây.");
+      } else {
+        setError(message || "Không thể mở workspace.");
+      }
     } finally {
       setBusy(false);
     }
@@ -57,6 +74,34 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
       setError(err?.message || "Không thể tạo workspace mới.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleBrowseOpen = async () => {
+    try {
+      const picked = await studioApi.pickFolder();
+      if (picked) {
+        setOpenPath(picked);
+      }
+    } catch (err: any) {
+      setError(err?.message || "Không thể mở hộp thoại chọn thư mục.");
+    }
+  };
+
+  const handleBrowseCreate = async () => {
+    try {
+      const picked = await studioApi.pickFolder();
+      if (picked) {
+        setCreatePath(picked);
+        if (!createName.trim()) {
+          const last = folderName(picked);
+          if (last) {
+            setCreateName(last);
+          }
+        }
+      }
+    } catch (err: any) {
+      setError(err?.message || "Không thể mở hộp thoại chọn thư mục.");
     }
   };
 
@@ -188,6 +233,11 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
               {error}
             </Callout>
           )}
+          {notice && !error && (
+            <Callout variant="info" title="Chưa có workspace">
+              {notice}
+            </Callout>
+          )}
 
           {tab === "recent" && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 280, overflowY: "auto" }}>
@@ -239,12 +289,25 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
 
           {tab === "open" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-3)" }}>
-              <Input
-                label="Đường dẫn thư mục workspace"
-                placeholder="Ví dụ: D:/Studio/ca-nhan/kenh-review"
-                value={openPath}
-                onChange={(e) => setOpenPath(e.target.value)}
-              />
+              <div style={{ display: "flex", gap: "var(--cs-space-2)", alignItems: "flex-end" }}>
+                <div style={{ flex: 1 }}>
+                  <Input
+                    label="Đường dẫn thư mục workspace"
+                    placeholder="Ví dụ: D:/Studio/ca-nhan/kenh-review"
+                    value={openPath}
+                    onChange={(e) => setOpenPath(e.target.value)}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleBrowseOpen}
+                  leftIcon={<Icon name="folder" size={14} />}
+                  style={{ flexShrink: 0, height: "var(--cs-control-height)" }}
+                >
+                  Chọn thư mục...
+                </Button>
+              </div>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--cs-space-2)" }}>
                 <Button variant="secondary" onClick={onClose}>
                   Hủy
@@ -269,12 +332,25 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
                 value={createName}
                 onChange={(e) => setCreateName(e.target.value)}
               />
-              <Input
-                label="Đường dẫn thư mục"
-                placeholder="Ví dụ: D:/Studio/cong-nghe"
-                value={createPath}
-                onChange={(e) => setCreatePath(e.target.value)}
-              />
+              <div style={{ display: "flex", gap: "var(--cs-space-2)", alignItems: "flex-end" }}>
+                <div style={{ flex: 1 }}>
+                  <Input
+                    label="Đường dẫn thư mục"
+                    placeholder="Ví dụ: D:/Studio/cong-nghe"
+                    value={createPath}
+                    onChange={(e) => setCreatePath(e.target.value)}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleBrowseCreate}
+                  leftIcon={<Icon name="folder" size={14} />}
+                  style={{ flexShrink: 0, height: "var(--cs-control-height)" }}
+                >
+                  Chọn thư mục...
+                </Button>
+              </div>
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--cs-space-2)" }}>
                 <Button variant="secondary" onClick={onClose}>
                   Hủy

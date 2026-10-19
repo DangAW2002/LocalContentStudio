@@ -53,6 +53,7 @@ export const LeftRail: React.FC<LeftRailProps> = ({
             key={item.id}
             type="button"
             aria-current={isActive ? "page" : undefined}
+            className="cs-rail-item"
             onClick={() => onChangeArea(item.id)}
             style={{
               position: "relative",

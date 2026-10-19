@@ -48,9 +48,11 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       style={{
         height: "var(--cs-titlebar-h)",
         minHeight: "var(--cs-titlebar-h)",
-        display: "flex",
+        // Equal side columns keep the command palette trigger centred regardless of breadcrumb length.
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)",
         alignItems: "center",
-        justifyContent: "space-between",
+        gap: "var(--cs-space-3)",
         padding: "0 var(--cs-space-3)",
         backgroundColor: "var(--cs-bg-panel)",
         borderBottom: "1px solid var(--cs-border-subtle)",
@@ -223,7 +225,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
       )}
 
       {/* Right: Task Center Trigger + Theme Toggle */}
-      <div style={{ display: "flex", alignItems: "center", gap: "var(--cs-space-2)", flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "var(--cs-space-2)", flexShrink: 0 }}>
         {/* Task Center Button */}
         <button
           type="button"

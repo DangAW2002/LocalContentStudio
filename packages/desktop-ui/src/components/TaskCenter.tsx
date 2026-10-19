@@ -16,6 +16,15 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({
 }) => {
   const [activeTab, setActiveTab] = React.useState<string>("running");
 
+  React.useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   const runningJobs = jobs.filter((j) => j.state === "RUNNING" || j.state === "PENDING" || j.state === "VERIFYING");
@@ -131,7 +140,7 @@ export const TaskCenter: React.FC<TaskCenterProps> = ({
               >
                 {/* State Icon */}
                 <div>
-                  {job.state === "RUNNING" && <Icon name="loader" size={16} color="var(--cs-accent)" />}
+                  {job.state === "RUNNING" && <Icon name="loader" size={16} color="var(--cs-accent)" className="cs-spin" />}
                   {job.state === "PENDING" && <Icon name="clock" size={16} color="var(--cs-fg-muted)" />}
                   {job.state === "DONE" && <Icon name="check-circle" size={16} color="var(--cs-success)" />}
                   {job.state === "FAILED" && <Icon name="x-circle" size={16} color="var(--cs-danger)" />}
