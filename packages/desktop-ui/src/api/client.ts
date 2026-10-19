@@ -74,6 +74,8 @@ import type {
   ProjectModulesSetResponse,
   ScopeKind,
   ScopeItem,
+  ScopeValidationResult,
+  ScopeActionResponse,
   AssetListFilter,
   AssetItem,
   JobSnapshot,
@@ -351,6 +353,38 @@ export class StudioApiClient {
    */
   async getScopeItems(kind: ScopeKind): Promise<ScopeItem[]> {
     return invoke<ScopeItem[]>("scope_list", { kind });
+  }
+
+  /**
+   * Copy an inherited item (and its assets) to workspace layer.
+   * Command: `scope_override`
+   */
+  async scopeOverride(kind: ScopeKind, id: string): Promise<ScopeActionResponse> {
+    return invoke<ScopeActionResponse>("scope_override", { kind, id });
+  }
+
+  /**
+   * Create a new item at the workspace layer.
+   * Command: `scope_create`
+   */
+  async scopeCreate(kind: ScopeKind, id: string, template?: string): Promise<ScopeActionResponse> {
+    return invoke<ScopeActionResponse>("scope_create", { kind, id, template });
+  }
+
+  /**
+   * Validate schema of Brand, Channel, or Playbook YAML/markdown text.
+   * Command: `scope_validate`
+   */
+  async scopeValidate(kind: ScopeKind, text: string): Promise<ScopeValidationResult> {
+    return invoke<ScopeValidationResult>("scope_validate", { kind, text });
+  }
+
+  /**
+   * Remove a workspace override (reverting back to inherited version).
+   * Command: `scope_remove_override`
+   */
+  async scopeRemoveOverride(kind: ScopeKind, id: string): Promise<ScopeActionResponse> {
+    return invoke<ScopeActionResponse>("scope_remove_override", { kind, id });
   }
 
   /**

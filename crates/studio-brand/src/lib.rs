@@ -5,6 +5,7 @@ pub mod checkers;
 pub mod error;
 pub mod loader;
 pub mod schema;
+pub mod validate;
 
 pub use checkers::{
     run_checks, CaptionsRequiredChecker, CheckInput, CheckSubject, Checker, CheckerRegistry,
@@ -17,4 +18,7 @@ pub use schema::{
     export_json_schemas, BrandColors, BrandFonts, BrandLogos, BrandMotion, BrandSpec, ChannelSpec,
     FileConstraints, FormatSpec, Playbook, PlaybookFrontmatter, PlaybookStep, SafeZone, TextLimits,
     VoiceWords,
+};
+pub use validate::{
+    format_yaml_error_vi, validate_scope_item, ValidationErrorItem, ValidationResult,
 };

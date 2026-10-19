@@ -866,6 +866,50 @@ pub struct AssetFilter {
     limit: Option<usize>,
 }
 
+fn validate_scope_id(id: &str) -> CmdResult<()> {
+    // No trimming: the id is used verbatim in paths, so surrounding spaces are rejected too.
+    let id_trimmed = id;
+    if id_trimmed.len() < 2 || id_trimmed.len() > 40 {
+        return Err(CmdError::msg("ID phải từ 2 đến 40 ký tự."));
+    }
+    if !id_trimmed
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(CmdError::msg(
+            "ID chỉ gồm chữ thường (a-z), chữ số (0-9) và dấu gạch ngang (-).",
+        ));
+    }
+    Ok(())
+}
+
+fn copy_dir_all_safe(src: &Path, dst: &Path) -> CmdResult<()> {
+    if !dst.exists() {
+        std::fs::create_dir_all(dst)?;
+    }
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ft = entry.file_type()?;
+        if ft.is_symlink() {
+            return Err(CmdError::msg(
+                "Không cho phép sao chép liên kết tượng trưng (symlink / junction).",
+            ));
+        }
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if ft.is_dir() {
+            copy_dir_all_safe(&src_path, &dst_path)?;
+        } else if ft.is_file() {
+            if let Some(p) = dst_path.parent() {
+                std::fs::create_dir_all(p)?;
+            }
+            let bytes = std::fs::read(&src_path)?;
+            std::fs::write(&dst_path, &bytes)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn scope_list_impl(state: &AppState, kind: String) -> CmdResult<Vec<Value>> {
     let allowed = [
         "brands",
@@ -879,33 +923,526 @@ pub fn scope_list_impl(state: &AppState, kind: String) -> CmdResult<Vec<Value>> 
         return Err(CmdError::msg("Loại không hợp lệ."));
     }
     let ws = state.workspace()?;
-    let set = studio_brand::BrandSet::load(&ws).ok();
-    Ok(ScopeChain::new(&ws)
-        .resolve(&kind)
-        .into_iter()
-        .map(|item| {
-            let layer = format!("{:?}", item.layer).to_lowercase();
-            let (name, summary) = match (kind.as_str(), &set) {
-                ("brands", Some(s)) => s.get_brand(&item.id).map(|b| (b.spec.name.clone(), Some(b.spec.slogan.clone()))).unwrap_or((item.id.clone(), None)),
-                ("channels", Some(s)) => s.get_channel(&item.id).map(|c| (c.title.clone(), Some(c.notes.clone()))).unwrap_or((item.id.clone(), None)),
-                ("playbooks", Some(s)) => s.get_playbook(&item.id).map(|p| (p.frontmatter.name.clone(), Some(p.frontmatter.description.clone()))).unwrap_or((item.id.clone(), None)),
-                _ => (item.id.clone(), None),
-            };
-            let mut out = json!({ "id": item.id, "name": name, "kind": kind, "layer": layer, "path": strip_verbatim(&item.path), "summary": summary });
-            // Channel formats (sizes + safe zones) drive the safe-zone preview in the Brand view.
-            if let ("channels", Some(s)) = (kind.as_str(), &set) {
-                if let Some(c) = s.get_channel(&item.id) {
-                    out["formats"] = json!(c.formats);
+
+    let app_shared = state.app_paths.shared_dir().join(&kind);
+    let org_shared = ws.org().shared_dir().join(&kind);
+
+    let items = ScopeChain::new(&ws).resolve(&kind);
+
+    let mut result = Vec::new();
+    for item in items {
+        let layer = format!("{:?}", item.layer).to_lowercase();
+        let is_ws = item.layer == studio_workspace::ResolutionLayer::Workspace;
+
+        let is_overriding = if is_ws {
+            match kind.as_str() {
+                "brands" => {
+                    app_shared.join(&item.id).is_dir() || org_shared.join(&item.id).is_dir()
+                }
+                "channels" => {
+                    let fname = format!("{}.yaml", item.id);
+                    app_shared.join(&fname).is_file() || org_shared.join(&fname).is_file()
+                }
+                "playbooks" => {
+                    let fname = format!("{}.md", item.id);
+                    app_shared.join(&fname).is_file()
+                        || org_shared.join(&fname).is_file()
+                        || app_shared.join(&item.id).is_dir()
+                        || org_shared.join(&item.id).is_dir()
+                }
+                _ => false,
+            }
+        } else {
+            false
+        };
+
+        let mut name = item.id.clone();
+        let mut summary: Option<String> = None;
+        let mut error_msg: Option<String> = None;
+        let mut formats_val: Option<Value> = None;
+
+        match kind.as_str() {
+            "brands" => {
+                let yaml_path = item.path.join("brand.yaml");
+                if yaml_path.exists() {
+                    match std::fs::read_to_string(&yaml_path) {
+                        Ok(content) => {
+                            let val = studio_brand::validate_scope_item("brands", &content);
+                            if val.valid {
+                                if let Ok(spec) =
+                                    serde_yaml::from_str::<studio_brand::BrandSpec>(&content)
+                                {
+                                    name = spec.name;
+                                    summary = Some(spec.slogan);
+                                }
+                            } else if let Some(err) = val.errors.first() {
+                                error_msg = Some(format!(
+                                    "Dòng {}, cột {}: {}",
+                                    err.line, err.column, err.message
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            error_msg = Some(format!("Không thể đọc tệp brand.yaml: {e}"));
+                        }
+                    }
+                } else {
+                    error_msg = Some("Thiếu tệp brand.yaml trong thư mục thương hiệu.".to_string());
                 }
             }
-            out
-        })
-        .collect())
+            "channels" if item.path.is_file() => match std::fs::read_to_string(&item.path) {
+                Ok(content) => {
+                    let val = studio_brand::validate_scope_item("channels", &content);
+                    if val.valid {
+                        if let Ok(spec) =
+                            serde_yaml::from_str::<studio_brand::ChannelSpec>(&content)
+                        {
+                            name = spec.title;
+                            summary = Some(spec.notes);
+                            formats_val = Some(json!(spec.formats));
+                        }
+                    } else if let Some(err) = val.errors.first() {
+                        error_msg = Some(format!(
+                            "Dòng {}, cột {}: {}",
+                            err.line, err.column, err.message
+                        ));
+                    }
+                }
+                Err(e) => {
+                    error_msg = Some(format!("Không thể đọc tệp kênh: {e}"));
+                }
+            },
+            "playbooks" if item.path.is_file() => match std::fs::read_to_string(&item.path) {
+                Ok(content) => {
+                    let val = studio_brand::validate_scope_item("playbooks", &content);
+                    if val.valid {
+                        if let Ok(pb) = studio_brand::Playbook::parse(&item.id, &content) {
+                            name = pb.frontmatter.name;
+                            summary = Some(pb.frontmatter.description);
+                        }
+                    } else if let Some(err) = val.errors.first() {
+                        error_msg = Some(format!(
+                            "Dòng {}, cột {}: {}",
+                            err.line, err.column, err.message
+                        ));
+                    }
+                }
+                Err(e) => {
+                    error_msg = Some(format!("Không thể đọc tệp quy trình: {e}"));
+                }
+            },
+            _ => {}
+        }
+
+        let mut out = json!({
+            "id": item.id,
+            "name": name,
+            "kind": kind,
+            "layer": layer,
+            "path": strip_verbatim(&item.path),
+            "summary": summary,
+            "isOverride": is_overriding,
+        });
+        if let Some(err) = error_msg {
+            out["error"] = json!(err);
+        }
+        if let Some(f) = formats_val {
+            out["formats"] = f;
+        }
+        result.push(out);
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]
 pub fn scope_list(state: State<'_, AppState>, kind: String) -> CmdResult<Vec<Value>> {
     scope_list_impl(&state, kind)
+}
+
+pub fn scope_override_impl(state: &AppState, kind: String, id: String) -> CmdResult<Value> {
+    let allowed = ["brands", "channels", "playbooks"];
+    if !allowed.contains(&kind.as_str()) {
+        return Err(CmdError::msg(
+            "Chỉ hỗ trợ ghi đè brands, channels hoặc playbooks.",
+        ));
+    }
+    validate_scope_id(&id)?;
+    let ws = state.workspace()?;
+
+    let ws_dest_rel = match kind.as_str() {
+        "brands" => PathBuf::from("brands").join(&id),
+        "channels" => PathBuf::from("channels").join(format!("{id}.yaml")),
+        "playbooks" => PathBuf::from("playbooks").join(format!("{id}.md")),
+        _ => unreachable!(),
+    };
+    let ws_dest_full = ws.scoped_path(&ws_dest_rel)?;
+    if ws_dest_full.exists() {
+        return Err(CmdError::msg(format!(
+            "Bản ghi đè '{id}' đã tồn tại trong workspace."
+        )));
+    }
+
+    let org_shared = ws.org().shared_dir().join(&kind);
+    let app_shared = state.app_paths.shared_dir().join(&kind);
+
+    let src_path = match kind.as_str() {
+        "brands" => {
+            let org_candidate = org_shared.join(&id);
+            if org_candidate.is_dir() {
+                org_candidate
+            } else {
+                let app_candidate = app_shared.join(&id);
+                if app_candidate.is_dir() {
+                    app_candidate
+                } else {
+                    return Err(CmdError::msg(format!(
+                        "Không tìm thấy thương hiệu '{id}' ở tầng kế thừa để ghi đè."
+                    )));
+                }
+            }
+        }
+        "channels" => {
+            let file_name = format!("{id}.yaml");
+            let org_candidate = org_shared.join(&file_name);
+            if org_candidate.is_file() {
+                org_candidate
+            } else {
+                let app_candidate = app_shared.join(&file_name);
+                if app_candidate.is_file() {
+                    app_candidate
+                } else {
+                    return Err(CmdError::msg(format!(
+                        "Không tìm thấy kênh '{id}' ở tầng kế thừa để ghi đè."
+                    )));
+                }
+            }
+        }
+        "playbooks" => {
+            let file_name = format!("{id}.md");
+            let org_candidate = org_shared.join(&file_name);
+            if org_candidate.is_file() {
+                org_candidate
+            } else if org_shared.join(&id).is_dir() {
+                org_shared.join(&id)
+            } else {
+                let app_candidate = app_shared.join(&file_name);
+                if app_candidate.is_file() {
+                    app_candidate
+                } else if app_shared.join(&id).is_dir() {
+                    app_shared.join(&id)
+                } else {
+                    return Err(CmdError::msg(format!(
+                        "Không tìm thấy quy trình '{id}' ở tầng kế thừa để ghi đè."
+                    )));
+                }
+            }
+        }
+        _ => unreachable!(),
+    };
+
+    if src_path.is_dir() {
+        for entry in std::fs::read_dir(&src_path)? {
+            let entry = entry?;
+            if entry.file_type()?.is_symlink() {
+                return Err(CmdError::msg(
+                    "Không cho phép ghi đè thư mục chứa liên kết tượng trưng (symlink / junction).",
+                ));
+            }
+        }
+    } else {
+        let meta = std::fs::symlink_metadata(&src_path)?;
+        if meta.file_type().is_symlink() {
+            return Err(CmdError::msg(
+                "Không cho phép ghi đè tệp là liên kết tượng trưng (symlink).",
+            ));
+        }
+    }
+
+    let kind_label = match kind.as_str() {
+        "brands" => "thương hiệu",
+        "channels" => "kênh",
+        _ => "quy trình",
+    };
+    CheckpointService::create(&ws, &format!("Ghi đè {kind_label} {id}"), None)?;
+
+    if src_path.is_dir() {
+        copy_dir_all_safe(&src_path, &ws_dest_full)?;
+    } else {
+        if let Some(p) = ws_dest_full.parent() {
+            std::fs::create_dir_all(p)?;
+        }
+        let bytes = std::fs::read(&src_path)?;
+        std::fs::write(&ws_dest_full, &bytes)?;
+    }
+
+    Ok(json!({
+        "success": true,
+        "id": id,
+        "kind": kind,
+        "path": rel(&ws, &ws_dest_full),
+    }))
+}
+
+#[tauri::command]
+pub fn scope_override(state: State<'_, AppState>, kind: String, id: String) -> CmdResult<Value> {
+    scope_override_impl(&state, kind, id)
+}
+
+pub fn scope_create_impl(
+    state: &AppState,
+    kind: String,
+    id: String,
+    template: Option<String>,
+) -> CmdResult<Value> {
+    let allowed = ["brands", "channels", "playbooks"];
+    if !allowed.contains(&kind.as_str()) {
+        return Err(CmdError::msg(
+            "Chỉ hỗ trợ tạo mới brands, channels hoặc playbooks.",
+        ));
+    }
+    validate_scope_id(&id)?;
+    let ws = state.workspace()?;
+
+    let ws_dest_rel = match kind.as_str() {
+        "brands" => PathBuf::from("brands").join(&id),
+        "channels" => PathBuf::from("channels").join(format!("{id}.yaml")),
+        "playbooks" => PathBuf::from("playbooks").join(format!("{id}.md")),
+        _ => unreachable!(),
+    };
+    let ws_dest_full = ws.scoped_path(&ws_dest_rel)?;
+    if ws_dest_full.exists() {
+        return Err(CmdError::msg(format!(
+            "Mục '{id}' đã tồn tại trong workspace."
+        )));
+    }
+
+    let kind_label = match kind.as_str() {
+        "brands" => "thương hiệu",
+        "channels" => "kênh",
+        _ => "quy trình",
+    };
+    CheckpointService::create(&ws, &format!("Tạo mới {kind_label} {id}"), None)?;
+
+    match kind.as_str() {
+        "brands" => {
+            std::fs::create_dir_all(&ws_dest_full)?;
+            let brand_yaml_path = ws_dest_full.join("brand.yaml");
+            let default_brand_yaml = r##"name: "Thương hiệu mới"
+slogan: "Sáng tạo nội dung chất lượng"
+colors:
+  primary: "#1E88E5"
+  accent: "#FFB300"
+  bg: "#0B0F14"
+  text: "#FFFFFF"
+  extra: []
+fonts:
+  heading: "Be Vietnam Pro"
+  body: "Inter"
+logos:
+  full: "logo.svg"
+  mark: "mark.svg"
+  min_size_px: 32
+voice: "voice.md"
+voice_words:
+  prefer: []
+  avoid: []
+rules: []
+version: "brand@1"
+"##
+            .to_string();
+            let brand_content = template
+                .filter(|t| !t.trim().is_empty())
+                .unwrap_or(default_brand_yaml);
+            std::fs::write(&brand_yaml_path, brand_content.as_bytes())?;
+
+            let voice_path = ws_dest_full.join("voice.md");
+            if !voice_path.exists() {
+                std::fs::write(
+                    &voice_path,
+                    "# Hướng dẫn giọng điệu\n\n- Tự nhiên, rõ ràng, ngắn gọn.\n".as_bytes(),
+                )?;
+            }
+            let logo_path = ws_dest_full.join("logo.svg");
+            if !logo_path.exists() {
+                std::fs::write(
+                    &logo_path,
+                    br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#1E88E5"/><text x="50" y="55" font-size="14" fill="#FFFFFF" text-anchor="middle" font-family="sans-serif">LOGO</text></svg>"##,
+                )?;
+            }
+            let mark_path = ws_dest_full.join("mark.svg");
+            if !mark_path.exists() {
+                std::fs::write(
+                    &mark_path,
+                    br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="20" y="20" width="60" height="60" rx="12" fill="#FFB300"/></svg>"##,
+                )?;
+            }
+        }
+        "channels" => {
+            if let Some(parent) = ws_dest_full.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let default_channel_yaml = format!(
+                r##"id: "{id}"
+platform: "custom"
+title: "Kênh mới"
+formats:
+  - name: "standard"
+    width: 1080
+    height: 1920
+    aspect: "9:16"
+    fps: 30.0
+    max_duration_s: 60.0
+    safe_zone:
+      top: 0.05
+      right: 0.05
+      bottom: 0.15
+      left: 0.05
+text:
+  title_max: 100
+  description_max: 2000
+captions_required: false
+file:
+  containers: ["mp4", "mov"]
+  max_size_mb: 500
+notes: "Cấu hình kênh tùy chỉnh"
+"##
+            );
+            let channel_content = template
+                .filter(|t| !t.trim().is_empty())
+                .unwrap_or(default_channel_yaml);
+            std::fs::write(&ws_dest_full, channel_content.as_bytes())?;
+        }
+        "playbooks" => {
+            if let Some(parent) = ws_dest_full.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let default_playbook_md = r##"---
+name: "Quy trình mới"
+description: "Mô tả các bước thực hiện quy trình nội dung"
+kind: playbook
+artifacts: []
+steps:
+  - id: "step-1"
+    name: "Khởi tạo nội dung"
+    capabilities: []
+checkers: []
+ask_user_at: []
+recipes: []
+---
+# Hướng dẫn quy trình
+
+1. Bước 1: Chuẩn bị nội dung và ý tưởng
+2. Bước 2: Thực hiện và kiểm tra quy chuẩn
+"##
+            .to_string();
+            let playbook_content = template
+                .filter(|t| !t.trim().is_empty())
+                .unwrap_or(default_playbook_md);
+            std::fs::write(&ws_dest_full, playbook_content.as_bytes())?;
+        }
+        _ => unreachable!(),
+    }
+
+    Ok(json!({
+        "success": true,
+        "id": id,
+        "kind": kind,
+        "path": rel(&ws, &ws_dest_full),
+    }))
+}
+
+#[tauri::command]
+pub fn scope_create(
+    state: State<'_, AppState>,
+    kind: String,
+    id: String,
+    template: Option<String>,
+) -> CmdResult<Value> {
+    scope_create_impl(&state, kind, id, template)
+}
+
+pub fn scope_validate_impl(_state: &AppState, kind: String, text: String) -> CmdResult<Value> {
+    let res = studio_brand::validate_scope_item(&kind, &text);
+    Ok(json!(res))
+}
+
+#[tauri::command]
+pub fn scope_validate(state: State<'_, AppState>, kind: String, text: String) -> CmdResult<Value> {
+    scope_validate_impl(&state, kind, text)
+}
+
+pub fn scope_remove_override_impl(state: &AppState, kind: String, id: String) -> CmdResult<Value> {
+    let allowed = ["brands", "channels", "playbooks"];
+    if !allowed.contains(&kind.as_str()) {
+        return Err(CmdError::msg(
+            "Chỉ hỗ trợ xoá bản ghi đè brands, channels hoặc playbooks.",
+        ));
+    }
+    validate_scope_id(&id)?;
+    let ws = state.workspace()?;
+
+    let ws_dest_rel = match kind.as_str() {
+        "brands" => PathBuf::from("brands").join(&id),
+        "channels" => PathBuf::from("channels").join(format!("{id}.yaml")),
+        "playbooks" => {
+            let md_path = PathBuf::from("playbooks").join(format!("{id}.md"));
+            if ws.root().join(&md_path).exists() {
+                md_path
+            } else {
+                PathBuf::from("playbooks").join(&id)
+            }
+        }
+        _ => unreachable!(),
+    };
+
+    let full_target = ws.scoped_path(&ws_dest_rel)?;
+
+    if !full_target.starts_with(ws.root()) {
+        return Err(CmdError::msg("Đường dẫn nằm ngoài thư mục workspace."));
+    }
+
+    let app_shared = state.app_paths.shared_dir();
+    let org_shared = ws.org().shared_dir();
+    if full_target.starts_with(&app_shared) || full_target.starts_with(&org_shared) {
+        return Err(CmdError::msg(
+            "Không được phép xoá dữ liệu tầng App hoặc Tổ chức.",
+        ));
+    }
+
+    if !full_target.exists() {
+        return Err(CmdError::msg(format!(
+            "Không tìm thấy bản ghi đè '{id}' trong workspace để xoá."
+        )));
+    }
+
+    let kind_label = match kind.as_str() {
+        "brands" => "thương hiệu",
+        "channels" => "kênh",
+        _ => "quy trình",
+    };
+    CheckpointService::create(&ws, &format!("Xoá bản ghi đè {kind_label} {id}"), None)?;
+
+    if full_target.is_dir() {
+        std::fs::remove_dir_all(&full_target)?;
+    } else {
+        std::fs::remove_file(&full_target)?;
+    }
+
+    Ok(json!({
+        "success": true,
+        "id": id,
+        "kind": kind,
+    }))
+}
+
+#[tauri::command]
+pub fn scope_remove_override(
+    state: State<'_, AppState>,
+    kind: String,
+    id: String,
+) -> CmdResult<Value> {
+    scope_remove_override_impl(&state, kind, id)
 }
 
 pub fn asset_list_impl(state: &AppState, filter: Option<AssetFilter>) -> CmdResult<Vec<Value>> {
@@ -2660,5 +3197,314 @@ mod tests {
         let invalid =
             tts_model_preview_impl(&state, "piper".into(), "non_existent_voice".into()).await;
         assert!(invalid.is_err());
+    }
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_scope_id_validation() {
+        assert!(validate_scope_id("my-brand").is_ok());
+        assert!(validate_scope_id("tiktok").is_ok());
+        assert!(validate_scope_id("pb-1").is_ok());
+
+        // Rejections
+        assert!(validate_scope_id("").is_err());
+        assert!(validate_scope_id("a").is_err()); // too short (<2)
+        assert!(validate_scope_id("ThisHasCaps").is_err());
+        assert!(validate_scope_id("../evil").is_err());
+        assert!(validate_scope_id("path/traversal").is_err());
+        assert!(validate_scope_id("name with spaces").is_err());
+        assert!(validate_scope_id(" tiktok").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_scope_override_copies_binary_and_refuses_duplicate() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join("app_data");
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
+
+        let app_brand_dir = app_dir.join("shared").join("brands").join("demo-brand");
+        std::fs::create_dir_all(&app_brand_dir).unwrap();
+        std::fs::write(
+            app_brand_dir.join("brand.yaml"),
+            r##"
+name: "Demo Brand"
+slogan: "Khẩu hiệu"
+colors:
+  primary: "#1E88E5"
+  accent: "#FFB300"
+  bg: "#0B0F14"
+  text: "#FFFFFF"
+fonts:
+  heading: "Inter"
+  body: "Inter"
+logos:
+  full: "logo.png"
+  mark: "mark.svg"
+version: "brand@1"
+"##,
+        )
+        .unwrap();
+
+        // Write a binary file
+        let binary_bytes: Vec<u8> = vec![
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0xFF, 0xFE,
+        ];
+        std::fs::write(app_brand_dir.join("logo.png"), &binary_bytes).unwrap();
+        std::fs::write(app_brand_dir.join("voice.md"), "# Voice").unwrap();
+
+        let ws_dir = temp.path().join("my_workspace");
+        let ws = Workspace::create(&ws_dir, "Test WS").unwrap();
+
+        let state = AppState::new();
+        *state.current.lock().unwrap() = Some(ws_dir.clone());
+
+        // Initial checkpoints count
+        let cp_before = CheckpointService::list(&ws).unwrap().len();
+
+        // Perform override
+        let res = scope_override_impl(&state, "brands".into(), "demo-brand".into())
+            .expect("scope_override should succeed");
+        assert_eq!(res["success"], true);
+
+        // Verify workspace files
+        let ws_brand = ws_dir.join("brands").join("demo-brand");
+        assert!(ws_brand.join("brand.yaml").is_file());
+        assert!(ws_brand.join("voice.md").is_file());
+        let copied_bytes = std::fs::read(ws_brand.join("logo.png")).unwrap();
+        assert_eq!(copied_bytes, binary_bytes);
+
+        // Verify checkpoint was created
+        let cp_after = CheckpointService::list(&ws).unwrap().len();
+        assert!(cp_after > cp_before);
+
+        // Refuse duplicate override
+        let dup = scope_override_impl(&state, "brands".into(), "demo-brand".into());
+        assert!(dup.is_err());
+        assert!(dup.unwrap_err().to_string().contains("đã tồn tại"));
+
+        // Reject path traversal / invalid ID
+        let invalid_id = scope_override_impl(&state, "brands".into(), "../escape".into());
+        assert!(invalid_id.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_scope_create_and_checkpoints() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join("app_data");
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
+
+        let ws_dir = temp.path().join("my_workspace");
+        let ws = Workspace::create(&ws_dir, "Test WS").unwrap();
+
+        let state = AppState::new();
+        *state.current.lock().unwrap() = Some(ws_dir.clone());
+
+        // Create new channel
+        let res_channel =
+            scope_create_impl(&state, "channels".into(), "youtube-shorts".into(), None)
+                .expect("create channel");
+        assert_eq!(res_channel["success"], true);
+        assert!(ws_dir
+            .join("channels")
+            .join("youtube-shorts.yaml")
+            .is_file());
+
+        // Create new playbook
+        let res_pb = scope_create_impl(&state, "playbooks".into(), "custom-flow".into(), None)
+            .expect("create playbook");
+        assert_eq!(res_pb["success"], true);
+        assert!(ws_dir.join("playbooks").join("custom-flow.md").is_file());
+
+        // Verify checkpoints were created
+        let cp = CheckpointService::list(&ws).unwrap();
+        assert!(!cp.is_empty());
+
+        // Duplicate create fails
+        let dup = scope_create_impl(&state, "channels".into(), "youtube-shorts".into(), None);
+        assert!(dup.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_scope_remove_override_never_touches_app_org() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join("app_data");
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
+
+        let app_channel = app_dir
+            .join("shared")
+            .join("channels")
+            .join("app-chan.yaml");
+        std::fs::create_dir_all(app_channel.parent().unwrap()).unwrap();
+        std::fs::write(&app_channel, "id: app-chan\n").unwrap();
+
+        let ws_dir = temp.path().join("my_workspace");
+        let _ws = Workspace::create(&ws_dir, "Test WS").unwrap();
+
+        let state = AppState::new();
+        *state.current.lock().unwrap() = Some(ws_dir.clone());
+
+        // Attempting to remove something that only exists in App layer fails
+        let err = scope_remove_override_impl(&state, "channels".into(), "app-chan".into());
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("Không tìm thấy"));
+        // App file is completely untouched
+        assert!(app_channel.is_file());
+
+        // Now create a workspace override for app-chan
+        let ws_channel = ws_dir.join("channels").join("app-chan.yaml");
+        std::fs::write(&ws_channel, "id: app-chan\ntitle: Workspace override\n").unwrap();
+
+        // Remove workspace override
+        let res = scope_remove_override_impl(&state, "channels".into(), "app-chan".into())
+            .expect("remove workspace override");
+        assert_eq!(res["success"], true);
+        assert!(!ws_channel.exists());
+        // App file STILL completely untouched!
+        assert!(app_channel.is_file());
+    }
+
+    #[tokio::test]
+    async fn test_file_write_rejects_absolute_app_path() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join("app_data");
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
+
+        let ws_dir = temp.path().join("my_workspace");
+        let _ws = Workspace::create(&ws_dir, "Test WS").unwrap();
+
+        let state = AppState::new();
+        *state.current.lock().unwrap() = Some(ws_dir.clone());
+
+        // Attempting file_write directly to App layer path fails
+        let res = file_write_impl(
+            &state,
+            None,
+            app_dir
+                .join("shared")
+                .join("brands")
+                .to_string_lossy()
+                .to_string(),
+            "hack".into(),
+        );
+        assert!(res.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_scope_list_independent_loading_and_errors() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join("app_data");
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
+
+        let ws_dir = temp.path().join("my_workspace");
+        let _ws = Workspace::create(&ws_dir, "Test WS").unwrap();
+
+        let state = AppState::new();
+        *state.current.lock().unwrap() = Some(ws_dir.clone());
+
+        // 1. Valid channel
+        let ch_valid = ws_dir.join("channels").join("ch-valid.yaml");
+        std::fs::write(
+            &ch_valid,
+            r#"
+id: "ch-valid"
+platform: "tiktok"
+title: "Kênh Hợp Lệ"
+formats:
+  - name: "reel"
+    width: 1080
+    height: 1920
+    aspect: "9:16"
+"#,
+        )
+        .unwrap();
+
+        // 2. Broken channel (invalid yaml syntax)
+        let ch_bad = ws_dir.join("channels").join("ch-bad.yaml");
+        std::fs::write(
+            &ch_bad,
+            r#"
+id: "ch-bad"
+platform: "tiktok"
+title: "Kênh Hỏng"
+formats: [unclosed list
+"#,
+        )
+        .unwrap();
+
+        let list = scope_list_impl(&state, "channels".into()).expect("scope_list should succeed");
+        assert_eq!(list.len(), 2);
+
+        let valid_item = list.iter().find(|i| i["id"] == "ch-valid").unwrap();
+        assert_eq!(valid_item["name"], "Kênh Hợp Lệ");
+        assert!(valid_item.get("error").is_none());
+        assert!(valid_item.get("formats").is_some());
+
+        let bad_item = list.iter().find(|i| i["id"] == "ch-bad").unwrap();
+        assert_eq!(bad_item["name"], "ch-bad");
+        assert!(bad_item.get("error").is_some());
+        let err_str = bad_item["error"].as_str().unwrap();
+        assert!(err_str.contains("Dòng") || err_str.contains("Lỗi"));
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn test_web_dispatch_scope_and_sudo() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join("app_data");
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
+
+        let ws_dir = temp.path().join("my_workspace");
+        let _ws = Workspace::create(&ws_dir, "Test WS").unwrap();
+
+        let state = AppState::new();
+        *state.current.lock().unwrap() = Some(ws_dir.clone());
+
+        // Create via web_dispatch without sudo
+        let create_args = serde_json::json!({
+            "kind": "channels",
+            "id": "web-chan"
+        });
+        crate::web_dispatch::dispatch_invoke(&state, "scope_create", create_args, false)
+            .await
+            .expect("scope_create without sudo should work");
+
+        // Validate via web_dispatch
+        let val_args = serde_json::json!({
+            "kind": "channels",
+            "text": "invalid: yaml: ["
+        });
+        let val_res =
+            crate::web_dispatch::dispatch_invoke(&state, "scope_validate", val_args, false)
+                .await
+                .expect("scope_validate should work");
+        assert_eq!(val_res["valid"], false);
+
+        // Remove override WITHOUT sudo -> FAILS
+        let rem_args = serde_json::json!({
+            "kind": "channels",
+            "id": "web-chan"
+        });
+        let sudo_err = crate::web_dispatch::dispatch_invoke(
+            &state,
+            "scope_remove_override",
+            rem_args.clone(),
+            false,
+        )
+        .await;
+        assert!(sudo_err.is_err());
+        assert!(sudo_err.unwrap_err().to_string().contains("sudo"));
+
+        // Remove override WITH sudo -> SUCCEEDS
+        let sudo_ok =
+            crate::web_dispatch::dispatch_invoke(&state, "scope_remove_override", rem_args, true)
+                .await;
+        assert!(sudo_ok.is_ok());
     }
 }

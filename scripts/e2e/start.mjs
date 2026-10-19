@@ -319,6 +319,8 @@ export async function startApp(options = {}) {
   });
 
   const pid = child.pid;
+  // The CLI stays alive as the app's parent: under Git Bash the app dies with it otherwise.
+  // Run `node scripts/e2e/start.mjs` in the background and end the app with stop.mjs.
   console.log(`[start] studio-tauri started (PID: ${pid}).`);
   // Start time pins the PID: stop.mjs refuses to kill a reused PID.
   const startedAt = getProcessInfo(pid)?.startedAt ?? null;
