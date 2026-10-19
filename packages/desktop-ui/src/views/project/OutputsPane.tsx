@@ -636,7 +636,7 @@ const moduleGroupTitleStyle: React.CSSProperties = {
 };
 
 /** "18/10 14:27" — day/month then time, as Vietnamese readers expect. */
-function formatCheckpointTime(ts: string): string {
+export function formatCheckpointTime(ts: string): string {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return ts;
   const two = (n: number) => String(n).padStart(2, "0");

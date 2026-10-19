@@ -89,9 +89,22 @@ export function parseBrandYaml(yamlText: string): BrandSpec {
   let currentSubSection: string | null = null;
 
   for (let rawLine of lines) {
-    // Strip comments
-    const hashIdx = rawLine.indexOf("#");
-    const lineWithoutComment = hashIdx >= 0 ? rawLine.slice(0, hashIdx) : rawLine;
+    // Strip comments (ignore # inside quotes)
+    let lineWithoutComment = rawLine;
+    let inQuote: string | null = null;
+    for (let i = 0; i < rawLine.length; i++) {
+      const ch = rawLine[i];
+      if (inQuote) {
+        if (ch === inQuote) inQuote = null;
+      } else {
+        if (ch === '"' || ch === "'") {
+          inQuote = ch;
+        } else if (ch === "#") {
+          lineWithoutComment = rawLine.slice(0, i);
+          break;
+        }
+      }
+    }
     const trimmed = lineWithoutComment.trim();
     if (!trimmed) continue;
 
