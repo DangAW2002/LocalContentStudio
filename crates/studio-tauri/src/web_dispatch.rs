@@ -252,6 +252,30 @@ pub async fn dispatch_invoke(
             let res = commands::scope_list_impl(state, kind)?;
             Ok(serde_json::to_value(res)?)
         }
+        "scope_override" => {
+            let kind: String = get_arg(&args, "kind")?;
+            let id: String = get_arg(&args, "id")?;
+            commands::scope_override_impl(state, kind, id)
+        }
+        "scope_create" => {
+            let kind: String = get_arg(&args, "kind")?;
+            let id: String = get_arg(&args, "id")?;
+            let template: Option<String> = get_opt_arg(&args, "template");
+            commands::scope_create_impl(state, kind, id, template)
+        }
+        "scope_validate" => {
+            let kind: String = get_arg(&args, "kind")?;
+            let text: String = get_arg(&args, "text")?;
+            commands::scope_validate_impl(state, kind, text)
+        }
+        "scope_remove_override" => {
+            if !_is_sudo {
+                return Err(CmdError::msg("Thao tác xoá bản ghi đè yêu cầu quyền sudo."));
+            }
+            let kind: String = get_arg(&args, "kind")?;
+            let id: String = get_arg(&args, "id")?;
+            commands::scope_remove_override_impl(state, kind, id)
+        }
         "asset_list" => {
             let filter: Option<commands::AssetFilter> = get_opt_arg(&args, "filter");
             let res = commands::asset_list_impl(state, filter)?;

@@ -4,6 +4,7 @@ import { BrandColorSection } from "./BrandColorSection";
 import { BrandTypographySection } from "./BrandTypographySection";
 import { BrandLogosSection } from "./BrandLogosSection";
 import { BrandVoiceSection } from "./BrandVoiceSection";
+import { BrandTemplatePreview } from "./BrandTemplatePreview";
 
 export interface BrandEditorProps {
   brandSpec: BrandSpec;
@@ -74,6 +75,12 @@ export const BrandEditor: React.FC<BrandEditorProps> = ({
       <BrandVoiceSection
         brandSpec={brandSpec}
         setBrandSpec={setBrandSpec}
+      />
+
+      {/* 7. Template Preview */}
+      <BrandTemplatePreview
+        brandSpec={brandSpec}
+        logoPreviewUrl={logoPreviewUrl}
       />
     </div>
   );

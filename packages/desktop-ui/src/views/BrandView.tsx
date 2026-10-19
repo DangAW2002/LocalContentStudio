@@ -35,6 +35,7 @@ const BrandViewInner: React.FC = () => {
   const [brandSpec, setBrandSpec] = React.useState<BrandSpec | null>(null);
   const [brandLoading, setBrandLoading] = React.useState(false);
   const [brandSaving, setBrandSaving] = React.useState(false);
+  const [revertingBrand, setRevertingBrand] = React.useState(false);
   const [saveSuccess, setSaveSuccess] = React.useState(false);
   const [brandError, setBrandError] = React.useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = React.useState<Record<string, string>>({});
@@ -43,17 +44,22 @@ const BrandViewInner: React.FC = () => {
   // Raw file content for channel / playbook
   const [rawText, setRawText] = React.useState<string | null>(null);
 
+  // Create new item modal
+  const [showCreateModal, setShowCreateModal] = React.useState(false);
+  const [newId, setNewId] = React.useState("");
+  const [newIdError, setNewIdError] = React.useState<string | null>(null);
+  const [creating, setCreating] = React.useState(false);
+
   const loadScopeItems = React.useCallback(async (kind: ScopeKind) => {
     setLoading(true);
     setError(null);
     try {
       const list = await studioApi.getScopeItems(kind);
       setItems(list);
-      if (list.length > 0) {
-        setSelectedId(list[0].id);
-      } else {
-        setSelectedId(null);
-      }
+      setSelectedId((prev) => {
+        if (prev && list.some((i) => i.id === prev)) return prev;
+        return list.length > 0 ? list[0].id : null;
+      });
     } catch (err: any) {
       setError(err?.message || "Chưa kết nối Studio core");
     } finally {
@@ -181,8 +187,11 @@ const BrandViewInner: React.FC = () => {
 
     try {
       const inherited = selectedItem.layer !== "workspace";
-      const itemPath = !inherited && selectedItem.path ? selectedItem.path : `brands/${selectedItem.id}`;
-      const targetYamlPath = itemPath.endsWith(".yaml") ? itemPath : `${itemPath}/brand.yaml`;
+      if (inherited) {
+        await studioApi.scopeOverride("brands", selectedItem.id);
+      }
+      const itemPath = `brands/${selectedItem.id}`;
+      const targetYamlPath = `${itemPath}/brand.yaml`;
       const yamlContent = stringifyBrandYaml(brandSpec);
 
       await studioApi.writeFile({
@@ -190,16 +199,56 @@ const BrandViewInner: React.FC = () => {
         text: yamlContent,
       });
 
-      if (inherited) {
-        const list = await studioApi.getScopeItems("brands");
-        setItems(list);
-      }
+      await loadScopeItems("brands");
+      setSelectedId(selectedItem.id);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: any) {
       setBrandError(err?.message || "Lỗi khi lưu tệp brand.yaml.");
     } finally {
       setBrandSaving(false);
+    }
+  };
+
+  // Revert Brand override
+  const handleRevertBrandOverride = async () => {
+    if (!selectedItem) return;
+    if (!window.confirm(`Bạn có chắc muốn bỏ bản ghi đè của thương hiệu '${selectedItem.name}' để quay về bản kế thừa?`)) {
+      return;
+    }
+    setRevertingBrand(true);
+    setBrandError(null);
+    try {
+      await studioApi.scopeRemoveOverride("brands", selectedItem.id);
+      await loadScopeItems("brands");
+      setSelectedId(selectedItem.id);
+    } catch (err: any) {
+      setBrandError(err?.message || "Lỗi khi bỏ bản ghi đè thương hiệu.");
+    } finally {
+      setRevertingBrand(false);
+    }
+  };
+
+  // Handle new item creation
+  const ID_REGEX = /^[a-z0-9-]{2,40}$/;
+  const handleCreateItem = async () => {
+    const trimmed = newId.trim().toLowerCase();
+    if (!ID_REGEX.test(trimmed)) {
+      setNewIdError("ID phải từ 2-40 ký tự gồm chữ thường (a-z), số (0-9) và dấu gạch ngang (-).");
+      return;
+    }
+
+    setCreating(true);
+    setNewIdError(null);
+    try {
+      await studioApi.scopeCreate(activeTab, trimmed);
+      setShowCreateModal(false);
+      await loadScopeItems(activeTab);
+      setSelectedId(trimmed);
+    } catch (err: any) {
+      setNewIdError(err?.message || "Không thể tạo mục mới.");
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -241,7 +290,7 @@ const BrandViewInner: React.FC = () => {
         <Tabs
           items={tabItems}
           activeId={activeTab}
-          onChange={(id) => setActiveTab(id as any)}
+          onChange={(id: string) => setActiveTab(id as any)}
           size="sm"
         />
       </div>
@@ -276,6 +325,11 @@ const BrandViewInner: React.FC = () => {
               items={items}
               selectedId={selectedId}
               onSelectId={setSelectedId}
+              onNewItem={() => {
+                setNewId("");
+                setNewIdError(null);
+                setShowCreateModal(true);
+              }}
             />
 
             {/* Right Interactive Editor & Detail Pane */}
@@ -322,6 +376,18 @@ const BrandViewInner: React.FC = () => {
 
                     {activeTab === "brands" && (
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        {selectedItem.isOverride && (
+                          <Button
+                            variant="secondary"
+                            busy={revertingBrand}
+                            busyText="Đang bỏ..."
+                            onClick={handleRevertBrandOverride}
+                            leftIcon={<Icon name="trash" size={14} />}
+                            title="Xoá bản ghi đè trong workspace này để quay lại bản kế thừa từ App / Tổ chức"
+                          >
+                            Bỏ bản ghi đè
+                          </Button>
+                        )}
                         {saveSuccess && (
                           <Badge variant="success">✓ Đã lưu thành công</Badge>
                         )}
@@ -373,9 +439,26 @@ const BrandViewInner: React.FC = () => {
                     <ChannelDetail
                       selectedItem={selectedItem}
                       rawText={rawText}
+                      onSave={async () => {
+                        await loadScopeItems("channels");
+                      }}
+                      onRevertOverride={async () => {
+                        await studioApi.scopeRemoveOverride("channels", selectedItem.id);
+                        await loadScopeItems("channels");
+                      }}
                     />
                   ) : (
-                    <PlaybookDetail rawText={rawText} />
+                    <PlaybookDetail
+                      selectedItem={selectedItem}
+                      rawText={rawText}
+                      onSave={async () => {
+                        await loadScopeItems("playbooks");
+                      }}
+                      onRevertOverride={async () => {
+                        await studioApi.scopeRemoveOverride("playbooks", selectedItem.id);
+                        await loadScopeItems("playbooks");
+                      }}
+                    />
                   )}
                 </div>
               ) : (
@@ -387,6 +470,100 @@ const BrandViewInner: React.FC = () => {
           </>
         )}
       </div>
+
+      {/* Creation Modal */}
+      {showCreateModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+            backdropFilter: "blur(2px)",
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: "var(--cs-bg-panel)",
+              border: "1px solid var(--cs-border-subtle)",
+              borderRadius: "var(--cs-radius-control)",
+              padding: "var(--cs-space-5)",
+              width: 440,
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+              boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: "var(--cs-text-base)", fontWeight: 700 }}>
+              {activeTab === "brands"
+                ? "Tạo thương hiệu mới"
+                : activeTab === "channels"
+                ? "Tạo kênh mới"
+                : "Tạo quy trình mới"}
+            </h3>
+            <p style={{ margin: 0, fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)" }}>
+              Tạo tệp cấu hình mẫu tối thiểu trong workspace. ID định danh dùng cho thư mục/tệp.
+            </p>
+
+            <label style={{ display: "flex", flexDirection: "column", gap: 6, fontSize: "var(--cs-text-xs)" }}>
+              <span style={{ fontWeight: 600 }}>ID định danh (slug):</span>
+              <input
+                type="text"
+                value={newId}
+                placeholder={activeTab === "brands" ? "brand-moi" : activeTab === "channels" ? "tiktok-video" : "video-review"}
+                onChange={(e) => {
+                  setNewId(e.target.value.toLowerCase());
+                  setNewIdError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    handleCreateItem();
+                  }
+                }}
+                autoFocus
+                style={{
+                  padding: "8px 12px",
+                  backgroundColor: "var(--cs-bg-app)",
+                  border: `1px solid ${newIdError ? "var(--cs-danger)" : "var(--cs-border-subtle)"}`,
+                  borderRadius: "var(--cs-radius-control)",
+                  color: "var(--cs-fg-primary)",
+                  outline: "none",
+                  fontFamily: "var(--cs-font-mono)",
+                  fontSize: "var(--cs-text-xs)",
+                }}
+              />
+              {newIdError && (
+                <span style={{ color: "var(--cs-danger)", fontSize: 11 }}>{newIdError}</span>
+              )}
+            </label>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+              <Button
+                variant="secondary"
+                onClick={() => setShowCreateModal(false)}
+                disabled={creating}
+              >
+                Huỷ
+              </Button>
+              <Button
+                variant="primary"
+                busy={creating}
+                busyText="Đang tạo..."
+                onClick={handleCreateItem}
+              >
+                Tạo mới
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -378,6 +378,28 @@ export interface ScopeItem {
   metadata?: Record<string, unknown>;
   /** Channels only: output formats with their safe zones. */
   formats?: ChannelFormat[];
+  /** Whether this workspace item overrides an App/Org inherited item */
+  isOverride?: boolean;
+  /** Configuration error message if file could not be parsed */
+  error?: string;
+}
+
+export interface ScopeValidationError {
+  line: number;
+  column: number;
+  message: string;
+}
+
+export interface ScopeValidationResult {
+  valid: boolean;
+  errors: ScopeValidationError[];
+}
+
+export interface ScopeActionResponse {
+  success: boolean;
+  id: string;
+  kind: string;
+  path?: string;
 }
 
 export interface ChannelFormat {
