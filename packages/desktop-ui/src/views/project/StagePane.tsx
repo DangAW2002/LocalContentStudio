@@ -314,6 +314,23 @@ export const StagePane: React.FC<StagePaneProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleSave]);
 
+  // Listen to command palette events
+  React.useEffect(() => {
+    const onStageSave = () => handleSave();
+    const onRender = () => handleRenderArtifact();
+    const onCheck = () => handleCheckArtifact();
+
+    window.addEventListener("studio:stage-save", onStageSave);
+    window.addEventListener("studio:render-artifact", onRender);
+    window.addEventListener("studio:check-artifact", onCheck);
+
+    return () => {
+      window.removeEventListener("studio:stage-save", onStageSave);
+      window.removeEventListener("studio:render-artifact", onRender);
+      window.removeEventListener("studio:check-artifact", onCheck);
+    };
+  }, [handleSave, matchingArtifact]);
+
   // Artifact Render action
   const handleRenderArtifact = async () => {
     if (!matchingArtifact) return;
