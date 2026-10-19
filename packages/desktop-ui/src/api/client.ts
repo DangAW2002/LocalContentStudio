@@ -61,6 +61,7 @@ import type {
   TurnUndoResponse,
   PermissionRespondRequest,
   PermissionRespondResponse,
+  PendingPermission,
   CheckpointSummary,
   CheckpointRestoreRequest,
   CheckpointRestoreResponse,
@@ -287,6 +288,14 @@ export class StudioApiClient {
    */
   async setBudget(dailyBudgetUsd: number | null, monthlyBudgetUsd: number | null): Promise<BudgetStatus> {
     return invoke<BudgetStatus>("budget_set", { dailyBudgetUsd, monthlyBudgetUsd });
+  }
+
+  /**
+   * Permission requests still waiting for an answer (all threads, or one thread).
+   * Command: `permission_pending`
+   */
+  async getPendingPermissions(threadId?: string): Promise<PendingPermission[]> {
+    return invoke<PendingPermission[]>("permission_pending", threadId ? { threadId } : {});
   }
 
   /**

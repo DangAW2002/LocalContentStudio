@@ -49,6 +49,36 @@ export const App: React.FC = () => {
   const [jobs, setJobs] = React.useState<JobSnapshot[]>([]);
   const [diskUsage, setDiskUsage] = React.useState<DiskUsageReport | undefined>();
   const [budgetStatus, setBudgetStatus] = React.useState<import("./api/types").BudgetStatus | undefined>();
+  const [pendingPermissions, setPendingPermissions] = React.useState<import("./api/types").PendingPermission[]>([]);
+
+  // Permission requests can arrive while their thread is not on screen; poll the broker so the
+  // status bar can point at them (the Thread pane re-attaches them when opened).
+  React.useEffect(() => {
+    let disposed = false;
+    const refresh = () =>
+      studioApi
+        .getPendingPermissions()
+        .then((list) => {
+          if (!disposed) setPendingPermissions(list);
+        })
+        .catch(() => {});
+    refresh();
+    const timer = window.setInterval(refresh, 3000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const openPendingPermission = React.useCallback((p: import("./api/types").PendingPermission) => {
+    setActiveArea("projects");
+    if (p.project) setActiveProjectSlug(p.project);
+    setActiveThreadId(p.threadId);
+    // ProjectView may already be mounted with another thread selected.
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("studio:select-thread", { detail: { threadId: p.threadId } }));
+    }, 300);
+  }, []);
 
   // Context for files and threads
   const [projectList, setProjectList] = React.useState<ProjectSummary[]>([]);
@@ -658,6 +688,8 @@ export const App: React.FC = () => {
         onOpenTaskCenter={() => setTaskCenterOpen(true)}
         onOpenSettings={handleNavigateSettings}
         onOpenWorkspaceFolder={() => setWorkspaceSwitcherOpen(true)}
+        pendingPermissions={pendingPermissions}
+        onOpenPendingPermission={openPendingPermission}
       />
 
       {/* Command Palette Modal (Ctrl+K) */}

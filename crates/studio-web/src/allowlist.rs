@@ -50,6 +50,7 @@ pub const ALLOWED_WEB_COMMANDS: &[&str] = &[
     "turn_cancel",
     "turn_undo",
     "permission_respond",
+    "permission_pending",
     // Checkpoints
     "checkpoint_list",
     "checkpoint_create",

@@ -241,6 +241,17 @@ export interface PermissionRespondRequest {
   allow: boolean;
 }
 
+/** An open permission request kept by the broker (see `permission_pending`). */
+export interface PendingPermission {
+  requestId: string;
+  threadId: string;
+  turnId: string;
+  project?: string | null;
+  tool: string;
+  input: unknown;
+  createdAt: string;
+}
+
 export interface PermissionRespondResponse {
   acknowledged: boolean;
 }

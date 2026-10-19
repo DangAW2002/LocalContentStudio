@@ -174,6 +174,7 @@ fn main() {
             commands::turn_cancel,
             commands::turn_undo,
             commands::permission_respond,
+            commands::permission_pending,
             budget::budget_get,
             budget::budget_set,
             commands::checkpoint_list,

@@ -221,6 +221,12 @@ pub async fn dispatch_invoke(
                 get_arg(&args, "turnId").or_else(|_| get_arg(&args, "turn_id"))?;
             commands::turn_undo_impl(state, turn_id)
         }
+        "permission_pending" => {
+            let thread_id: Option<String> = get_arg(&args, "threadId")
+                .or_else(|_| get_arg(&args, "thread_id"))
+                .ok();
+            commands::permission_pending_impl(state, thread_id)
+        }
         "permission_respond" => {
             let request_id: String =
                 get_arg(&args, "requestId").or_else(|_| get_arg(&args, "request_id"))?;

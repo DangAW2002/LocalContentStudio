@@ -12,11 +12,21 @@ use tokio::sync::oneshot;
 /// How long a permission dialog waits before denying.
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(600);
 
+/// A permission request still waiting for the user.
+struct Pending {
+    tx: oneshot::Sender<bool>,
+    /// What the UI needs to redraw the dialog (`requestId`, `threadId`, `turnId`, `tool`, `input`).
+    info: Value,
+}
+
 /// Routes engine permission requests to a UI dialog and waits for `permission_respond`.
+///
+/// The `turn-event` it emits is transient, so open requests are also kept here and listed by
+/// `permission_pending`: a Thread pane mounted later (or another view) can still show them.
 #[derive(Default)]
 pub struct UiBroker {
     app: OnceLock<AppHandle>,
-    pending: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+    pending: Mutex<HashMap<String, Pending>>,
     /// turn id → thread id, so events reach the right Thread pane.
     threads: Mutex<HashMap<String, String>>,
 }
@@ -48,7 +58,21 @@ impl UiBroker {
             .lock()
             .ok()
             .and_then(|mut m| m.remove(request_id));
-        sender.is_some_and(|tx| tx.send(allow).is_ok())
+        sender.is_some_and(|p| p.tx.send(allow).is_ok())
+    }
+
+    /// Open requests, oldest first, optionally for one thread.
+    pub fn list_pending(&self, thread_id: Option<&str>) -> Vec<Value> {
+        let Ok(m) = self.pending.lock() else {
+            return Vec::new();
+        };
+        let mut out: Vec<Value> = m
+            .values()
+            .filter(|p| thread_id.is_none_or(|t| p.info["threadId"] == t))
+            .map(|p| p.info.clone())
+            .collect();
+        out.sort_by(|a, b| a["createdAt"].as_str().cmp(&b["createdAt"].as_str()));
+        out
     }
 }
 
@@ -74,8 +98,17 @@ impl PermissionBroker for UiBroker {
             };
             let request_id = uuid::Uuid::new_v4().to_string();
             let (tx, rx) = oneshot::channel();
+            let info = json!({
+                "requestId": request_id,
+                "threadId": thread_id,
+                "turnId": ctx.turn_id,
+                "project": ctx.project,
+                "tool": tool_name,
+                "input": input,
+                "createdAt": chrono::Utc::now().to_rfc3339(),
+            });
             if let Ok(mut m) = self.pending.lock() {
-                m.insert(request_id.clone(), tx);
+                m.insert(request_id.clone(), Pending { tx, info });
             }
             let event = json!({ "type": "PermissionRequest", "requestId": request_id, "tool": tool_name, "input": input });
             let _ = app.emit(
