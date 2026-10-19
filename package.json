@@ -12,7 +12,9 @@
     "typecheck": "pnpm --recursive run typecheck",
     "lint": "pnpm --recursive run lint",
     "cargo:check": "cargo check --workspace",
-    "cargo:test": "cargo test --workspace"
+    "cargo:test": "cargo test --workspace",
+    "e2e:smoke": "node scripts/e2e/smoke.mjs",
+    "gate": "powershell -ExecutionPolicy Bypass -File scripts/gate.ps1"
   },
   "packageManager": "pnpm@11.22.0"
 }

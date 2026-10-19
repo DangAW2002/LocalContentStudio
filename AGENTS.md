@@ -36,11 +36,20 @@ Legacy crates of the previous multi-user design were removed on 2026-10-16 (see 
 
 ## Gate (must pass before you report done)
 
+Run full workspace quality gate:
+```
+scripts/gate.ps1  # Windows PowerShell (or ./scripts/gate.sh on Unix/Bash)
+```
+Or run individual gates:
 ```
 cargo fmt --all -- --check
-cargo clippy -p <your-crate> --all-targets -- -D warnings
-cargo test -p <your-crate>
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+pnpm --filter @studio/design-system build
+pnpm --filter @studio/desktop-ui typecheck
+pnpm --filter @studio/desktop-ui test
+pnpm --filter @studio/desktop-ui build
 ```
-For UI: `pnpm --filter @studio/desktop-ui typecheck`, `pnpm --filter @studio/desktop-ui test` and `pnpm --filter @studio/desktop-ui build`.
+For E2E smoke testing: `pnpm e2e:smoke` (or `scripts/gate.ps1 -Smoke`).
 
 Do not commit; the orchestrator reviews and commits. When committing, strictly forbid `Co-Authored-By` or AI attribution trailers. Report: what you built, public API, tests, gate output, known gaps.
