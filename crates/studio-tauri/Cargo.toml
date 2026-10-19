@@ -36,3 +36,7 @@ rfd = "0.15"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[features]
+default = []
+custom-protocol = ["tauri/custom-protocol"]
