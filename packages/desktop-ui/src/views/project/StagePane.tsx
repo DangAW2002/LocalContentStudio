@@ -8,13 +8,14 @@ import {
   Dialog,
 } from "@studio/design-system";
 import { studioApi } from "../../api/client";
-import {
-  DesignEditor,
-  type DesignEditorHandle,
-} from "./DesignEditor";
+import { DesignEditor, type DesignEditorHandle } from "./DesignEditor";
 import { PlainHtmlPreview } from "./PlainHtmlPreview";
 import { TimelineEditor } from "./TimelineEditor";
-import { renderMarkdown } from "../../runtime/markdown";
+import { MediaViewer } from "./stage/MediaViewer";
+import { StageToolbar } from "./stage/StageToolbar";
+import { CheckResultDialog } from "./stage/CheckResultDialog";
+import { TextEditorViewer } from "./stage/TextEditorViewer";
+import { RenderOutputsBar } from "./stage/RenderOutputsBar";
 import type {
   ArtifactSummary,
   ArtifactRenderResult,
@@ -446,220 +447,23 @@ export const StagePane: React.FC<StagePaneProps> = ({
       fileData.kind === "json"
     ) {
       return (
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            height: "100%",
-            backgroundColor: "var(--cs-bg-panel)",
-            position: "relative",
-            overflow: "hidden",
-          }}
-        >
-          {/* Markdown subheader: edit / preview toggle (save state lives in the main header). */}
-          {fileData.kind === "markdown" && (
-            <div
-              style={{
-                height: 32,
-                padding: "0 var(--cs-space-3)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "flex-end",
-                borderBottom: "1px solid var(--cs-border-subtle)",
-                backgroundColor: "var(--cs-bg-raised)",
-                fontSize: "var(--cs-text-xs)",
-              }}
-            >
-              <Button
-                size="sm"
-                variant={showMdPreview ? "secondary" : "quiet"}
-                onClick={() => setShowMdPreview(!showMdPreview)}
-                leftIcon={<Icon name="eye" size={12} />}
-              >
-                {showMdPreview ? "Chỉnh sửa" : "Xem thử Markdown"}
-              </Button>
-            </div>
-          )}
-
-          {/* Editor Body */}
-          <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
-            {fileData.kind === "markdown" && showMdPreview ? (
-              <div
-                style={{
-                  flex: 1,
-                  padding: "var(--cs-space-4) var(--cs-space-6)",
-                  overflowY: "auto",
-                  overflowX: "hidden",
-                  maxWidth: 820,
-                  margin: "0 auto",
-                  width: "100%",
-                  fontSize: "var(--cs-text-sm)",
-                  fontFamily: "var(--cs-font-ui)",
-                  boxSizing: "border-box",
-                }}
-              >
-                <div className="cs-md">{renderMarkdown(textValue)}</div>
-              </div>
-            ) : (
-              <textarea
-                value={textValue}
-                onChange={(e) => {
-                  setTextValue(e.target.value);
-                  setIsDirty(true);
-                }}
-                spellCheck={false}
-                style={{
-                  flex: 1,
-                  width: "100%",
-                  height: "100%",
-                  padding: "var(--cs-space-3)",
-                  margin: 0,
-                  border: "none",
-                  outline: "none",
-                  resize: "none",
-                  backgroundColor: "var(--cs-bg-panel)",
-                  color: "var(--cs-fg-primary)",
-                  fontFamily: "var(--cs-font-mono)",
-                  fontSize: "var(--cs-text-xs)",
-                  lineHeight: 1.6,
-                  whiteSpace: "pre",
-                  boxSizing: "border-box",
-                }}
-              />
-            )}
-          </div>
-        </div>
+        <TextEditorViewer
+          kind={fileData.kind}
+          textValue={textValue}
+          setTextValue={setTextValue}
+          setIsDirty={setIsDirty}
+        />
       );
     }
 
-    // 4. Image viewer
-    if (fileData.kind === "image") {
-      return (
-        <div
-          style={{
-            flex: 1,
-            width: "100%",
-            height: "100%",
-            minWidth: 0,
-            minHeight: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: "var(--cs-canvas-checker)",
-            overflow: "auto",
-            position: "relative",
-            padding: "var(--cs-space-4)",
-            boxSizing: "border-box",
-          }}
-        >
-          <img
-            src={fileData.assetUrl || (fileData.text ? `data:${fileData.mime};base64,${fileData.text}` : "")}
-            alt={selectedFilePath || "Image preview"}
-            style={{
-              maxWidth: zoom === 100 ? "100%" : `${zoom}%`,
-              maxHeight: zoom === 100 ? "100%" : `${zoom}%`,
-              objectFit: "contain",
-              boxShadow: "var(--cs-shadow-artboard)",
-              backgroundColor: "var(--cs-canvas-artboard)",
-            }}
-          />
-        </div>
-      );
-    }
-
-    // 5. Video viewer
-    if (fileData.kind === "video") {
-      return (
-        <div
-          style={{
-            flex: 1,
-            width: "100%",
-            height: "100%",
-            minWidth: 0,
-            minHeight: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: "var(--cs-bg-canvas)",
-            padding: "var(--cs-space-4)",
-            boxSizing: "border-box",
-            overflow: "hidden",
-          }}
-        >
-          <video
-            controls
-            src={fileData.assetUrl}
-            style={{
-              maxWidth: "100%",
-              maxHeight: "100%",
-              backgroundColor: "#000",
-              boxShadow: "var(--cs-shadow-artboard)",
-            }}
-          />
-        </div>
-      );
-    }
-
-    // 6. Audio viewer
-    if (fileData.kind === "audio") {
-      return (
-        <div
-          style={{
-            flex: 1,
-            width: "100%",
-            height: "100%",
-            minWidth: 0,
-            minHeight: 0,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: "var(--cs-bg-app)",
-            gap: "var(--cs-space-4)",
-            padding: "var(--cs-space-4)",
-            boxSizing: "border-box",
-            overflow: "hidden",
-          }}
-        >
-          <Icon name="audio" size={48} color="var(--cs-accent)" />
-          <div style={{ fontWeight: 600, fontSize: "var(--cs-text-md)" }}>
-            {selectedFilePath}
-          </div>
-          <audio controls src={fileData.assetUrl} style={{ width: "100%", maxWidth: 460 }} />
-        </div>
-      );
-    }
-
-    // Default binary/unknown
+    // 4. Media & Binary viewers (image, video, audio, binary)
     return (
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "var(--cs-space-6)",
-          textAlign: "center",
-          gap: "var(--cs-space-3)",
-        }}
-      >
-        <Icon name="file" size={48} color="var(--cs-fg-muted)" />
-        <h3 style={{ margin: 0, fontSize: "var(--cs-text-md)", fontWeight: 600 }}>
-          Định dạng tệp nhị phân
-        </h3>
-        <p style={{ margin: 0, fontSize: "var(--cs-text-sm)", color: "var(--cs-fg-secondary)", maxWidth: 360 }}>
-          Không thể xem trước trực tiếp định dạng <code>{fileData.mime}</code> ({fileData.size.toLocaleString()} bytes).
-        </p>
-        <Button
-          variant="secondary"
-          onClick={handleOpenExternal}
-          leftIcon={<Icon name="external" size={14} />}
-        >
-          Mở bằng ứng dụng hệ thống
-        </Button>
-      </div>
+      <MediaViewer
+        fileData={fileData}
+        selectedFilePath={selectedFilePath}
+        zoom={zoom}
+        onOpenExternal={handleOpenExternal}
+      />
     );
   };
 
@@ -674,134 +478,24 @@ export const StagePane: React.FC<StagePaneProps> = ({
       }}
     >
       {/* Stage Toolbar Header */}
-      <div
-        style={{
-          height: 38,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "0 var(--cs-space-3)",
-          backgroundColor: "var(--cs-bg-panel)",
-          borderBottom: "1px solid var(--cs-border-subtle)",
-          fontSize: "var(--cs-text-xs)",
-          userSelect: "none",
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-          <span
-            style={{
-              fontWeight: 600,
-              color: "var(--cs-fg-primary)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {selectedFilePath || "Stage (Khung làm việc)"}
-          </span>
-          {fileData && (
-            <>
-              <Badge variant="neutral">{fileData.kind.toUpperCase()}</Badge>
-              <span style={{ color: "var(--cs-fg-muted)" }}>
-                {(fileData.size / 1024).toFixed(1)} KB
-              </span>
-            </>
-          )}
-          {matchingArtifact && (
-            <Badge variant="info">
-              Artifact: {matchingArtifact.title || matchingArtifact.id}
-            </Badge>
-          )}
-          {isDirty && (
-            <Badge variant="warning">Đã sửa · Ctrl+S để lưu</Badge>
-          )}
-          {!isDirty && saveStatus === "saved" && (
-            <span style={{ color: "var(--cs-success)" }}>Đã lưu</span>
-          )}
-          {saveStatus === "error" && (
-            <span style={{ color: "var(--cs-danger)" }} title={saveError ?? undefined}>
-              Lỗi lưu: {saveError}
-            </span>
-          )}
-        </div>
-
-        {selectedFilePath && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            {/* Artifact Toolbar Actions */}
-            {matchingArtifact && (
-              <>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  busy={rendering}
-                  busyText="Đang render..."
-                  onClick={handleRenderArtifact}
-                  leftIcon={<Icon name="play" size={12} />}
-                >
-                  Render
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  busy={checking}
-                  busyText="Đang kiểm tra..."
-                  onClick={handleCheckArtifact}
-                  leftIcon={<Icon name="check" size={12} />}
-                >
-                  Kiểm tra
-                </Button>
-              </>
-            )}
-
-            {/* Save Button for editable files */}
-            {(isLayerHtml ||
-              fileData?.kind === "markdown" ||
-              fileData?.kind === "text" ||
-              fileData?.kind === "code" ||
-              fileData?.kind === "json") && (
-              <Button
-                size="sm"
-                variant={isDirty ? "primary" : "quiet"}
-                busy={saveStatus === "saving"}
-                onClick={handleSave}
-                leftIcon={<Icon name="check" size={12} />}
-              >
-                Lưu
-              </Button>
-            )}
-
-            {fileData?.kind === "image" && (
-              <div style={{ display: "flex", alignItems: "center", gap: 2, marginRight: 4 }}>
-                <Button size="sm" variant="quiet" onClick={() => setZoom((z) => Math.max(25, z - 25))}>
-                  -
-                </Button>
-                <span style={{ fontSize: 11, minWidth: 32, textAlign: "center" }}>{zoom}%</span>
-                <Button size="sm" variant="quiet" onClick={() => setZoom((z) => Math.min(300, z + 25))}>
-                  +
-                </Button>
-              </div>
-            )}
-
-            <Button
-              size="sm"
-              variant="quiet"
-              onClick={handleOpenExternal}
-              title="Mở bên ngoài"
-            >
-              <Icon name="external" size={13} />
-            </Button>
-            <Button
-              size="sm"
-              variant="quiet"
-              onClick={onClearSelection}
-              title="Đóng xem trước"
-            >
-              <Icon name="x" size={13} />
-            </Button>
-          </div>
-        )}
-      </div>
+      <StageToolbar
+        selectedFilePath={selectedFilePath}
+        fileData={fileData}
+        matchingArtifact={matchingArtifact}
+        isDirty={isDirty}
+        saveStatus={saveStatus}
+        saveError={saveError}
+        rendering={rendering}
+        checking={checking}
+        isLayerHtml={isLayerHtml}
+        zoom={zoom}
+        setZoom={setZoom}
+        onSave={handleSave}
+        onRenderArtifact={handleRenderArtifact}
+        onCheckArtifact={handleCheckArtifact}
+        onOpenExternal={handleOpenExternal}
+        onClearSelection={onClearSelection}
+      />
 
       {/* External Change Conflict Callout */}
       {externalChange && (
@@ -835,56 +529,12 @@ export const StagePane: React.FC<StagePaneProps> = ({
 
       {/* Render Outputs Bar (when render finished) */}
       {renderResult && renderResult.outputs && renderResult.outputs.length > 0 && (
-        <div
-          style={{
-            padding: "6px var(--cs-space-3)",
-            backgroundColor: "var(--cs-bg-raised)",
-            borderBottom: "1px solid var(--cs-border-subtle)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            fontSize: "var(--cs-text-xs)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontWeight: 600, color: "var(--cs-success)" }}>
-              ✓ Render xong ({renderResult.cached ? "từ cache" : "mới"}):
-            </span>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {renderResult.outputs.map((outPath) => (
-                <button
-                  key={outPath}
-                  type="button"
-                  onClick={() => {
-                    if (isMediaOutput(outPath) && onSelectFile) {
-                      onSelectFile(outPath);
-                    }
-                  }}
-                  style={{
-                    padding: "2px 6px",
-                    borderRadius: "var(--cs-radius-control)",
-                    backgroundColor: "var(--cs-bg-panel)",
-                    border: "1px solid var(--cs-border-subtle)",
-                    fontSize: 11,
-                    fontFamily: "var(--cs-font-mono)",
-                    cursor: onSelectFile ? "pointer" : "default",
-                    color: "var(--cs-accent)",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                  }}
-                  title="Bấm để xem output trên Stage"
-                >
-                  <Icon name="file" size={11} />
-                  <span>{outPath}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <Button size="sm" variant="quiet" onClick={() => setRenderResult(null)}>
-            Đóng
-          </Button>
-        </div>
+        <RenderOutputsBar
+          outputs={renderResult.outputs}
+          cached={renderResult.cached}
+          onSelectFile={onSelectFile}
+          onClose={() => setRenderResult(null)}
+        />
       )}
 
       {/* Stage Body */}
@@ -923,121 +573,12 @@ export const StagePane: React.FC<StagePaneProps> = ({
       </div>
 
       {/* Artifact Check Result Dialog */}
-      {showCheckDialog && checkResult && (
-        <Dialog
-          title="Kết quả kiểm tra tiêu chuẩn Brand & Channel"
-          open={showCheckDialog}
-          onClose={() => setShowCheckDialog(false)}
-          actions={
-            <div style={{ display: "flex", gap: "var(--cs-space-2)", alignItems: "center" }}>
-              {!checkResult.passed && onAskAi && (
-                <Button variant="primary" onClick={handleAskAgentToFix}>
-                  Nhờ agent sửa
-                </Button>
-              )}
-              <Button variant="secondary" onClick={() => setShowCheckDialog(false)}>
-                Đóng
-              </Button>
-            </div>
-          }
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-3)", maxHeight: 420, overflowY: "auto" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Badge variant={checkResult.passed ? "success" : "danger"}>
-                {checkResult.passed ? "ĐẠT TOÀN BỘ KÊNH" : "CHƯA ĐẠT TIÊU CHUẨN"}
-              </Badge>
-              <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
-                Kiểm tra theo quy chuẩn của từng kênh phân phối.
-              </span>
-            </div>
-
-            {Object.entries(checkResult.channels).length === 0 ? (
-              <div style={{ fontSize: "var(--cs-text-sm)", color: "var(--cs-fg-muted)" }}>
-                Không có dữ liệu kênh kiểm tra.
-              </div>
-            ) : (
-              Object.entries(checkResult.channels).map(([chId, chRes]) => (
-                <div
-                  key={chId}
-                  style={{
-                    padding: "var(--cs-space-3)",
-                    border: "1px solid var(--cs-border-subtle)",
-                    borderRadius: "var(--cs-radius-control)",
-                    backgroundColor: "var(--cs-bg-raised)",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 6,
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span style={{ fontWeight: 600, fontSize: "var(--cs-text-sm)" }}>
-                      Kênh: {chId}
-                    </span>
-                    <Badge variant={chRes.passed ? "success" : "danger"}>
-                      {chRes.passed ? "Đạt" : "Không đạt"}
-                    </Badge>
-                  </div>
-
-                  {chRes.findings && chRes.findings.length > 0 ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-                      {chRes.findings.map((f, fIdx) => (
-                        <div
-                          key={fIdx}
-                          style={{
-                            padding: "6px 8px",
-                            backgroundColor: "var(--cs-bg-panel)",
-                            borderRadius: "var(--cs-radius-control)",
-                            borderLeft: `3px solid ${
-                              f.severity === "error"
-                                ? "var(--cs-danger)"
-                                : f.severity === "warn"
-                                ? "var(--cs-warning)"
-                                : "var(--cs-accent)"
-                            }`,
-                            fontSize: "var(--cs-text-xs)",
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: 2,
-                          }}
-                        >
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <Badge
-                              variant={
-                                f.severity === "error"
-                                  ? "danger"
-                                  : f.severity === "warn"
-                                  ? "warning"
-                                  : "info"
-                              }
-                            >
-                              {f.severity.toUpperCase()}
-                            </Badge>
-                            <span style={{ fontWeight: 600 }}>{f.message_vi}</span>
-                          </div>
-                          {f.fix_hint_vi && (
-                            <div style={{ color: "var(--cs-fg-secondary)", marginTop: 2 }}>
-                              💡 Gợi ý khắc phục: {f.fix_hint_vi}
-                            </div>
-                          )}
-                          {f.location && (
-                            <div style={{ color: "var(--cs-fg-muted)", fontSize: 11 }}>
-                              Vị trí: <code>{f.location}</code>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-success)" }}>
-                      ✓ Không có cảnh báo hay lỗi vi phạm nào.
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        </Dialog>
-      )}
+      <CheckResultDialog
+        open={showCheckDialog}
+        onClose={() => setShowCheckDialog(false)}
+        checkResult={checkResult}
+        onAskAgentToFix={onAskAi ? handleAskAgentToFix : undefined}
+      />
     </div>
   );
 };
