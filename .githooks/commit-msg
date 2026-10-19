@@ -1,0 +1,21 @@
+#!/bin/sh
+# Git commit-msg hook: Strictly reject commits containing Co-Authored-By trailers
+COMMIT_MSG_FILE="$1"
+
+if [ ! -f "$COMMIT_MSG_FILE" ]; then
+    exit 0
+fi
+
+# Reject any commit containing Co-Authored-By (case-insensitive, optional leading whitespace)
+if grep -qiE '^[[:space:]]*co-?authored?-by[[:space:]]*:' "$COMMIT_MSG_FILE"; then
+    echo "" >&2
+    echo "========================================================================" >&2
+    echo "[GIT HOOK ERROR] Commit bi chan vi chua trailer 'Co-Authored-By'!" >&2
+    echo "Rule cua repository nghiem cam them bot/agent co-author vao commit." >&2
+    echo "Vui long go bo dong 'Co-Authored-By:' khoi commit message va thu lai." >&2
+    echo "========================================================================" >&2
+    echo "" >&2
+    exit 1
+fi
+
+exit 0
