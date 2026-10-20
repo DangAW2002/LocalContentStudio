@@ -4,9 +4,10 @@ use crate::error::{CmdError, CmdResult};
 use crate::state::AppState;
 use std::path::PathBuf;
 use studio_tools::publish::{
-    connect_youtube, export_bundle, extract_client_id_last6, publish_youtube_complete,
-    resolve_google_client_credentials, PublishMetadata, PublishRequest, PublishStatus,
-    PublishTarget, YouTubeChannelAccount, YouTubePublishParams, KEY_YOUTUBE_CLIENT_ID,
+    connect_youtube, export_bundle, extract_client_id_last6, publish_facebook_complete,
+    publish_youtube_complete, resolve_google_client_credentials, FacebookPublishParams,
+    PublishMetadata, PublishRequest, PublishStatus, PublishTarget, YouTubeChannelAccount,
+    YouTubePublishParams, KEY_FACEBOOK_PAGE_TOKEN, KEY_YOUTUBE_CLIENT_ID,
     KEY_YOUTUBE_CLIENT_SECRET, KEY_YOUTUBE_REFRESH_TOKEN,
 };
 use studio_workspace::WorkspaceDb;
@@ -309,10 +310,180 @@ pub async fn publish_confirm_impl(
                 }
             }
         }
-        PublishTarget::Facebook
-        | PublishTarget::Tiktok
-        | PublishTarget::Instagram
-        | PublishTarget::Export => {
+        PublishTarget::Facebook => {
+            // Facebook Page publisher
+            let target_page_id = if let Some(ref cid) = channel_id {
+                cid.clone()
+            } else if let Ok(app_db) = state.app_paths.open_app_db() {
+                app_db
+                    .get_setting("publish:last_used_facebook_page")
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            let org_name = ws.org().name();
+            let ws_name = ws.name();
+            let has_token = if !target_page_id.is_empty() {
+                state
+                    .secrets
+                    .get(
+                        org_name,
+                        Some(ws_name),
+                        &format!("{KEY_FACEBOOK_PAGE_TOKEN}:{target_page_id}"),
+                    )
+                    .is_some()
+            } else {
+                false
+            };
+
+            if !has_token {
+                // Not connected -> Fall back to Export bundle as required by specs
+                emit_publish_event(
+                    state,
+                    &job_id,
+                    "running",
+                    Some(0.5),
+                    "Chưa kết nối Facebook Page — Đang tạo gói tệp xuất bản...",
+                    None,
+                );
+
+                match export_bundle(&ws, &req) {
+                    Ok(bundle_path) => {
+                        let bundle_str = bundle_path
+                            .strip_prefix(ws.root())
+                            .unwrap_or(&bundle_path)
+                            .to_string_lossy()
+                            .replace('\\', "/");
+
+                        req.status = PublishStatus::Published;
+                        req.result_url = Some("exported".into());
+                        req.error = None;
+                        req.updated_at = chrono::Utc::now().to_rfc3339();
+                        req.save(db.conn())?;
+
+                        emit_publish_event(
+                            state,
+                            &job_id,
+                            "succeeded",
+                            Some(1.0),
+                            &format!("Đã xuất gói thành công vào thư mục: {bundle_str}"),
+                            None,
+                        );
+
+                        return Ok(req);
+                    }
+                    Err(err) => {
+                        let err_msg = err.to_string();
+                        req.status = PublishStatus::Failed;
+                        req.error = Some(err_msg.clone());
+                        req.updated_at = chrono::Utc::now().to_rfc3339();
+                        let _ = req.save(db.conn());
+
+                        emit_publish_event(
+                            state,
+                            &job_id,
+                            "failed",
+                            None,
+                            "Xuất gói thất bại",
+                            Some(&err_msg),
+                        );
+
+                        return Err(CmdError::msg(err_msg));
+                    }
+                }
+            }
+
+            // Target file to publish (video or image)
+            let mut file_to_publish = None;
+            for rel in &req.files {
+                if let Ok(p) = ws.scoped_path(rel) {
+                    if p.exists() {
+                        file_to_publish = Some(p);
+                        break;
+                    }
+                }
+            }
+
+            let upload_file = match file_to_publish {
+                Some(f) => f,
+                None => {
+                    let err =
+                        "Không tìm thấy tệp nội dung (ảnh hoặc video) để đăng lên Facebook Page."
+                            .to_string();
+                    req.status = PublishStatus::Failed;
+                    req.error = Some(err.clone());
+                    req.updated_at = chrono::Utc::now().to_rfc3339();
+                    let _ = req.save(db.conn());
+                    emit_publish_event(state, &job_id, "failed", None, "Thất bại", Some(&err));
+                    return Err(CmdError::msg(err));
+                }
+            };
+
+            let state_clone = state.clone();
+            let j_id_clone = job_id.clone();
+            let progress_cb = move |frac: f32, msg: &str| {
+                emit_publish_event(&state_clone, &j_id_clone, "running", Some(frac), msg, None);
+            };
+
+            let fb_params = FacebookPublishParams {
+                page_id: &target_page_id,
+                file_path: &upload_file,
+                metadata: &req.metadata,
+            };
+
+            match publish_facebook_complete(
+                state.secrets.as_ref(),
+                org_name,
+                Some(ws_name),
+                fb_params,
+                progress_cb,
+            )
+            .await
+            {
+                Ok(url) => {
+                    req.status = PublishStatus::Published;
+                    req.result_url = Some(url.clone());
+                    req.error = None;
+                    req.updated_at = chrono::Utc::now().to_rfc3339();
+                    req.save(db.conn())?;
+
+                    if let Ok(app_db) = state.app_paths.open_app_db() {
+                        let _ =
+                            app_db.set_setting("publish:last_used_facebook_page", &target_page_id);
+                    }
+
+                    emit_publish_event(
+                        state,
+                        &job_id,
+                        "succeeded",
+                        Some(1.0),
+                        "Đã đăng tải bài viết lên Facebook Page thành công!",
+                        None,
+                    );
+                    Ok(req)
+                }
+                Err(err) => {
+                    let err_msg = err.to_string();
+                    req.status = PublishStatus::Failed;
+                    req.error = Some(err_msg.clone());
+                    req.updated_at = chrono::Utc::now().to_rfc3339();
+                    let _ = req.save(db.conn());
+                    emit_publish_event(
+                        state,
+                        &job_id,
+                        "failed",
+                        None,
+                        "Đăng bài Facebook Page thất bại",
+                        Some(&err_msg),
+                    );
+                    Err(err.into())
+                }
+            }
+        }
+        PublishTarget::Tiktok | PublishTarget::Instagram | PublishTarget::Export => {
             // Generate export bundle folder and open folder on desktop
             emit_publish_event(
                 state,
