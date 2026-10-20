@@ -279,19 +279,27 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
         if (isNarrow) setNarrowTab("thread");
       }
     };
+    const handleAskAiEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ text: string }>;
+      if (custom.detail?.text) {
+        handleAskAi(custom.detail.text);
+      }
+    };
 
     window.addEventListener("studio:toggle-pane", handleTogglePaneEvent);
     window.addEventListener("studio:create-thread", handleCreateThreadEvent);
     window.addEventListener("studio:select-file", handleSelectFileEvent);
     window.addEventListener("studio:select-thread", handleSelectThreadEvent);
+    window.addEventListener("studio:ask-ai", handleAskAiEvent);
 
     return () => {
       window.removeEventListener("studio:toggle-pane", handleTogglePaneEvent);
       window.removeEventListener("studio:create-thread", handleCreateThreadEvent);
       window.removeEventListener("studio:select-file", handleSelectFileEvent);
       window.removeEventListener("studio:select-thread", handleSelectThreadEvent);
+      window.removeEventListener("studio:ask-ai", handleAskAiEvent);
     };
-  }, [togglePane, handleCreateThread, isNarrow]);
+  }, [togglePane, handleCreateThread, isNarrow, handleAskAi]);
 
   const limitsFor = (pane: keyof ProjectLayout, other: PaneState) => {
     const width = panesRef.current?.clientWidth ?? window.innerWidth;

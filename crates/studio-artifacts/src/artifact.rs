@@ -33,6 +33,12 @@ pub struct Artifact {
     /// Additional parameters or configuration.
     #[serde(default)]
     pub params: serde_json::Value,
+    /// Artboard width in pixels (same as `params.width`; agents often write it at the top level).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    /// Artboard height in pixels (same as `params.height`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
 }
 
 impl Artifact {
@@ -105,6 +111,8 @@ impl Artifact {
             renderer: default_renderer,
             inputs: Vec::new(),
             params: params.unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
+            width: None,
+            height: None,
         };
 
         let yaml = serde_yaml::to_string(&artifact)?;
@@ -174,5 +182,34 @@ impl Artifact {
     /// Return absolute path to the main source file within the project.
     pub fn source_path(&self, project: &Project) -> PathBuf {
         self.dir(project).join(&self.source)
+    }
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::Artifact;
+
+    #[test]
+    fn top_level_size_is_read_and_not_written_when_absent() {
+        let a: Artifact = serde_yaml::from_str(
+            "id: thumb
+kind: design
+title: T
+source: index.html
+width: 1280
+height: 720
+",
+        )
+        .unwrap();
+        assert_eq!((a.width, a.height), (Some(1280), Some(720)));
+        let b: Artifact = serde_yaml::from_str(
+            "id: x
+kind: design
+title: T
+source: index.html
+",
+        )
+        .unwrap();
+        assert!(!serde_yaml::to_string(&b).unwrap().contains("width"));
     }
 }

@@ -2,6 +2,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+pub mod assets;
 mod broker;
 pub mod budget;
 mod commands;
@@ -9,6 +10,7 @@ mod defaults;
 mod engines;
 mod error;
 mod publish;
+mod publish_facebook;
 mod state;
 mod turns;
 pub mod web_dispatch;
@@ -191,7 +193,10 @@ fn main() {
             commands::scope_create,
             commands::scope_validate,
             commands::scope_remove_override,
-            commands::asset_list,
+            assets::asset_list,
+            assets::asset_import,
+            assets::asset_delete,
+            assets::asset_open_folder,
             commands::jobs_snapshot,
             commands::disk_usage,
             commands::agy_connect,
@@ -234,6 +239,11 @@ fn main() {
             publish::youtube_connect,
             publish::youtube_channels_list,
             publish::youtube_channel_disconnect,
+            publish_facebook::facebook_client_config,
+            publish_facebook::facebook_client_status,
+            publish_facebook::facebook_connect,
+            publish_facebook::facebook_pages_list,
+            publish_facebook::facebook_page_disconnect,
         ])
         .run(tauri::generate_context!())
         .expect("không khởi động được Local Content Studio");

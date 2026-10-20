@@ -221,6 +221,11 @@ fn test_ffmpeg_graph_builder_unit() {
                         duration: 3.0,
                         transition: Transition::None,
                         transition_duration: None,
+                        x: None,
+                        y: None,
+                        width: None,
+                        height: None,
+                        opacity: None,
                     },
                     Clip {
                         id: "c2".into(),
@@ -231,6 +236,11 @@ fn test_ffmpeg_graph_builder_unit() {
                         duration: 2.0,
                         transition: Transition::Fade,
                         transition_duration: Some(0.5),
+                        x: None,
+                        y: None,
+                        width: None,
+                        height: None,
+                        opacity: None,
                     },
                 ],
             },
@@ -246,13 +256,18 @@ fn test_ffmpeg_graph_builder_unit() {
                     duration: 2.0,
                     transition: Transition::None,
                     transition_duration: None,
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    opacity: None,
                 }],
             },
         ],
     };
 
     let out_path = PathBuf::from("rendered.mp4");
-    let (args, filter_graph) = build_timeline_ffmpeg_args(&doc, &out_path);
+    let (args, filter_graph) = build_timeline_ffmpeg_args(&doc, &out_path).unwrap();
 
     // Verify filter_graph string structure
     assert!(filter_graph.contains(
@@ -390,6 +405,11 @@ async fn test_windows_integration_ffmpeg_timeline() {
                     duration: 2.0,
                     transition: Transition::None,
                     transition_duration: None,
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    opacity: None,
                 },
                 Clip {
                     id: "part2".into(),
@@ -400,6 +420,11 @@ async fn test_windows_integration_ffmpeg_timeline() {
                     duration: 2.0,
                     transition: Transition::Fade,
                     transition_duration: Some(0.5),
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    opacity: None,
                 },
             ],
         }],
@@ -655,6 +680,11 @@ fn test_timeline_ffmpeg_args_with_image_audio_and_srt() {
                     duration: 5.0,
                     transition: Transition::None,
                     transition_duration: None,
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    opacity: None,
                 }],
             },
             Track {
@@ -669,6 +699,11 @@ fn test_timeline_ffmpeg_args_with_image_audio_and_srt() {
                     duration: 4.5,
                     transition: Transition::None,
                     transition_duration: None,
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    opacity: None,
                 }],
             },
             Track {
@@ -683,13 +718,18 @@ fn test_timeline_ffmpeg_args_with_image_audio_and_srt() {
                     duration: 5.0,
                     transition: Transition::None,
                     transition_duration: None,
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    opacity: None,
                 }],
             },
         ],
     };
 
     let out_path = PathBuf::from("output.mp4");
-    let (args, filter_graph) = build_timeline_ffmpeg_args(&doc, &out_path);
+    let (args, filter_graph) = build_timeline_ffmpeg_args(&doc, &out_path).unwrap();
 
     // Verify image looping in filter graph
     assert!(filter_graph.contains("loop=loop=-1:size=1:start=0,trim=start=0:duration=5"));
@@ -715,7 +755,7 @@ fn test_timeline_ffmpeg_args_with_image_audio_and_srt() {
     // A loudness target routes the mix through loudnorm and still maps [a].
     let mut doc = doc;
     doc.loudness_lufs = Some(-14.0);
-    let (args, filter_graph) = build_timeline_ffmpeg_args(&doc, &out_path);
+    let (args, filter_graph) = build_timeline_ffmpeg_args(&doc, &out_path).unwrap();
     assert!(filter_graph.contains("adelay=500|500[amix]"));
     assert!(filter_graph.contains("[amix]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[a]"));
     assert!(args.contains(&"[a]".to_string()));
@@ -796,6 +836,11 @@ async fn real_timeline_assembles_image_wav_srt_to_mp4() {
                     duration: 4.0,
                     transition: Transition::None,
                     transition_duration: None,
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    opacity: None,
                 }],
             },
             Track {
@@ -810,6 +855,11 @@ async fn real_timeline_assembles_image_wav_srt_to_mp4() {
                     duration: 4.0,
                     transition: Transition::None,
                     transition_duration: None,
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    opacity: None,
                 }],
             },
             Track {
@@ -824,6 +874,11 @@ async fn real_timeline_assembles_image_wav_srt_to_mp4() {
                     duration: 4.0,
                     transition: Transition::None,
                     transition_duration: None,
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    opacity: None,
                 }],
             },
         ],
@@ -927,5 +982,236 @@ fn test_timeline_starter_parses_and_validates() {
         caption_track.clips.len(),
         2,
         "Caption track must contain 2 captions"
+    );
+}
+
+#[test]
+fn test_timeline_overlay_filter_graph() {
+    let doc = TimelineDoc {
+        version: 1,
+        width: 1920,
+        height: 1080,
+        fps: 30.0,
+        loudness_lufs: None,
+        tracks: vec![
+            Track {
+                id: "base-video".into(),
+                kind: TrackKind::Video,
+                clips: vec![Clip {
+                    id: "c1".into(),
+                    source: "color:#1E88E5".into(),
+                    in_point: 0.0,
+                    out_point: None,
+                    start: 0.0,
+                    duration: 10.0,
+                    transition: Transition::None,
+                    transition_duration: None,
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    opacity: None,
+                }],
+            },
+            Track {
+                id: "overlay-track".into(),
+                kind: TrackKind::Video,
+                clips: vec![Clip {
+                    id: "logo-clip".into(),
+                    source: "brand/logo.png".into(),
+                    in_point: 0.0,
+                    out_point: None,
+                    start: 1.5,
+                    duration: 5.0,
+                    transition: Transition::None,
+                    transition_duration: None,
+                    x: Some(40),
+                    y: Some(60),
+                    width: Some(250),
+                    height: None,
+                    opacity: Some(0.85),
+                }],
+            },
+        ],
+    };
+
+    let out_path = PathBuf::from("overlay_out.mp4");
+    let (args, filter_graph) = build_timeline_ffmpeg_args(&doc, &out_path).expect("args build ok");
+
+    // Verify overlay image looping, trim, PTS delay, keep-aspect scaling, and opacity mixer
+    assert!(filter_graph.contains("loop=loop=-1:size=1:start=0,trim=start=0:duration=5,setpts=PTS-STARTPTS+1.5/TB,fps=30,scale=250:-1,format=rgba,colorchannelmixer=aa=0.85[ov0]"));
+    // Verify overlay compositing with position and enable timing
+    assert!(filter_graph
+        .contains("[v][ov0]overlay=x=40:y=60:enable='between(t,1.5,6.5)':eof_action=pass[v]"));
+    assert!(args.contains(&"-i".to_string()));
+    assert!(args.contains(&"brand/logo.png".to_string()));
+}
+
+#[test]
+fn test_timeline_rejects_svg_source() {
+    let doc = TimelineDoc {
+        version: 1,
+        width: 1920,
+        height: 1080,
+        fps: 30.0,
+        loudness_lufs: None,
+        tracks: vec![Track {
+            id: "overlay".into(),
+            kind: TrackKind::Video,
+            clips: vec![Clip {
+                id: "logo".into(),
+                source: "logo.svg".into(),
+                in_point: 0.0,
+                out_point: None,
+                start: 0.0,
+                duration: 5.0,
+                transition: Transition::None,
+                transition_duration: None,
+                x: None,
+                y: None,
+                width: None,
+                height: None,
+                opacity: None,
+            }],
+        }],
+    };
+
+    let out_path = PathBuf::from("out.mp4");
+    let err = build_timeline_ffmpeg_args(&doc, &out_path).unwrap_err();
+    match err {
+        ArtifactError::InvalidConfig(msg) => {
+            assert!(msg.contains("SVG"), "Message should mention SVG: {msg}");
+            assert!(
+                msg.contains("PNG"),
+                "Message should mention PNG design artifact: {msg}"
+            );
+        }
+        other => panic!("Expected InvalidConfig, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+#[ignore = "real timeline render asserting overlay outside base duration does not extend video"]
+async fn real_timeline_overlay_does_not_extend_duration_beyond_base_track() {
+    let ffmpeg_report = probe_ffmpeg();
+    let ffprobe_report = probe_ffprobe();
+    if !ffmpeg_report.available || !ffprobe_report.available {
+        println!(
+            "SKIP: real_timeline_overlay_does_not_extend_duration_beyond_base_track — missing tool"
+        );
+        return;
+    }
+
+    let (_tmp, _ws, proj) = create_test_env();
+    let scheduler = create_test_scheduler();
+    let ffmpeg_bin = ffmpeg_report.path.clone().unwrap();
+    let ffprobe_bin = ffprobe_report.path.clone().unwrap();
+
+    let logo_path = proj.root().join("test_logo.png");
+    let status = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=yellow:s=100x100:d=1:r=30",
+            "-vframes",
+            "1",
+            logo_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to create test logo PNG");
+    assert!(status.status.success());
+
+    // Base track is 3.0 seconds, overlay clip duration is 15.0 seconds (well past base).
+    let doc = TimelineDoc {
+        version: 1,
+        width: 1280,
+        height: 720,
+        fps: 30.0,
+        loudness_lufs: None,
+        tracks: vec![
+            Track {
+                id: "base".into(),
+                kind: TrackKind::Video,
+                clips: vec![Clip {
+                    id: "c1".into(),
+                    source: "color:#1E88E5".into(),
+                    in_point: 0.0,
+                    out_point: None,
+                    start: 0.0,
+                    duration: 3.0,
+                    transition: Transition::None,
+                    transition_duration: None,
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    opacity: None,
+                }],
+            },
+            Track {
+                id: "overlay".into(),
+                kind: TrackKind::Video,
+                clips: vec![Clip {
+                    id: "logo".into(),
+                    source: logo_path.to_string_lossy().to_string(),
+                    in_point: 0.0,
+                    out_point: None,
+                    start: 0.0,
+                    duration: 15.0,
+                    transition: Transition::None,
+                    transition_duration: None,
+                    x: Some(20),
+                    y: Some(20),
+                    width: Some(100),
+                    height: Some(100),
+                    opacity: Some(0.9),
+                }],
+            },
+        ],
+    };
+
+    let out_file = proj.root().join("output_overlay.mp4");
+    let job = build_timeline_render_job(
+        "job-overlay-test",
+        "ws-test",
+        &ffmpeg_report,
+        &doc,
+        proj.root(),
+        &out_file,
+    )
+    .expect("job spec ok");
+
+    let mut handle = scheduler.submit(job).await;
+    while let Some(evt) = handle.next_event().await {
+        if matches!(
+            evt,
+            studio_jobs::TaskEvent::Finished { .. } | studio_jobs::TaskEvent::Failed { .. }
+        ) {
+            break;
+        }
+    }
+    assert!(out_file.exists(), "Output mp4 must exist");
+
+    let probe_out = std::process::Command::new(&ffprobe_bin)
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            out_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("probe failed");
+    let dur_str = String::from_utf8_lossy(&probe_out.stdout)
+        .trim()
+        .to_string();
+    let duration: f64 = dur_str.parse().expect("parse duration");
+    assert!(
+        (duration - 3.0).abs() < 0.25,
+        "Duration {duration} should match base track (3.0s), not overlay (15.0s)"
     );
 }

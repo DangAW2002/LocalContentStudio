@@ -161,6 +161,8 @@ impl Registry {
         let mut set: std::collections::BTreeSet<String> = [
             crate::publish::KEY_YOUTUBE_CLIENT_ID,
             crate::publish::KEY_YOUTUBE_CLIENT_SECRET,
+            crate::publish::KEY_FACEBOOK_APP_ID,
+            crate::publish::KEY_FACEBOOK_APP_SECRET,
         ]
         .iter()
         .map(|k| k.to_string())
@@ -218,6 +220,10 @@ impl Registry {
                 "media.import@1",
                 include_str!("../builtin/capabilities/media.import@1.json"),
             ),
+            (
+                "media.inspect@1",
+                include_str!("../builtin/capabilities/media.inspect@1.json"),
+            ),
         ];
 
         for (id, content) in builtin_caps {
@@ -245,6 +251,7 @@ impl Registry {
             include_str!("../builtin/tools/openai.videos/tool.yaml"),
             include_str!("../builtin/tools/google.veo/tool.yaml"),
             include_str!("../builtin/tools/media.import.yt-dlp/tool.yaml"),
+            include_str!("../builtin/tools/media.inspect/tool.yaml"),
         ];
 
         for (i, content) in builtin_tools.iter().enumerate() {

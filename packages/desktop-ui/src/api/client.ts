@@ -80,6 +80,8 @@ import type {
   ScopeActionResponse,
   AssetListFilter,
   AssetItem,
+  AssetImportResult,
+  AssetDeleteResult,
   JobSnapshot,
   DiskUsageReport,
   TurnEventPayload,
@@ -434,9 +436,37 @@ export class StudioApiClient {
           const q = new URLSearchParams({ path: item.path });
           item.previewUrl = `/api/file?${q.toString()}`;
         }
+        if (item.thumbnailUrl) {
+          const q = new URLSearchParams({ path: item.path });
+          item.thumbnailUrl = `/api/file?${q.toString()}`;
+        }
       }
     }
     return items;
+  }
+
+  /**
+   * Import one or more files from local paths into library/imports/<date>/.
+   * Command: `asset_import`
+   */
+  async importAssets(paths: string[]): Promise<AssetImportResult> {
+    return invoke<AssetImportResult>("asset_import", { paths });
+  }
+
+  /**
+   * Delete an asset within the workspace (creates checkpoint for undo).
+   * Command: `asset_delete`
+   */
+  async deleteAsset(path: string): Promise<AssetDeleteResult> {
+    return invoke<AssetDeleteResult>("asset_delete", { path });
+  }
+
+  /**
+   * Reveal the containing folder of an asset in the OS file explorer.
+   * Command: `asset_open_folder`
+   */
+  async openAssetFolder(path: string): Promise<{ success: boolean }> {
+    return invoke<{ success: boolean }>("asset_open_folder", { path });
   }
 
   // ==========================================
@@ -715,6 +745,46 @@ export class StudioApiClient {
    */
   async youtubeChannelDisconnect(channelId: string): Promise<YoutubeDisconnectResult> {
     return invoke<YoutubeDisconnectResult>("youtube_channel_disconnect", { channelId });
+  }
+
+  /**
+   * Configure Facebook App ID and App Secret in Credential Manager.
+   * Command: facebook_client_config
+   */
+  async facebookClientConfig(appId: string, appSecret: string): Promise<import("./types").FacebookClientConfigResult> {
+    return invoke<import("./types").FacebookClientConfigResult>("facebook_client_config", { appId, appSecret });
+  }
+
+  /**
+   * Get Facebook client status.
+   * Command: facebook_client_status
+   */
+  async facebookClientStatus(): Promise<import("./types").FacebookClientStatus> {
+    return invoke<import("./types").FacebookClientStatus>("facebook_client_status");
+  }
+
+  /**
+   * Connect Facebook Pages via OAuth loopback redirect.
+   * Command: facebook_connect
+   */
+  async facebookConnect(): Promise<import("./types").FacebookPageAccount[]> {
+    return invoke<import("./types").FacebookPageAccount[]>("facebook_connect");
+  }
+
+  /**
+   * List connected Facebook Pages.
+   * Command: facebook_pages_list
+   */
+  async facebookPagesList(): Promise<import("./types").FacebookPageAccount[]> {
+    return invoke<import("./types").FacebookPageAccount[]>("facebook_pages_list");
+  }
+
+  /**
+   * Disconnect a Facebook Page.
+   * Command: facebook_page_disconnect
+   */
+  async facebookPageDisconnect(pageId: string): Promise<import("./types").FacebookDisconnectResult> {
+    return invoke<import("./types").FacebookDisconnectResult>("facebook_page_disconnect", { pageId });
   }
 
   // ==========================================
