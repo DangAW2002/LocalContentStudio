@@ -10,6 +10,7 @@ mod defaults;
 mod engines;
 mod error;
 mod publish;
+mod publish_facebook;
 mod state;
 mod turns;
 pub mod web_dispatch;
@@ -237,6 +238,11 @@ fn main() {
             publish::youtube_connect,
             publish::youtube_channels_list,
             publish::youtube_channel_disconnect,
+            publish_facebook::facebook_client_config,
+            publish_facebook::facebook_client_status,
+            publish_facebook::facebook_connect,
+            publish_facebook::facebook_pages_list,
+            publish_facebook::facebook_page_disconnect,
         ])
         .run(tauri::generate_context!())
         .expect("không khởi động được Local Content Studio");

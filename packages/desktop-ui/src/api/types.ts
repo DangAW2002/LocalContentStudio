@@ -856,6 +856,29 @@ export interface YoutubeClientStatus {
   configured: boolean;
   clientIdLast6?: string;
 }
+export interface FacebookPageAccount {
+  id: string;
+  name: string;
+  category?: string;
+  avatarUrl?: string;
+  connectedAt: string;
+}
+
+export interface FacebookClientConfigResult {
+  appIdLast4: string;
+  message: string;
+}
+
+export interface FacebookClientStatus {
+  configured: boolean;
+  appIdLast4?: string;
+}
+
+export interface FacebookDisconnectResult {
+  success: boolean;
+  message: string;
+}
+
 export interface YoutubeDisconnectResult {
   success: boolean;
   revokeUrl: string;

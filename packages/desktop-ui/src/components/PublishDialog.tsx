@@ -32,7 +32,7 @@ export interface PublishDialogProps {
 
 const TARGET_OPTIONS = [
   { value: "youtube", label: "YouTube (Tải lên trực tiếp)" },
-  { value: "facebook", label: "Facebook (Xuất gói tệp)" },
+  { value: "facebook", label: "Facebook Page (Đăng trực tiếp hoặc xuất gói)" },
   { value: "tiktok", label: "TikTok (Xuất gói tệp)" },
   { value: "instagram", label: "Instagram (Xuất gói tệp)" },
   { value: "export", label: "Xuất bản gói tệp (Thư mục cục bộ)" },
