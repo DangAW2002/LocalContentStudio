@@ -75,6 +75,8 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
 ### 5. Kết xuất & Kiểm tra chất lượng (Render & Validation)
 - Thực hiện kết xuất video qua `artifact_render` cho artifact timeline:
   - FFmpeg ghép nối video, audio và phụ đề ra định dạng MP4 H.264/AAC.
+  - Âm thanh tự chuẩn hoá theo `loudness_lufs` của kênh trong `artifact.yaml` (youtube: −14 LUFS) — không cần tự chỉnh
+    `volume` hay đo bằng Bash. Muốn mức khác thì ghi `"loudness_lufs": -16` ở gốc `timeline.json`.
 - Chạy kiểm tra quy chuẩn kênh bằng `check_run`:
   - Đảm bảo video đạt chuẩn 16:9, thời lượng không vượt giới hạn kênh, không vi phạm từ cấm trong giọng đọc.
   - Nếu phát hiện lỗi (finding), tự động điều chỉnh lại `timeline.json` hoặc audio/text và render lại.

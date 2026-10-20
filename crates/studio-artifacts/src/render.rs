@@ -29,6 +29,30 @@ pub struct RenderOutcome {
     pub probe_report: Vec<ProbeReport>,
 }
 
+/// Per-render settings resolved by the caller (e.g. from the artifact's channels).
+#[derive(Debug, Clone, Default)]
+pub struct RenderOptions {
+    /// Loudness target (LUFS) for timeline renders whose `timeline.json` sets none.
+    pub loudness_lufs: Option<f64>,
+}
+
+/// Render with default options. See [`render_with`].
+pub async fn render(
+    workspace: &Workspace,
+    project: &Project,
+    artifact: &Artifact,
+    scheduler: &Scheduler,
+) -> Result<RenderOutcome> {
+    render_with(
+        workspace,
+        project,
+        artifact,
+        scheduler,
+        &RenderOptions::default(),
+    )
+    .await
+}
+
 /// Orchestrate rendering an artifact:
 /// 1. Resolve brand version and renderer version.
 /// 2. Compute deterministic input hash.
@@ -37,11 +61,12 @@ pub struct RenderOutcome {
 /// 5. Submit to `Scheduler`, await completion.
 /// 6. Post-validate generated outputs.
 /// 7. Record outputs in `renders` table and return `RenderOutcome`.
-pub async fn render(
+pub async fn render_with(
     workspace: &Workspace,
     project: &Project,
     artifact: &Artifact,
     scheduler: &Scheduler,
+    options: &RenderOptions,
 ) -> Result<RenderOutcome> {
     let brand_version = artifact.brand.as_deref().unwrap_or("default@1");
     let renderer_id = artifact
@@ -60,7 +85,17 @@ pub async fn render(
     }
 
     // 2. Compute input hash
-    let full_hash = compute_input_hash(workspace, project, artifact, brand_version, &renderer_id)?;
+    let mut full_hash =
+        compute_input_hash(workspace, project, artifact, brand_version, &renderer_id)?;
+    // The channel loudness target changes the timeline output, so it is part of the cache key.
+    if renderer_id == "render.timeline_ffmpeg@1" {
+        if let Some(lufs) = options.loudness_lufs {
+            use sha2::{Digest, Sha256};
+            full_hash = hex::encode(Sha256::digest(
+                format!("{full_hash}|loudness={lufs}").as_bytes(),
+            ));
+        }
+    }
     let short_hash = hash12(&full_hash);
 
     // 3. Check render cache
@@ -161,6 +196,9 @@ pub async fn render(
             let content = fs::read_to_string(&timeline_file)?;
             let mut timeline_doc: crate::timeline::TimelineDoc = serde_json::from_str(&content)
                 .map_err(|e| ArtifactError::InvalidConfig(timeline_schema_hint(&e)))?;
+            if timeline_doc.loudness_lufs.is_none() {
+                timeline_doc.loudness_lufs = options.loudness_lufs;
+            }
             resolve_workspace_relative_sources(
                 &mut timeline_doc,
                 &artifact.dir(project),

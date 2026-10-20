@@ -18,6 +18,10 @@ pub struct TimelineDoc {
     /// Ordered list of tracks
     #[serde(default)]
     pub tracks: Vec<Track>,
+    /// Integrated loudness target (LUFS) for the mixed audio. When absent, the render uses the
+    /// target of the artifact's channel, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loudness_lufs: Option<f64>,
 }
 
 fn default_version() -> u32 {

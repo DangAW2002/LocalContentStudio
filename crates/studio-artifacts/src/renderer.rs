@@ -564,6 +564,12 @@ pub fn build_timeline_ffmpeg_args(
             args.extend_from_slice(&["-i".into(), strip_verbatim(Path::new(&clip.source))]);
         }
 
+        // With a loudness target the mix ends in [amix] and loudnorm produces [a].
+        let mix_out = if timeline_doc.loudness_lufs.is_some() {
+            "amix"
+        } else {
+            "a"
+        };
         let mut a_filter_parts = Vec::new();
         for (j, clip) in audio_clips.iter().enumerate() {
             let in_idx = audio_input_start + j;
@@ -574,9 +580,12 @@ pub fn build_timeline_ffmpeg_args(
             let start_ms = (clip.start * 1000.0).round() as u64;
             if audio_clips.len() == 1 {
                 if start_ms > 0 {
-                    a_filter_parts.push(format!("{},adelay={}|{}[a]", atrim, start_ms, start_ms));
+                    a_filter_parts.push(format!(
+                        "{},adelay={}|{}[{}]",
+                        atrim, start_ms, start_ms, mix_out
+                    ));
                 } else {
-                    a_filter_parts.push(format!("{}[a]", atrim));
+                    a_filter_parts.push(format!("{}[{}]", atrim, mix_out));
                 }
             } else {
                 if start_ms > 0 {
@@ -596,9 +605,17 @@ pub fn build_timeline_ffmpeg_args(
                 mix_inputs.push_str(&format!("[a{}]", j));
             }
             a_filter_parts.push(format!(
-                "{}amix=inputs={}:duration=longest:dropout_transition=0[a]",
+                "{}amix=inputs={}:duration=longest:dropout_transition=0[{}]",
                 mix_inputs,
-                audio_clips.len()
+                audio_clips.len(),
+                mix_out
+            ));
+        }
+
+        if let Some(lufs) = timeline_doc.loudness_lufs {
+            // Single-pass loudnorm resamples internally (192 kHz); bring it back to 48 kHz.
+            a_filter_parts.push(format!(
+                "[amix]loudnorm=I={lufs}:TP=-1.5:LRA=11,aresample=48000[a]"
             ));
         }
 
