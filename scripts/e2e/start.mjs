@@ -88,17 +88,13 @@ function seedWorkspaceAndAppDb({ appDir, wsDir }) {
   );
 
   // 2. Workspace SQLite: .studio/studio.db
+  // Only the tables the seed rows need, copied from migration v1. No schema_migrations rows: the
+  // app's WorkspaceDb::open then runs every migration (IF NOT EXISTS), so the schema always
+  // matches the real one (marking versions as applied here left publish_requests missing).
   const wsDbPath = path.join(wsDir, ".studio/studio.db");
   const wsDb = new DatabaseSync(wsDbPath);
 
   wsDb.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version INTEGER PRIMARY KEY,
-      checksum TEXT NOT NULL,
-      applied_at TEXT NOT NULL
-    );
-    INSERT OR IGNORE INTO schema_migrations VALUES (1, 'init', '${now}'), (2, 'v2', '${now}');
-
     CREATE TABLE IF NOT EXISTS threads (
       id TEXT PRIMARY KEY,
       project_slug TEXT,
@@ -116,7 +112,8 @@ function seedWorkspaceAndAppDb({ appDir, wsDir }) {
       user_prompt TEXT NOT NULL,
       status TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      completed_at TEXT
+      completed_at TEXT,
+      FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS events (
@@ -124,7 +121,8 @@ function seedWorkspaceAndAppDb({ appDir, wsDir }) {
       turn_id TEXT NOT NULL,
       event_type TEXT NOT NULL,
       payload_json TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS artifacts_index (
@@ -140,39 +138,6 @@ function seedWorkspaceAndAppDb({ appDir, wsDir }) {
       updated_at TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS assets_index (
-      id TEXT PRIMARY KEY,
-      path TEXT NOT NULL,
-      name TEXT NOT NULL,
-      mime_type TEXT NOT NULL,
-      size_bytes INTEGER NOT NULL,
-      sha256 TEXT NOT NULL,
-      metadata_json TEXT,
-      updated_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS renders (
-      id TEXT PRIMARY KEY,
-      artifact_id TEXT NOT NULL,
-      hash TEXT NOT NULL,
-      output_path TEXT NOT NULL,
-      format TEXT NOT NULL,
-      size_bytes INTEGER NOT NULL,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS jobs (
-      id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL,
-      status TEXT NOT NULL,
-      priority INTEGER NOT NULL DEFAULT 0,
-      input_json TEXT NOT NULL,
-      output_json TEXT,
-      error_message TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
-
     CREATE TABLE IF NOT EXISTS checkpoints (
       id TEXT PRIMARY KEY,
       label TEXT NOT NULL,
@@ -180,42 +145,24 @@ function seedWorkspaceAndAppDb({ appDir, wsDir }) {
       pinned INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     );
-
-    CREATE TABLE IF NOT EXISTS checkpoint_files (
-      checkpoint_id TEXT NOT NULL,
-      rel_path TEXT NOT NULL,
-      blob_sha256 TEXT NOT NULL,
-      size_bytes INTEGER NOT NULL,
-      PRIMARY KEY (checkpoint_id, rel_path)
-    );
-
-    CREATE TABLE IF NOT EXISTS cost_ledger (
-      id TEXT PRIMARY KEY,
-      turn_id TEXT,
-      job_id TEXT,
-      provider TEXT NOT NULL,
-      model TEXT,
-      cost_usd REAL NOT NULL,
-      created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
   `);
 
-  // Insert seed thread, turn, event, artifact, checkpoint
+  // Seed thread with one finished turn. Events use the persisted UI format (turns.rs `persist`):
+  // without a `Done` event the thread replays the turn as still running.
+  const textEvt = JSON.stringify({
+    type: "Text",
+    text: "Chào mừng bạn đến với Local Content Studio! Tôi đã chuẩn bị sẵn kịch bản và khung làm việc.",
+  });
+  const doneEvt = JSON.stringify({ type: "Done", status: "success", text: null });
   wsDb.exec(`
     INSERT OR REPLACE INTO threads VALUES (
       'demo-thread-1', 'demo', 'Hội thoại kiểm thử E2E', 'agy', 'gemini-3.8-flash-medium', '${now}', '${now}'
     );
     INSERT OR REPLACE INTO turns VALUES (
-      'demo-turn-1', 'demo-thread-1', 1, 'Xin chào, hãy dựng một video quảng bá.', 'done', '${now}', '${now}'
+      'demo-turn-1', 'demo-thread-1', 1, 'Xin chào, hãy dựng một video quảng bá.', 'success', '${now}', '${now}'
     );
-    INSERT OR REPLACE INTO events VALUES (
-      'demo-evt-1', 'demo-turn-1', 'message', '{"text":"Chào mừng bạn đến với Local Content Studio! Tôi đã chuẩn bị sẵn kịch bản và khung làm việc."}', '${now}'
-    );
+    INSERT OR REPLACE INTO events VALUES ('demo-evt-1', 'demo-turn-1', 'Text', '${textEvt}', '${now}');
+    INSERT OR REPLACE INTO events VALUES ('demo-evt-2', 'demo-turn-1', 'Done', '${doneEvt}', '${now}');
     INSERT OR REPLACE INTO artifacts_index VALUES (
       'thumb-01', 'demo', 'design', 'Thumbnail E2E', 'projects/demo/artifacts/thumb-01', 'demo', '["youtube"]', 'index.html', 'design', '${now}'
     );
