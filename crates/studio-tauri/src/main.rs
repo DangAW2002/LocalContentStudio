@@ -12,6 +12,7 @@ mod publish;
 mod state;
 mod turns;
 pub mod web_dispatch;
+mod web_settings;
 
 use std::sync::Arc;
 
