@@ -56,6 +56,17 @@ impl ClaudeParser {
                             id: sid.to_string(),
                         });
                     }
+                } else if subtype == "thinking_tokens" {
+                    if let Some(tokens) = value.get("estimated_tokens").and_then(|v| v.as_u64()) {
+                        events.push(Event::Usage {
+                            input_tokens: 0,
+                            output_tokens: 0,
+                            cache_read_tokens: 0,
+                            cache_write_tokens: 0,
+                            reasoning_tokens: tokens,
+                            cost_usd: None,
+                        });
+                    }
                 }
             }
             "stream_event" => {

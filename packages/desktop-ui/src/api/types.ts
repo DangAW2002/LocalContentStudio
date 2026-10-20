@@ -111,6 +111,16 @@ export interface BudgetSummary {
   warningThreshold: number;
 }
 
+export interface BudgetStatus {
+  todaySpendUsd: number;
+  dailyBudgetUsd?: number | null;
+  monthSpendUsd: number;
+  monthlyBudgetUsd?: number | null;
+  warningThreshold: number;
+  isDailyOver: boolean;
+  isMonthlyOver: boolean;
+}
+
 export interface WorkspaceCurrentResponse {
   workspace: WorkspaceSummary;
   org?: OrgSummary;
@@ -229,6 +239,17 @@ export interface TurnUndoResponse {
 export interface PermissionRespondRequest {
   requestId: string;
   allow: boolean;
+}
+
+/** An open permission request kept by the broker (see `permission_pending`). */
+export interface PendingPermission {
+  requestId: string;
+  threadId: string;
+  turnId: string;
+  project?: string | null;
+  tool: string;
+  input: unknown;
+  createdAt: string;
 }
 
 export interface PermissionRespondResponse {

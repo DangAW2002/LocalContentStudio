@@ -70,7 +70,10 @@ pub fn detect_artboard_size(html: &str) -> Option<(u32, u32)> {
         let close = lower[open..].find('}').map(|c| open + c)?;
         let selector_start = lower[..open].rfind(['}', '>']).map(|s| s + 1).unwrap_or(0);
         let selector = &lower[selector_start..open];
-        if selector.contains("artboard") || selector.contains("frame") {
+        let page_root = selector
+            .split(',')
+            .any(|s| matches!(s.trim(), "html" | "body"));
+        if selector.contains("artboard") || selector.contains("frame") || page_root {
             let body = &lower[open..close];
             if let (Some(w), Some(h)) = (
                 num_after_prop(body, "width"),
@@ -131,6 +134,13 @@ mod artboard_tests {
     #[test]
     fn css_frame_rule() {
         let html = "<style>html, body { margin: 0; }\n .frame {\n position: relative;\n max-width: 9px;\n width: 1280px;\n height: 720px;\n line-height: 3px; }</style>";
+        assert_eq!(detect_artboard_size(html), Some((1280, 720)));
+    }
+
+    #[test]
+    fn css_page_root_rule() {
+        let html = "<style>
+ html, body { margin: 0; width: 1280px; height: 720px; overflow: hidden; }</style>";
         assert_eq!(detect_artboard_size(html), Some((1280, 720)));
     }
 
@@ -564,6 +574,12 @@ pub fn build_timeline_ffmpeg_args(
             args.extend_from_slice(&["-i".into(), strip_verbatim(Path::new(&clip.source))]);
         }
 
+        // With a loudness target the mix ends in [amix] and loudnorm produces [a].
+        let mix_out = if timeline_doc.loudness_lufs.is_some() {
+            "amix"
+        } else {
+            "a"
+        };
         let mut a_filter_parts = Vec::new();
         for (j, clip) in audio_clips.iter().enumerate() {
             let in_idx = audio_input_start + j;
@@ -574,9 +590,12 @@ pub fn build_timeline_ffmpeg_args(
             let start_ms = (clip.start * 1000.0).round() as u64;
             if audio_clips.len() == 1 {
                 if start_ms > 0 {
-                    a_filter_parts.push(format!("{},adelay={}|{}[a]", atrim, start_ms, start_ms));
+                    a_filter_parts.push(format!(
+                        "{},adelay={}|{}[{}]",
+                        atrim, start_ms, start_ms, mix_out
+                    ));
                 } else {
-                    a_filter_parts.push(format!("{}[a]", atrim));
+                    a_filter_parts.push(format!("{}[{}]", atrim, mix_out));
                 }
             } else {
                 if start_ms > 0 {
@@ -596,9 +615,17 @@ pub fn build_timeline_ffmpeg_args(
                 mix_inputs.push_str(&format!("[a{}]", j));
             }
             a_filter_parts.push(format!(
-                "{}amix=inputs={}:duration=longest:dropout_transition=0[a]",
+                "{}amix=inputs={}:duration=longest:dropout_transition=0[{}]",
                 mix_inputs,
-                audio_clips.len()
+                audio_clips.len(),
+                mix_out
+            ));
+        }
+
+        if let Some(lufs) = timeline_doc.loudness_lufs {
+            // Single-pass loudnorm resamples internally (192 kHz); bring it back to 48 kHz.
+            a_filter_parts.push(format!(
+                "[amix]loudnorm=I={lufs}:TP=-1.5:LRA=11,aresample=48000[a]"
             ));
         }
 

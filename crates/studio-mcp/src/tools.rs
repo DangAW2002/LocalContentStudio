@@ -454,6 +454,52 @@ fn catalog_enable(
     )
 }
 
+/// Adds `duration_seconds` next to a WAV `audio_path` in a tool result, so agents can plan a
+/// timeline without probing every clip themselves.
+fn annotate_audio_duration(ws: &Workspace, output: &mut Value) {
+    let Some(rel) = output.get("audio_path").and_then(Value::as_str) else {
+        return;
+    };
+    let path = std::path::Path::new(rel);
+    let full = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        ws.root().join(path)
+    };
+    if !full.starts_with(ws.root()) {
+        return;
+    }
+    if let Some(secs) = wav_duration_seconds(&full) {
+        output["duration_seconds"] = json!((secs * 1000.0).round() / 1000.0);
+    }
+}
+
+/// Duration of a PCM/float WAV file from its RIFF header (`data` bytes / byte rate).
+fn wav_duration_seconds(path: &std::path::Path) -> Option<f64> {
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return None;
+    }
+    let mut pos = 12;
+    let mut byte_rate: Option<u32> = None;
+    while pos + 8 <= bytes.len() {
+        let id = &bytes[pos..pos + 4];
+        let size = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().ok()?) as usize;
+        let body = pos + 8;
+        if id == b"fmt " && body + 12 <= bytes.len() {
+            byte_rate = Some(u32::from_le_bytes(
+                bytes[body + 8..body + 12].try_into().ok()?,
+            ));
+        } else if id == b"data" {
+            let rate = byte_rate.filter(|r| *r > 0)?;
+            let data_len = size.min(bytes.len().saturating_sub(body));
+            return Some(data_len as f64 / rate as f64);
+        }
+        pos = body + size + (size & 1);
+    }
+    None
+}
+
 async fn capability_run(
     state: &ServerState,
     ctx: &TurnContext,
@@ -489,6 +535,7 @@ async fn capability_run(
             Ok(run) => {
                 let mut output = run.to_json_output();
                 relocate_and_index_generated_files(ws, ctx, provider, &input, &mut output);
+                annotate_audio_duration(ws, &mut output);
                 return Ok(json!({ "provider": provider, "result": output }));
             }
             Err(e) => errors.push(format!("{provider}: {e}")),
@@ -875,7 +922,16 @@ pub async fn render_artifact_shared(
         }
     }
 
-    let outcome = studio_artifacts::render(ws, &p, &artifact, scheduler)
+    // Timeline audio is normalized to the loudness target of the first channel that sets one.
+    let loudness_lufs = BrandSet::load(ws).ok().and_then(|set| {
+        artifact
+            .channels
+            .iter()
+            .find_map(|c| set.get_channel(c).and_then(|ch| ch.loudness_lufs))
+            .map(f64::from)
+    });
+    let options = studio_artifacts::RenderOptions { loudness_lufs };
+    let outcome = studio_artifacts::render_with(ws, &p, &artifact, scheduler, &options)
         .await
         .map_err(|e| format!("Render lỗi: {e}"))?;
 
@@ -1089,5 +1145,41 @@ mod tests {
         assert_eq!(json["status"], "ok");
         assert_eq!(json["unrelated"], "text string");
         assert_eq!(json["number"], 42);
+    }
+}
+
+#[cfg(test)]
+mod audio_duration_tests {
+    use super::wav_duration_seconds;
+
+    fn wav(sample_rate: u32, channels: u16, bits: u16, samples: u32) -> Vec<u8> {
+        let block = channels * bits / 8;
+        let data_len = samples * block as u32;
+        let mut v = Vec::new();
+        v.extend_from_slice(b"RIFF");
+        v.extend_from_slice(&(36 + data_len).to_le_bytes());
+        v.extend_from_slice(b"WAVEfmt ");
+        v.extend_from_slice(&16u32.to_le_bytes());
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.extend_from_slice(&channels.to_le_bytes());
+        v.extend_from_slice(&sample_rate.to_le_bytes());
+        v.extend_from_slice(&(sample_rate * block as u32).to_le_bytes());
+        v.extend_from_slice(&block.to_le_bytes());
+        v.extend_from_slice(&bits.to_le_bytes());
+        v.extend_from_slice(b"data");
+        v.extend_from_slice(&data_len.to_le_bytes());
+        v.resize(v.len() + data_len as usize, 0);
+        v
+    }
+
+    #[test]
+    fn reads_duration_from_wav_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("a.wav");
+        std::fs::write(&p, wav(22050, 1, 16, 22050 * 3 / 2)).unwrap();
+        let d = wav_duration_seconds(&p).unwrap();
+        assert!((d - 1.5).abs() < 1e-6, "{d}");
+        std::fs::write(&p, b"not a wav").unwrap();
+        assert!(wav_duration_seconds(&p).is_none());
     }
 }

@@ -206,6 +206,7 @@ fn test_ffmpeg_graph_builder_unit() {
         width: 1920,
         height: 1080,
         fps: 30.0,
+        loudness_lufs: None,
         tracks: vec![
             Track {
                 id: "video-track".into(),
@@ -375,6 +376,7 @@ async fn test_windows_integration_ffmpeg_timeline() {
         width: 1280,
         height: 720,
         fps: 30.0,
+        loudness_lufs: None,
         tracks: vec![Track {
             id: "main-video".into(),
             kind: TrackKind::Video,
@@ -639,6 +641,7 @@ fn test_timeline_ffmpeg_args_with_image_audio_and_srt() {
         width: 1920,
         height: 1080,
         fps: 30.0,
+        loudness_lufs: None,
         tracks: vec![
             Track {
                 id: "video-track".into(),
@@ -707,6 +710,15 @@ fn test_timeline_ffmpeg_args_with_image_audio_and_srt() {
     assert!(args.contains(&"[v]".to_string()));
     assert!(args.contains(&"[a]".to_string()));
     assert!(args.contains(&"aac".to_string()));
+    assert!(!filter_graph.contains("loudnorm"));
+
+    // A loudness target routes the mix through loudnorm and still maps [a].
+    let mut doc = doc;
+    doc.loudness_lufs = Some(-14.0);
+    let (args, filter_graph) = build_timeline_ffmpeg_args(&doc, &out_path);
+    assert!(filter_graph.contains("adelay=500|500[amix]"));
+    assert!(filter_graph.contains("[amix]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[a]"));
+    assert!(args.contains(&"[a]".to_string()));
 }
 
 #[tokio::test]
@@ -770,6 +782,7 @@ async fn real_timeline_assembles_image_wav_srt_to_mp4() {
         width: 1920,
         height: 1080,
         fps: 30.0,
+        loudness_lufs: None,
         tracks: vec![
             Track {
                 id: "video-track-1".into(),
@@ -833,7 +846,11 @@ async fn real_timeline_assembles_image_wav_srt_to_mp4() {
     )
     .unwrap();
 
-    let outcome = render(&ws, &proj, &art, &scheduler)
+    // Channel loudness target, as studio-mcp resolves it for youtube.
+    let options = RenderOptions {
+        loudness_lufs: Some(-14.0),
+    };
+    let outcome = render_with(&ws, &proj, &art, &scheduler, &options)
         .await
         .expect("Timeline render of image + wav + srt failed");
     assert!(!outcome.cached);
@@ -850,6 +867,25 @@ async fn real_timeline_assembles_image_wav_srt_to_mp4() {
     assert_eq!(meta.width, 1920);
     assert_eq!(meta.height, 1080);
     assert!(meta.duration_seconds >= 3.8 && meta.duration_seconds <= 4.2);
+
+    // Integrated loudness lands near the -14 LUFS target.
+    let ebur = std::process::Command::new(&ffmpeg_bin)
+        .args(["-hide_banner", "-nostats", "-i"])
+        .arg(mp4_path)
+        .args(["-af", "ebur128", "-f", "null", "-"])
+        .output()
+        .expect("ebur128 measurement failed");
+    let log = String::from_utf8_lossy(&ebur.stderr);
+    let summary = &log[log.rfind("Summary:").expect("no ebur128 summary")..];
+    let integrated: f64 = summary
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("I:"))
+        .and_then(|v| v.trim().trim_end_matches("LUFS").trim().parse().ok())
+        .expect("no integrated loudness");
+    assert!(
+        (integrated + 14.0).abs() <= 1.5,
+        "integrated loudness {integrated} LUFS, expected about -14"
+    );
 
     println!(
         "SUCCESS: Assembled image + wav + srt to MP4: {} (size: {} bytes, duration: {:.2}s, resolution: {}x{})",

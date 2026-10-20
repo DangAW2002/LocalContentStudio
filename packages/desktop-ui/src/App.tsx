@@ -48,6 +48,37 @@ export const App: React.FC = () => {
   const [engines, setEngines] = React.useState<EngineProbeResult[]>([]);
   const [jobs, setJobs] = React.useState<JobSnapshot[]>([]);
   const [diskUsage, setDiskUsage] = React.useState<DiskUsageReport | undefined>();
+  const [budgetStatus, setBudgetStatus] = React.useState<import("./api/types").BudgetStatus | undefined>();
+  const [pendingPermissions, setPendingPermissions] = React.useState<import("./api/types").PendingPermission[]>([]);
+
+  // Permission requests can arrive while their thread is not on screen; poll the broker so the
+  // status bar can point at them (the Thread pane re-attaches them when opened).
+  React.useEffect(() => {
+    let disposed = false;
+    const refresh = () =>
+      studioApi
+        .getPendingPermissions()
+        .then((list) => {
+          if (!disposed) setPendingPermissions(list);
+        })
+        .catch(() => {});
+    refresh();
+    const timer = window.setInterval(refresh, 3000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const openPendingPermission = React.useCallback((p: import("./api/types").PendingPermission) => {
+    setActiveArea("projects");
+    if (p.project) setActiveProjectSlug(p.project);
+    setActiveThreadId(p.threadId);
+    // ProjectView may already be mounted with another thread selected.
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("studio:select-thread", { detail: { threadId: p.threadId } }));
+    }, 300);
+  }, []);
 
   // Context for files and threads
   const [projectList, setProjectList] = React.useState<ProjectSummary[]>([]);
@@ -79,13 +110,14 @@ export const App: React.FC = () => {
   // Initial data loading
   const loadWorkspaceAndCore = React.useCallback(async () => {
     try {
-      const [currWs, recents, engs, jobList, disk, projs] = await Promise.all([
+      const [currWs, recents, engs, jobList, disk, projs, bgt] = await Promise.all([
         studioApi.getCurrentWorkspace().catch(() => null),
         studioApi.getRecentWorkspaces().catch(() => []),
         studioApi.probeEngines().catch(() => []),
         studioApi.getJobsSnapshot().catch(() => []),
         studioApi.getDiskUsage().catch(() => undefined),
         studioApi.getProjects().catch(() => []),
+        studioApi.getBudget().catch(() => undefined),
       ]);
 
       if (currWs?.workspace) {
@@ -98,6 +130,7 @@ export const App: React.FC = () => {
       setJobs(jobList);
       setDiskUsage(disk);
       setProjectList(projs);
+      setBudgetStatus(bgt);
       if (!activeProjectSlug && projs.length > 0) {
         setActiveProjectSlug(projs[0].slug);
       }
@@ -666,9 +699,13 @@ export const App: React.FC = () => {
         engines={engines}
         jobs={jobs}
         diskUsage={diskUsage}
+        todayCostUsd={budgetStatus?.todaySpendUsd}
+        todayBudgetUsd={budgetStatus?.dailyBudgetUsd}
         onOpenTaskCenter={() => setTaskCenterOpen(true)}
         onOpenSettings={handleNavigateSettings}
         onOpenWorkspaceFolder={() => setWorkspaceSwitcherOpen(true)}
+        pendingPermissions={pendingPermissions}
+        onOpenPendingPermission={openPendingPermission}
       />
 
       {/* Command Palette Modal (Ctrl+K) */}

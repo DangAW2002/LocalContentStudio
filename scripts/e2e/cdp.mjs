@@ -118,9 +118,16 @@ export class CDPClient {
     const expr = `(async () => {
       const internals = window.__TAURI_INTERNALS__ || window.__TAURI__?.core;
       if (!internals) throw new Error("Tauri internals not available on window");
-      return await internals.invoke(${JSON.stringify(cmd)}, ${JSON.stringify(args)});
+      try {
+        return { ok: true, value: await internals.invoke(${JSON.stringify(cmd)}, ${JSON.stringify(args)}) };
+      } catch (e) {
+        // Command errors are plain values/strings; surface them instead of "Uncaught (in promise)".
+        return { ok: false, error: typeof e === "string" ? e : (e?.message ?? JSON.stringify(e)) };
+      }
     })()`;
-    return await this.eval(expr);
+    const res = await this.eval(expr);
+    if (!res?.ok) throw new Error(`invoke ${cmd} failed: ${res?.error}`);
+    return res.value;
   }
 
   async shot(outPath) {

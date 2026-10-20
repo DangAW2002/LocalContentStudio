@@ -18,6 +18,10 @@ pub struct TimelineDoc {
     /// Ordered list of tracks
     #[serde(default)]
     pub tracks: Vec<Track>,
+    /// Integrated loudness target (LUFS) for the mixed audio. When absent, the render uses the
+    /// target of the artifact's channel, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loudness_lufs: Option<f64>,
 }
 
 fn default_version() -> u32 {
@@ -78,7 +82,9 @@ pub enum Transition {
 pub struct Clip {
     /// Unique clip identifier within track
     pub id: String,
-    /// Source reference: asset path, render path, or text (for captions)
+    /// Source reference: asset path, render path, or text (for captions).
+    /// `text` / `path` are accepted too — agents naturally write captions as `text`.
+    #[serde(alias = "text", alias = "path")]
     pub source: String,
     /// Source in-point in seconds
     #[serde(default)]
@@ -97,4 +103,18 @@ pub struct Clip {
     /// Transition duration in seconds if transition is Fade
     #[serde(default)]
     pub transition_duration: Option<f64>,
+}
+
+#[cfg(test)]
+mod alias_tests {
+    use super::*;
+
+    #[test]
+    fn caption_clip_accepts_text_for_source() {
+        let doc: TimelineDoc = serde_json::from_str(
+            r#"{"tracks":[{"id":"s","kind":"captions","clips":[{"id":"t1","text":"Xin chào","start":0,"duration":2}]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(doc.tracks[0].clips[0].source, "Xin chào");
+    }
 }

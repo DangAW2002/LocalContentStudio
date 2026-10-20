@@ -5,14 +5,13 @@ provides:
   - "ffmpeg.probe@1"
 run:
   type: cli
-  command: "ffprobe"
+  command: "powershell"
   args:
-    - "-v"
-    - "quiet"
-    - "-print_format"
-    - "json"
-    - "-show_format"
-    - "-show_streams"
+    - "-NoProfile"
+    - "-ExecutionPolicy"
+    - "Bypass"
+    - "-Command"
+    - "[Console]::InputEncoding = [System.Text.Encoding]::UTF8; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $json = [Console]::In.ReadToEnd() | ConvertFrom-Json; $asset = [string]$json.asset; if (-not $asset) { [Console]::Error.WriteLine('Thiếu tham số asset (đường dẫn tương đối trong workspace).'); exit 2 }; if ([System.IO.Path]::IsPathRooted($asset) -or ($asset -split '[\\\\/]' -contains '..')) { [Console]::Error.WriteLine('asset phải là đường dẫn tương đối trong workspace, không chứa ..'); exit 2 }; $full = [System.IO.Path]::Combine((Get-Location).Path, $asset); if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { [Console]::Error.WriteLine('Không tìm thấy tệp: ' + $asset); exit 2 }; $out = & ffprobe -v error -print_format json -show_format -show_streams $full; if ($LASTEXITCODE -ne 0) { [Console]::Error.WriteLine('ffprobe không đọc được tệp: ' + $asset); exit $LASTEXITCODE }; $text = ($out -join [Environment]::NewLine); if ($env:STUDIO_OUT) { [System.IO.File]::WriteAllText($env:STUDIO_OUT, $text, [System.Text.Encoding]::UTF8) }; Write-Output $text"
 needs:
   - "bin:ffmpeg"
 cost:

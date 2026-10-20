@@ -4,6 +4,7 @@
 
 pub mod assets;
 mod broker;
+pub mod budget;
 mod commands;
 mod defaults;
 mod engines;
@@ -169,10 +170,14 @@ fn main() {
             commands::thread_list,
             commands::thread_create,
             commands::thread_events,
+            budget::thread_set_model,
             commands::turn_start,
             commands::turn_cancel,
             commands::turn_undo,
             commands::permission_respond,
+            commands::permission_pending,
+            budget::budget_get,
+            budget::budget_set,
             commands::checkpoint_list,
             commands::checkpoint_restore,
             commands::engines_probe,

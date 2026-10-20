@@ -645,6 +645,19 @@ pub fn permission_respond_impl(
     Ok(json!({ "acknowledged": state.broker.respond(&request_id, allow) }))
 }
 
+/// Permission requests still waiting for an answer (optionally for one thread).
+pub fn permission_pending_impl(state: &AppState, thread_id: Option<String>) -> CmdResult<Value> {
+    Ok(json!(state.broker.list_pending(thread_id.as_deref())))
+}
+
+#[tauri::command]
+pub fn permission_pending(
+    state: State<'_, AppState>,
+    thread_id: Option<String>,
+) -> CmdResult<Value> {
+    permission_pending_impl(&state, thread_id)
+}
+
 #[tauri::command]
 pub fn permission_respond(
     state: State<'_, AppState>,

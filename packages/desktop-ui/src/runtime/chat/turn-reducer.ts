@@ -37,6 +37,7 @@ export interface ThreadMessage {
   turnId?: string;
   isStreaming?: boolean;
   errorMessage?: string;
+  model?: string;
 }
 
 export interface ToolCallItem {

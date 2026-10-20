@@ -120,7 +120,7 @@ impl AgyParser {
 
                             events.push(Event::ToolCall {
                                 id: step_id,
-                                name: tool_name.to_string(),
+                                name: friendly_agy_tool_name(tool_name).to_string(),
                                 input: parameters,
                             });
                         } else if state == "DONE" || state == "ERROR" {
@@ -246,4 +246,21 @@ fn extract_agy_target_file(params: &Value) -> Option<&str> {
         .or_else(|| params.get("AbsolutePath"))
         .or_else(|| params.get("path"))
         .and_then(|v| v.as_str())
+}
+
+/// Map internal agy tool names to friendly Vietnamese readable step names.
+fn friendly_agy_tool_name(tool_name: &str) -> &'static str {
+    match tool_name {
+        "view_file" => "Đọc tệp",
+        "write_to_file" => "Tạo tệp",
+        "replace_file_content" | "multi_replace_file_content" | "sed_file" => "Sửa tệp",
+        "run_command" | "send_command_input" => "Chạy lệnh shell",
+        "read_url_content" | "search_web" | "read_browser_page" | "open_browser_url" => {
+            "Tìm kiếm & duyệt web"
+        }
+        "call_mcp_tool" => "Gọi công cụ Studio",
+        "invoke_subagent" | "send_message" => "Điều phối tác vụ con",
+        "list_dir" | "find_by_name" | "grep_search" => "Tìm kiếm tệp",
+        _ => "Công cụ",
+    }
 }

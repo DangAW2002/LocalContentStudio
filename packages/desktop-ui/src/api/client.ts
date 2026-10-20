@@ -43,6 +43,7 @@ import type {
   WorkspaceCreateRequest,
   WorkspaceOpenRequest,
   WorkspaceCurrentResponse,
+  BudgetStatus,
   ProjectSummary,
   ProjectCreateRequest,
   ProjectFileEntry,
@@ -60,6 +61,7 @@ import type {
   TurnUndoResponse,
   PermissionRespondRequest,
   PermissionRespondResponse,
+  PendingPermission,
   CheckpointSummary,
   CheckpointRestoreRequest,
   CheckpointRestoreResponse,
@@ -264,6 +266,38 @@ export class StudioApiClient {
    */
   async undoTurn(req: TurnUndoRequest): Promise<TurnUndoResponse> {
     return invoke<TurnUndoResponse>("turn_undo", { ...req });
+  }
+
+  /**
+   * Update the model of an existing thread mid-thread.
+   * Command: `thread_set_model`
+   */
+  async setThreadModel(threadId: string, model: string | null): Promise<{ success: boolean; threadId: string; model: string | null }> {
+    return invoke("thread_set_model", { threadId, model });
+  }
+
+  /**
+   * Get workspace budget status and current spend.
+   * Command: `budget_get`
+   */
+  async getBudget(): Promise<BudgetStatus> {
+    return invoke<BudgetStatus>("budget_get");
+  }
+
+  /**
+   * Set workspace daily and monthly budget.
+   * Command: `budget_set`
+   */
+  async setBudget(dailyBudgetUsd: number | null, monthlyBudgetUsd: number | null): Promise<BudgetStatus> {
+    return invoke<BudgetStatus>("budget_set", { dailyBudgetUsd, monthlyBudgetUsd });
+  }
+
+  /**
+   * Permission requests still waiting for an answer (all threads, or one thread).
+   * Command: `permission_pending`
+   */
+  async getPendingPermissions(threadId?: string): Promise<PendingPermission[]> {
+    return invoke<PendingPermission[]>("permission_pending", threadId ? { threadId } : {});
   }
 
   /**

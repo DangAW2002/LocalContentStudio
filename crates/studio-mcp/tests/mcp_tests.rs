@@ -454,13 +454,16 @@ async fn test_capability_relocation_and_indexing() {
 
     let rel_file = files[0].as_str().unwrap();
     // Path should be relocated to projects/my-project/assets/generated/<YYYY-MM-DD>/...
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let expected_prefix = format!("projects/my-project/assets/generated/{}", today);
+    let today_local = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let today_utc = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let prefix_local = format!("projects/my-project/assets/generated/{}", today_local);
+    let prefix_utc = format!("projects/my-project/assets/generated/{}", today_utc);
     assert!(
-        rel_file.starts_with(&expected_prefix),
-        "Relocated path {} should start with {}",
+        rel_file.starts_with(&prefix_local) || rel_file.starts_with(&prefix_utc),
+        "Relocated path {} should start with {} or {}",
         rel_file,
-        expected_prefix
+        prefix_local,
+        prefix_utc
     );
 
     // Verify physical file exists at relocated path

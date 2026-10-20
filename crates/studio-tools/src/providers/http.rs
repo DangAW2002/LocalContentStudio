@@ -92,10 +92,13 @@ pub fn check_magic_bytes(bytes: &[u8], kind: MediaKind) -> Result<&'static str> 
 }
 
 /// Create a reusable reqwest Client with reasonable timeouts.
+///
+/// Image/video generation calls routinely take 1–3 minutes (more through gateways), so the
+/// request timeout is generous; the connect timeout stays short.
 pub fn create_http_client() -> Client {
     Client::builder()
         .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(120))
+        .timeout(Duration::from_secs(600))
         .build()
         .unwrap_or_else(|_| Client::new())
 }
@@ -157,7 +160,9 @@ where
                     reason: error_msg,
                 });
             }
-            Err(e) if attempt < max_retries && (e.is_timeout() || e.is_connect()) => {
+            // Only retry when the request never reached the server. A timed-out generation
+            // may still have been processed (and billed), so it is not sent again.
+            Err(e) if attempt < max_retries && e.is_connect() => {
                 attempt += 1;
                 tokio::time::sleep(backoff).await;
                 backoff = (backoff * 2).min(Duration::from_secs(30));

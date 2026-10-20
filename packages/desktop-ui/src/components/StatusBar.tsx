@@ -1,7 +1,7 @@
 import React from "react";
 import { Icon } from "./Icon";
 import { cleanDisplayPath } from "../utils/path";
-import type { EngineProbeResult, JobSnapshot, DiskUsageReport } from "../api/types";
+import type { EngineProbeResult, JobSnapshot, DiskUsageReport, PendingPermission } from "../api/types";
 
 export interface StatusBarProps {
   workspacePath?: string;
@@ -9,9 +9,13 @@ export interface StatusBarProps {
   jobs: JobSnapshot[];
   diskUsage?: DiskUsageReport;
   todayCostUsd?: number;
+  todayBudgetUsd?: number | null;
   onOpenTaskCenter: () => void;
   onOpenSettings: (tab?: string) => void;
   onOpenWorkspaceFolder?: () => void;
+  /** Permission requests waiting for an answer, in any thread. */
+  pendingPermissions?: PendingPermission[];
+  onOpenPendingPermission?: (p: PendingPermission) => void;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
@@ -20,9 +24,12 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   jobs,
   diskUsage,
   todayCostUsd,
+  todayBudgetUsd,
   onOpenTaskCenter,
   onOpenSettings,
   onOpenWorkspaceFolder,
+  pendingPermissions,
+  onOpenPendingPermission,
 }) => {
   const [windowWidth, setWindowWidth] = React.useState<number>(
     typeof window !== "undefined" ? window.innerWidth : 1024
@@ -161,19 +168,36 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
       {/* Right: Cost (if M07 available) + Disk Usage + Jobs snapshot */}
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        {!isUnder600 && typeof todayCostUsd === "number" && todayCostUsd > 0 && (
-          <span
+        {!isUnder600 && typeof todayCostUsd === "number" && (
+          <button
+            type="button"
+            onClick={() => onOpenSettings("jobs")}
             style={{
               display: "inline-flex",
               alignItems: "center",
               gap: 4,
-              color: "var(--cs-fg-secondary)",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: "inherit",
+              padding: "2px 4px",
+              borderRadius: "var(--cs-radius-control)",
+              color: todayBudgetUsd && todayCostUsd >= todayBudgetUsd ? "var(--cs-danger)" : "var(--cs-fg-secondary)",
+              fontWeight: todayBudgetUsd && todayCostUsd >= todayBudgetUsd ? 600 : 400,
             }}
-            title="Chi phí ước tính hôm nay"
+            title={
+              todayBudgetUsd
+                ? `Hôm nay: $${todayCostUsd.toFixed(2)} / $${todayBudgetUsd.toFixed(2)} (Bấm để đổi ngân sách)`
+                : `Hôm nay: $${todayCostUsd.toFixed(2)} (Chưa đặt giới hạn ngày)`
+            }
           >
-            <Icon name="dollar-sign" size={12} color="var(--cs-fg-muted)" />
-            <span>${todayCostUsd.toFixed(2)} hôm nay</span>
-          </span>
+            <Icon name="dollar-sign" size={12} color={todayBudgetUsd && todayCostUsd >= todayBudgetUsd ? "var(--cs-danger)" : "var(--cs-fg-muted)"} />
+            <span>
+              {todayBudgetUsd != null
+                ? `Hôm nay $${todayCostUsd.toFixed(2)} / $${todayBudgetUsd.toFixed(2)}`
+                : `$${todayCostUsd.toFixed(2)} hôm nay`}
+            </span>
+          </button>
         )}
 
         {!isUnder600 && diskUsage && (
@@ -196,6 +220,30 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           >
             <Icon name="hard-drive" size={12} color="var(--cs-fg-muted)" />
             <span>Đĩa: {diskUsage.formatted.total}</span>
+          </button>
+        )}
+
+        {pendingPermissions && pendingPermissions.length > 0 && (
+          <button
+            type="button"
+            onClick={() => onOpenPendingPermission?.(pendingPermissions[0])}
+            title="Agent đang chờ bạn cấp quyền — bấm để mở hội thoại"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              background: "none",
+              border: "none",
+              color: "var(--cs-warning)",
+              fontWeight: 600,
+              cursor: "pointer",
+              fontSize: "inherit",
+              padding: "2px 6px",
+              borderRadius: "var(--cs-radius-control)",
+            }}
+          >
+            <Icon name="shield" size={13} color="var(--cs-warning)" />
+            <span>{pendingPermissions.length} chờ cấp quyền</span>
           </button>
         )}
 

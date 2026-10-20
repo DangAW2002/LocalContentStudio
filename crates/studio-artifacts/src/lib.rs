@@ -20,7 +20,7 @@ pub use cache::{
 pub use error::{ArtifactError, Result};
 pub use kind::{KindRegistry, KindSpec};
 pub use probe::{probe_chromium, probe_ffmpeg, probe_ffprobe, probe_node_npx, ProbeReport};
-pub use render::{render, RenderOutcome};
+pub use render::{render, render_with, RenderOptions, RenderOutcome};
 pub use renderer::{
     build_html_render_job, build_hyperframes_render_job, build_proxy_job,
     build_timeline_ffmpeg_args, build_timeline_render_job, detect_artboard_size,

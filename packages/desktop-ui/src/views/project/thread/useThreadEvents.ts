@@ -33,6 +33,16 @@ export function useThreadEvents({ activeThreadId, onTurnDone }: UseThreadEventsO
           if (!res.hasMore || !res.nextCursor) break;
           cursor = res.nextCursor;
         }
+        // Permission requests are not in the persisted history; re-attach the ones still open
+        // (they may have been asked while this thread was not on screen).
+        const pending = await studioApi.getPendingPermissions(activeThreadId).catch(() => []);
+        for (const p of pending) {
+          folded = applyTurnEvent(folded, {
+            threadId: p.threadId,
+            turnId: p.turnId,
+            event: { type: "PermissionRequest", requestId: p.requestId, tool: p.tool, input: p.input },
+          });
+        }
         if (cancelled) return;
         const live = folded.find((m) => m.role === "agent" && m.isStreaming);
         setRunningTurnId(live?.turnId ?? null);
