@@ -78,7 +78,7 @@ pub enum Transition {
 }
 
 /// Clip placed on a track.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct Clip {
     /// Unique clip identifier within track
     pub id: String,
@@ -103,6 +103,21 @@ pub struct Clip {
     /// Transition duration in seconds if transition is Fade
     #[serde(default)]
     pub transition_duration: Option<f64>,
+    /// Horizontal offset in pixels from top-left (default: 0).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<i32>,
+    /// Vertical offset in pixels from top-left (default: 0).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<i32>,
+    /// Optional scaled width in pixels. If height is omitted, aspect ratio is preserved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    /// Optional scaled height in pixels. If width is omitted, aspect ratio is preserved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+    /// Opacity from 0.0 (transparent) to 1.0 (fully opaque).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
 }
 
 #[cfg(test)]
@@ -116,5 +131,19 @@ mod alias_tests {
         )
         .unwrap();
         assert_eq!(doc.tracks[0].clips[0].source, "Xin chào");
+    }
+
+    #[test]
+    fn clip_optional_overlay_fields_deserialization() {
+        let doc: TimelineDoc = serde_json::from_str(
+            r#"{"tracks":[{"id":"v2","kind":"video","clips":[{"id":"logo","source":"logo.png","start":1.0,"duration":5.0,"x":50,"y":30,"width":200,"opacity":0.85}]}]}"#,
+        )
+        .unwrap();
+        let clip = &doc.tracks[0].clips[0];
+        assert_eq!(clip.x, Some(50));
+        assert_eq!(clip.y, Some(30));
+        assert_eq!(clip.width, Some(200));
+        assert_eq!(clip.height, None);
+        assert_eq!(clip.opacity, Some(0.85));
     }
 }

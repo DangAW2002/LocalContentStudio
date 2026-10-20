@@ -1,0 +1,53 @@
+{
+  "id": "media.inspect",
+  "version": 1,
+  "title": "Media Inspect",
+  "description": "Inspects media file properties: duration, dimensions, framerate, audio presence, loudness (integrated LUFS via ebur128), and extracts sample frames",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "path": {
+        "type": "string",
+        "description": "Workspace-relative path to audio or video file"
+      }
+    },
+    "required": ["path"]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "duration_seconds": {
+        "type": "number",
+        "description": "Media duration in seconds"
+      },
+      "width": {
+        "type": ["integer", "null"],
+        "description": "Video width in pixels, or null if audio-only"
+      },
+      "height": {
+        "type": ["integer", "null"],
+        "description": "Video height in pixels, or null if audio-only"
+      },
+      "fps": {
+        "type": ["number", "null"],
+        "description": "Video framerate, or null if audio-only"
+      },
+      "has_audio": {
+        "type": "boolean",
+        "description": "True if an audio stream is present"
+      },
+      "loudness_lufs": {
+        "type": ["number", "null"],
+        "description": "Integrated loudness in LUFS via ebur128, or null if no audio"
+      },
+      "sample_frames": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Workspace-relative paths to PNG frames captured at 10%, 50%, and 90% of duration"
+      }
+    },
+    "required": ["duration_seconds", "has_audio", "sample_frames"]
+  }
+}

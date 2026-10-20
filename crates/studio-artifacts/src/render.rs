@@ -335,10 +335,13 @@ fn artboard_size(artifact: &Artifact, project: &Project) -> Option<(u32, u32)> {
 pub(crate) fn timeline_schema_hint(err: &serde_json::Error) -> String {
     format!(
         "timeline.json không hợp lệ (dòng {}, cột {}): {err}. Cấu trúc đúng: \
-         {{\"width\":1920,\"height\":1080,\"fps\":30,\"tracks\":[{{\"id\":\"v1\",\"kind\":\"video\"|\"audio\"|\"captions\",\
+         {{\"width\":1920,\"height\":1080,\"fps\":30,\"tracks\":[{{\"id\":\"video\",\"kind\":\"video\",\
          \"clips\":[{{\"id\":\"c1\",\"source\":\"<đường dẫn tương đối từ thư mục artifact, hoặc color:#RRGGBB, \
-         hoặc chữ phụ đề>\",\"start\":0,\"duration\":5,\"in_point\":0,\"transition\":\"none\"|\"fade\"}}]}}]}}. \
-         Mỗi track và mỗi clip bắt buộc có \"id\"; mỗi clip bắt buộc có \"source\" và \"duration\".",
+         hoặc chữ phụ đề>\",\"start\":0,\"duration\":5,\"in_point\":0,\"transition\":\"none\"|\"fade\"}}]}},\
+         {{\"id\":\"overlay\",\"kind\":\"video\",\"clips\":[{{\"id\":\"logo\",\"source\":\"assets/logo.png\",\
+         \"start\":0,\"duration\":5,\"x\":50,\"y\":50,\"width\":200,\"opacity\":0.9}}]}}]}}. \
+         Mỗi track và mỗi clip bắt buộc có \"id\"; mỗi clip bắt buộc có \"source\" và \"duration\". \
+         Track video đầu tiên là chuỗi gốc (base), các track video tiếp theo là lớp phủ (overlay). Không dùng file .svg trực tiếp trong timeline (cần render sang PNG trước).",
         err.line(),
         err.column()
     )

@@ -1,0 +1,21 @@
+id: media.inspect
+kind: checker
+description: "Kiểm tra thông số kỹ thuật đa phương tiện (thời lượng, kích thước, fps, loudness LUFS qua ebur128, trích xuất khung hình mẫu)"
+provides:
+  - "media.inspect@1"
+run:
+  type: builtin
+  command: "media.inspect"
+needs:
+  - "bin:ffmpeg"
+  - "bin:ffprobe"
+cost:
+  unit: "call"
+  estimate: 0.0
+side_effect: none
+resources:
+  ram_mb: 256
+  cpu: light
+  gpu_vram_mb: 0
+  exclusive: []
+lifecycle: per_call
