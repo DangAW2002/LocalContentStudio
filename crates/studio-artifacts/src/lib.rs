@@ -11,6 +11,7 @@ pub mod render;
 pub mod renderer;
 pub mod starter;
 pub mod timeline;
+pub mod timeline_build;
 pub mod validate;
 
 pub use artifact::Artifact;
@@ -28,4 +29,8 @@ pub use renderer::{
 };
 pub use starter::*;
 pub use timeline::{Clip, TimelineDoc, Track, TrackKind, Transition};
+pub use timeline_build::{
+    build_timeline, build_timeline_tool, OverlayInput, SegmentInput, SegmentOutput,
+    TimelineBuildParams, TimelineBuildResult,
+};
 pub use validate::{validate_png, validate_video, ImageMeta, VideoMeta};

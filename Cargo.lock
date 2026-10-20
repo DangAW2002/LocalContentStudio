@@ -4289,6 +4289,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2",
+ "studio-brand",
  "studio-jobs",
  "studio-workspace",
  "tempfile",
