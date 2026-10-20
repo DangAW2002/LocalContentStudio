@@ -720,3 +720,155 @@ async fn test_stale_runtime_d_entries_cleaned_up() {
     // Alive file must still exist
     assert!(alive_file.exists(), "alive entry should be preserved");
 }
+
+#[tokio::test]
+async fn test_mcp_timeline_build_with_generated_wavs() {
+    let ffmpeg_report = studio_artifacts::probe_ffmpeg();
+    let ffprobe_report = studio_artifacts::probe_ffprobe();
+    if !ffmpeg_report.available || !ffprobe_report.available {
+        println!("SKIP: test_mcp_timeline_build_with_generated_wavs — ffmpeg/ffprobe not found");
+        return;
+    }
+    let ffmpeg_bin = ffmpeg_report.path.unwrap();
+
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("a"), "A").unwrap();
+    let proj = studio_workspace::Project::create(&ws, "test-proj", "Test Project").unwrap();
+
+    // Generate 2 short wavs: 1.5s and 2.5s
+    let wav1 = proj.root().join("assets").join("vo1.wav");
+    let wav2 = proj.root().join("assets").join("vo2.wav");
+    std::fs::create_dir_all(proj.root().join("assets")).unwrap();
+
+    let s1 = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=1.5",
+            "-ar",
+            "22050",
+            "-ac",
+            "1",
+            wav1.to_str().unwrap(),
+        ])
+        .output()
+        .expect("generate wav1");
+    assert!(s1.status.success());
+
+    let s2 = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:duration=2.5",
+            "-ar",
+            "22050",
+            "-ac",
+            "1",
+            wav2.to_str().unwrap(),
+        ])
+        .output()
+        .expect("generate wav2");
+    assert!(s2.status.success());
+
+    // Generate 1 logo png
+    let logo = proj.root().join("assets").join("logo.png");
+    let s_logo = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=160x60:d=1:r=30",
+            "-vframes",
+            "1",
+            logo.to_str().unwrap(),
+        ])
+        .output()
+        .expect("generate logo");
+    assert!(s_logo.status.success());
+
+    let st = state();
+    let token = st.tokens.issue(ctx(ws.root(), EngineKind::Claude));
+    let srv = server::start(st.clone(), 0).await.unwrap();
+    let port = srv.addr.port();
+
+    let payload = json!({
+        "project": "test-proj",
+        "artifact": "video",
+        "segments": [
+            {
+                "audio": "projects/test-proj/assets/vo1.wav",
+                "text": "Phân cảnh đầu tiên giới thiệu về sản phẩm cà phê phin.",
+                "visual": "color:#1E88E5"
+            },
+            {
+                "audio": "projects/test-proj/assets/vo2.wav",
+                "text": "Phân cảnh thứ hai hướng dẫn chi tiết từng bước pha chế đúng điệu.",
+                "visual": "color:#43A047"
+            }
+        ],
+        "lead_s": 0.5,
+        "gap_s": 0.4,
+        "tail_s": 1.5,
+        "transition": "fade",
+        "captions": "sentences",
+        "overlays": [
+            {
+                "source": "projects/test-proj/assets/logo.png",
+                "x": 30,
+                "y": 30,
+                "width": 160,
+                "opacity": 0.8
+            }
+        ],
+        "brand": "demo",
+        "channels": ["youtube"]
+    });
+
+    let (status, resp) = post(port, Some(&token), None, call("timeline_build", payload)).await;
+    assert_eq!(status, 200, "MCP response status must be 200: {resp}");
+
+    let (text, err) = text_of(&resp);
+    assert!(!err, "MCP call returned error: {text}");
+
+    let parsed: Value = serde_json::from_str(&text).expect("parse json response text");
+    assert_eq!(parsed["artifact"], "video");
+    // Starts: 0.5; Next: 0.5 + 1.5 + 0.4 = 2.4; End = 2.4 + 2.5 + 1.5 = 6.4s
+    let duration = parsed["duration_s"].as_f64().unwrap();
+    assert!(
+        (duration - 6.4).abs() < 0.05,
+        "Expected duration 6.4, got {duration}"
+    );
+
+    let segments = parsed["segments"].as_array().unwrap();
+    assert_eq!(segments.len(), 2);
+    assert_eq!(segments[0]["start"], 0.0);
+    assert!((segments[0]["duration"].as_f64().unwrap() - 2.4).abs() < 0.05);
+    assert_eq!(segments[1]["start"], 2.4);
+
+    let captions_count = parsed["captions_count"].as_u64().unwrap();
+    assert!(captions_count >= 2);
+
+    // Verify artifact.yaml and timeline.json were written to disk
+    let art_dir = proj.artifacts_dir().join("video");
+    assert!(
+        art_dir.join("artifact.yaml").exists(),
+        "artifact.yaml must exist"
+    );
+    assert!(
+        art_dir.join("timeline.json").exists(),
+        "timeline.json must exist"
+    );
+
+    let tl_json_content = std::fs::read_to_string(art_dir.join("timeline.json")).unwrap();
+    let tl_doc: studio_artifacts::TimelineDoc = serde_json::from_str(&tl_json_content).unwrap();
+    assert_eq!(tl_doc.tracks.len(), 4); // video, overlays, audio, captions
+    assert_eq!(tl_doc.tracks[0].id, "video");
+    assert_eq!(tl_doc.tracks[1].id, "overlays");
+    assert_eq!(tl_doc.tracks[2].id, "audio");
+    assert_eq!(tl_doc.tracks[3].id, "captions");
+}
