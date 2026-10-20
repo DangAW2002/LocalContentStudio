@@ -70,7 +70,10 @@ pub fn detect_artboard_size(html: &str) -> Option<(u32, u32)> {
         let close = lower[open..].find('}').map(|c| open + c)?;
         let selector_start = lower[..open].rfind(['}', '>']).map(|s| s + 1).unwrap_or(0);
         let selector = &lower[selector_start..open];
-        if selector.contains("artboard") || selector.contains("frame") {
+        let page_root = selector
+            .split(',')
+            .any(|s| matches!(s.trim(), "html" | "body"));
+        if selector.contains("artboard") || selector.contains("frame") || page_root {
             let body = &lower[open..close];
             if let (Some(w), Some(h)) = (
                 num_after_prop(body, "width"),
@@ -131,6 +134,13 @@ mod artboard_tests {
     #[test]
     fn css_frame_rule() {
         let html = "<style>html, body { margin: 0; }\n .frame {\n position: relative;\n max-width: 9px;\n width: 1280px;\n height: 720px;\n line-height: 3px; }</style>";
+        assert_eq!(detect_artboard_size(html), Some((1280, 720)));
+    }
+
+    #[test]
+    fn css_page_root_rule() {
+        let html = "<style>
+ html, body { margin: 0; width: 1280px; height: 720px; overflow: hidden; }</style>";
         assert_eq!(detect_artboard_size(html), Some((1280, 720)));
     }
 

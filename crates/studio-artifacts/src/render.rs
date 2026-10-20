@@ -315,8 +315,12 @@ pub async fn render_with(
     })
 }
 
-/// Artboard size for an HTML artifact: `params.width/height` first, then what the HTML source declares.
+/// Artboard size for an HTML artifact: `width/height` (top level or under `params`) first, then
+/// what the HTML source declares.
 fn artboard_size(artifact: &Artifact, project: &Project) -> Option<(u32, u32)> {
+    if let (Some(w), Some(h)) = (artifact.width, artifact.height) {
+        return Some((w, h));
+    }
     let w = artifact.params["width"].as_u64();
     let h = artifact.params["height"].as_u64();
     if let (Some(w), Some(h)) = (w, h) {
