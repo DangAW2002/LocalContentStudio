@@ -804,7 +804,7 @@ export class StudioApiClient {
    * Command: `web_configure`
    */
   async webConfigure(req: WebConfigureRequest): Promise<WebStatus> {
-    return invoke<WebStatus>("web_configure", { ...req, req });
+    return invoke<WebStatus>("web_configure", { req });
   }
 
   // ==========================================

@@ -12,6 +12,7 @@ pub mod lan;
 pub mod qr;
 pub mod security;
 pub mod server;
+pub mod tls;
 pub mod upload;
 
 pub use auth::{hash_password, verify_password, Session, SessionStore};
@@ -19,4 +20,8 @@ pub use dispatcher::{BoxFuture, WebDispatcher};
 pub use events::WebEvent;
 pub use lan::{detect_lan_ip, format_lan_url};
 pub use qr::generate_qr_svg;
-pub use server::{build_router, start, RunningWebServer, WebServerConfig, WebServerState};
+pub use server::{
+    build_router, load_rustls_config, start, RunningWebServer, WebLimitsConfig, WebServerConfig,
+    WebServerState,
+};
+pub use tls::{ensure_tls_certificate, generate_self_signed_cert, TlsCertificateInfo};

@@ -12,7 +12,20 @@ fn extract_host(raw: &str) -> &str {
     trimmed.split(['/', ':']).next().unwrap_or("")
 }
 
+fn extract_scheme(raw: &str) -> Option<&str> {
+    if raw.starts_with("https://") {
+        Some("https")
+    } else if raw.starts_with("http://") {
+        Some("http")
+    } else {
+        None
+    }
+}
+
 /// Check if the Origin and Host headers are valid to prevent DNS rebinding and cross-site requests.
+///
+/// When `lan_allowed` is true, accepts either HTTP or HTTPS Origin matching the Host or LAN IP/loopback.
+/// Rejects origins with mismatched hosts or non-HTTP/HTTPS schemes.
 pub fn verify_origin_and_host(headers: &HeaderMap, lan_allowed: bool) -> bool {
     let host_hdr = match headers.get("host").and_then(|v| v.to_str().ok()) {
         Some(h) => h,
@@ -27,6 +40,15 @@ pub fn verify_origin_and_host(headers: &HeaderMap, lan_allowed: bool) -> bool {
 
     // If Origin is present (e.g., standard browser fetch / POST), it must match the Host.
     if let Some(origin_val) = headers.get("origin").and_then(|v| v.to_str().ok()) {
+        let scheme = match extract_scheme(origin_val) {
+            Some(s) => s,
+            None => return false, // Reject non-http/https origins like file://, javascript:, etc.
+        };
+
+        if scheme != "http" && scheme != "https" {
+            return false;
+        }
+
         let origin_host = extract_host(origin_val);
         // Compare hosts
         if !origin_host.eq_ignore_ascii_case(host_name) {
@@ -107,6 +129,33 @@ mod tests {
             HeaderValue::from_static("http://evil-attacker.com"),
         );
         assert!(!verify_origin_and_host(&headers, false));
+        assert!(!verify_origin_and_host(&headers, true));
+    }
+
+    #[test]
+    fn test_origin_and_host_https_lan() {
+        let mut headers = HeaderMap::new();
+        headers.insert("host", HeaderValue::from_static("192.168.1.50:3000"));
+        headers.insert(
+            "origin",
+            HeaderValue::from_static("https://192.168.1.50:3000"),
+        );
+
+        // LAN allowed -> accepted
+        assert!(verify_origin_and_host(&headers, true));
+
+        // Wrong host rejected
+        headers.insert(
+            "origin",
+            HeaderValue::from_static("https://192.168.1.99:3000"),
+        );
+        assert!(!verify_origin_and_host(&headers, true));
+
+        // Wrong scheme (e.g. ftp:// or file://) rejected
+        headers.insert(
+            "origin",
+            HeaderValue::from_static("file://192.168.1.50:3000"),
+        );
         assert!(!verify_origin_and_host(&headers, true));
     }
 
