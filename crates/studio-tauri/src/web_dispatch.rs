@@ -301,9 +301,16 @@ pub async fn dispatch_invoke(
             commands::scope_remove_override_impl(state, kind, id)
         }
         "asset_list" => {
-            let filter: Option<commands::AssetFilter> = get_opt_arg(&args, "filter");
-            let res = commands::asset_list_impl(state, filter)?;
+            let filter: Option<crate::assets::AssetFilter> = get_opt_arg(&args, "filter");
+            let res = crate::assets::asset_list_impl(state, filter)?;
             Ok(serde_json::to_value(res)?)
+        }
+        // `asset_import` (copies host paths) and `asset_open_folder` (opens Explorer on the host)
+        // are desktop-only on purpose: over the web they would read or act on the server machine.
+        "asset_delete" => {
+            let path: String = get_arg(&args, "path")?;
+            let res = crate::assets::asset_delete_impl(state, path)?;
+            Ok(res)
         }
         "jobs_snapshot" => {
             let res = commands::jobs_snapshot_impl(state).await?;

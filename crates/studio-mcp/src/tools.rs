@@ -644,6 +644,7 @@ fn relocate_and_index_generated_files(
                                 prompt: prompt.clone(),
                                 cost_usd: cost,
                                 turn_id: Some(ctx.turn_id.clone()),
+                                ..Default::default()
                             };
 
                             let sidecar_file = dest_path.with_extension(format!(

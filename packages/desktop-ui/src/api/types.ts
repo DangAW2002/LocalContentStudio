@@ -439,8 +439,23 @@ export interface ChannelFormat {
 // Library Assets Types
 // ==========================================
 
+export type AssetSource = "generated" | "imported" | "uploaded";
+
+export interface AssetMeta {
+  prompt?: string;
+  provider?: string;
+  model?: string;
+  costUsd?: number;
+  createdAt?: string;
+  turnId?: string;
+  description?: string;
+}
+
 export interface AssetListFilter {
   kind?: string;
+  source?: string;
+  project?: string;
+  brand?: string;
   search?: string;
   limit?: number;
 }
@@ -453,8 +468,27 @@ export interface AssetItem {
   size: number;
   path: string;
   previewUrl?: string;
+  thumbnailUrl?: string;
+  source: AssetSource;
+  project?: string;
+  brand?: string;
+  meta: AssetMeta;
   createdAt: string;
+  updatedAt?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface AssetImportResult {
+  success: boolean;
+  checkpointId: string;
+  imported: AssetItem[];
+  count: number;
+}
+
+export interface AssetDeleteResult {
+  success: boolean;
+  checkpointId: string;
+  deletedPath: string;
 }
 
 // ==========================================

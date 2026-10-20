@@ -3,6 +3,7 @@
 pub mod http;
 pub mod imagen;
 pub mod import;
+pub mod inspect;
 pub mod openai;
 pub mod openai_videos;
 pub mod piper;
@@ -25,6 +26,7 @@ pub async fn run_builtin(
     pricing: Option<&crate::pricing::ProviderPricing>,
 ) -> Result<Value> {
     match tool_id {
+        "media.inspect" => inspect::run_media_inspect(ws, out_dir, input).await,
         "media.import.yt-dlp" => import::run_media_import(ws, out_dir, input).await,
         "tts.vieneu" => vieneu::run_vieneu(ws, out_dir, input).await,
         "tts.piper" => piper::run_piper(ws, out_dir, input).await,

@@ -587,6 +587,22 @@ export const App: React.FC = () => {
     window.dispatchEvent(new CustomEvent("studio:select-thread", { detail: { threadId } }));
   };
 
+  const handleUseInThread = React.useCallback(
+    (assetPath: string, projectSlug?: string) => {
+      const target = projectSlug || activeProjectSlug || projectList[0]?.slug;
+      if (target) {
+        setActiveProjectSlug(target);
+      }
+      setActiveArea("projects");
+      setTimeout(() => {
+        window.dispatchEvent(
+          new CustomEvent("studio:ask-ai", { detail: { text: `@${assetPath} ` } })
+        );
+      }, 50);
+    },
+    [activeProjectSlug, projectList]
+  );
+
   const renderActiveView = () => {
     switch (activeArea) {
       case "home":
@@ -608,7 +624,7 @@ export const App: React.FC = () => {
       case "brand":
         return <BrandView />;
       case "library":
-        return <LibraryView />;
+        return <LibraryView onUseInThread={handleUseInThread} />;
       case "settings":
         return <SettingsView initialTab={settingsTab} />;
     }
