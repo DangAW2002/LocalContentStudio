@@ -132,6 +132,24 @@ impl WorkspaceDb {
             Self::apply_v3(conn)?;
         }
 
+        if current < 4 {
+            // Backup before applying v4 if database file already exists and has tables
+            if db_path.exists() {
+                let table_count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name != 'schema_migrations'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
+                if table_count > 0 {
+                    Self::perform_backup(conn, backup_dir, "v4")?;
+                }
+            }
+
+            Self::apply_v4(conn)?;
+        }
+
         Ok(())
     }
 
@@ -373,6 +391,72 @@ impl WorkspaceDb {
         let now = chrono::Utc::now().to_rfc3339();
         tx.execute(
             "INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (3, 'v3-artifact-checks-matrix', ?1)
+             ON CONFLICT(version) DO NOTHING",
+            [&now],
+        )?;
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn apply_v4(conn: &mut Connection) -> Result<()> {
+        let tx = conn.transaction()?;
+
+        let table_exists: bool = tx
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='assets_index'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|c| c > 0)
+            .unwrap_or(false);
+
+        if table_exists {
+            let pragma_source: bool = tx
+                .prepare("PRAGMA table_info(assets_index)")?
+                .query_map([], |row| row.get::<_, String>(1))?
+                .filter_map(|r| r.ok())
+                .any(|col| col == "source");
+
+            if !pragma_source {
+                tx.execute_batch(
+                    "
+                    ALTER TABLE assets_index ADD COLUMN source TEXT NOT NULL DEFAULT 'uploaded';
+                    ALTER TABLE assets_index ADD COLUMN project TEXT;
+                    ALTER TABLE assets_index ADD COLUMN brand TEXT;
+                    CREATE INDEX IF NOT EXISTS idx_assets_source ON assets_index(source);
+                    CREATE INDEX IF NOT EXISTS idx_assets_project ON assets_index(project);
+                    CREATE INDEX IF NOT EXISTS idx_assets_brand ON assets_index(brand);
+                    ",
+                )?;
+            }
+        } else {
+            tx.execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS assets_index (
+                    id TEXT PRIMARY KEY,
+                    path TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    mime_type TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    metadata_json TEXT,
+                    updated_at TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'uploaded',
+                    project TEXT,
+                    brand TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_assets_sha ON assets_index(sha256);
+                CREATE INDEX IF NOT EXISTS idx_assets_source ON assets_index(source);
+                CREATE INDEX IF NOT EXISTS idx_assets_project ON assets_index(project);
+                CREATE INDEX IF NOT EXISTS idx_assets_brand ON assets_index(brand);
+                ",
+            )?;
+        }
+
+        let now = chrono::Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (4, 'v4-assets-source-project', ?1)
              ON CONFLICT(version) DO NOTHING",
             [&now],
         )?;

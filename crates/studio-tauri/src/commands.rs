@@ -857,15 +857,6 @@ pub fn project_modules_set(
     project_modules_set_impl(&state, project, modules)
 }
 
-// ───────────────────────── Scope & assets ─────────────────────────
-
-#[derive(Clone, Deserialize)]
-pub struct AssetFilter {
-    kind: Option<String>,
-    search: Option<String>,
-    limit: Option<usize>,
-}
-
 fn validate_scope_id(id: &str) -> CmdResult<()> {
     // No trimming: the id is used verbatim in paths, so surrounding spaces are rejected too.
     let id_trimmed = id;
@@ -1443,69 +1434,6 @@ pub fn scope_remove_override(
     id: String,
 ) -> CmdResult<Value> {
     scope_remove_override_impl(&state, kind, id)
-}
-
-pub fn asset_list_impl(state: &AppState, filter: Option<AssetFilter>) -> CmdResult<Vec<Value>> {
-    let ws = state.workspace()?;
-    let mut files = Vec::new();
-    collect(&ws.root().join("library"), &mut files);
-    let search = filter
-        .as_ref()
-        .and_then(|f| f.search.clone())
-        .map(|s| s.to_lowercase());
-    let want = filter.as_ref().and_then(|f| f.kind.clone());
-    let limit = filter.as_ref().and_then(|f| f.limit).unwrap_or(500);
-    Ok(files
-        .into_iter()
-        .filter(|p| !p.to_string_lossy().ends_with(".meta.yaml"))
-        .filter_map(|p| {
-            let (k, mime) = kind_of(&p);
-            let kind = match k {
-                "image" | "video" | "audio" => k,
-                _ if p.extension().is_some_and(|e| e == "ttf" || e == "otf" || e == "woff2") => "font",
-                "markdown" | "text" | "html" | "json" | "code" => "document",
-                _ if mime == "application/pdf" => "document",
-                _ => "other",
-            };
-            if want.as_deref().is_some_and(|w| w != kind) {
-                return None;
-            }
-            let r = rel(&ws, &p);
-            if search.as_ref().is_some_and(|s| !r.to_lowercase().contains(s)) {
-                return None;
-            }
-            let size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-            Some(json!({
-                "id": r, "name": p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
-                "kind": kind, "mime": mime, "size": size, "path": r,
-                "previewUrl": matches!(kind, "image" | "video" | "audio").then(|| asset_url(&p)),
-                "createdAt": modified(&p).unwrap_or_default(),
-            }))
-        })
-        .take(limit)
-        .collect())
-}
-
-#[tauri::command]
-pub fn asset_list(
-    state: State<'_, AppState>,
-    filter: Option<AssetFilter>,
-) -> CmdResult<Vec<Value>> {
-    asset_list_impl(&state, filter)
-}
-
-fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for e in rd.flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            collect(&p, out)
-        } else {
-            out.push(p)
-        }
-    }
 }
 
 // ───────────────────────── Jobs & disk ─────────────────────────

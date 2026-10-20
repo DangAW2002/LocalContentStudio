@@ -454,7 +454,7 @@ async fn test_capability_relocation_and_indexing() {
 
     let rel_file = files[0].as_str().unwrap();
     // Path should be relocated to projects/my-project/assets/generated/<YYYY-MM-DD>/...
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let expected_prefix = format!("projects/my-project/assets/generated/{}", today);
     assert!(
         rel_file.starts_with(&expected_prefix),

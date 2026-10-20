@@ -222,7 +222,7 @@ fn test_migrations_idempotency_and_backup() {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 
     // Second open must be idempotent
@@ -234,7 +234,7 @@ fn test_migrations_idempotency_and_backup() {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
     }
 }
 
@@ -277,7 +277,7 @@ fn test_migrations_upgrade_from_v2() {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, 4);
 
         // Verify artifact_checks table exists
         let table_exists: i64 = db
@@ -289,17 +289,30 @@ fn test_migrations_upgrade_from_v2() {
             )
             .unwrap();
         assert_eq!(table_exists, 1);
+
+        // Verify assets_index table exists
+        let assets_exists: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='assets_index'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(assets_exists, 1);
     }
 
-    // Verify backup file for v3 was created
+    // Verify backup file for v3 or v4 was created
     let backups = std::fs::read_dir(&backups_dir)
         .unwrap()
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().to_string())
         .collect::<Vec<_>>();
     assert!(
-        backups.iter().any(|name| name.contains("studio-pre-v3-")),
-        "Backup before v3 must be created: {:?}",
+        backups
+            .iter()
+            .any(|name| name.contains("studio-pre-v3-") || name.contains("studio-pre-v4-")),
+        "Backup before v3/v4 must be created: {:?}",
         backups
     );
 }
