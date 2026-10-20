@@ -61,6 +61,15 @@ pub struct AssetSidecarMeta {
     /// Associated turn ID
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
+    /// Associated brand slug
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brand: Option<String>,
+    /// Asset source override (generated | imported | uploaded)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Creation ISO timestamp
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
 }
 
 /// Indexer responsible for scanning and rebuilding search/artifact/asset indexes in `studio.db`.
@@ -134,6 +143,11 @@ impl Indexer {
                                     String::new()
                                 };
 
+                                tx.execute_batch(
+                                    "CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
+                                        target_type, target_id, title, content
+                                    );",
+                                )?;
                                 tx.execute(
                                     "INSERT INTO search_fts (target_type, target_id, title, content) VALUES ('artifact', ?1, ?2, ?3)",
                                     params![art.id, art.title, source_content],
@@ -198,10 +212,11 @@ impl Indexer {
                     // Compute SHA256
                     let sha256 = hash_file(path)?;
                     let now = chrono::Utc::now().to_rfc3339();
+                    let (source, project, brand) = determine_asset_origin(&rel_path, &sidecar);
 
                     tx.execute(
-                        "INSERT INTO assets_index (id, path, name, mime_type, size_bytes, sha256, metadata_json, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                        "INSERT INTO assets_index (id, path, name, mime_type, size_bytes, sha256, metadata_json, updated_at, source, project, brand)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                         params![
                             id,
                             rel_path,
@@ -211,10 +226,18 @@ impl Indexer {
                             sha256,
                             meta_json,
                             now,
+                            source,
+                            project,
+                            brand,
                         ],
                     )?;
 
                     let fts_content = sidecar.description.unwrap_or_default();
+                    tx.execute_batch(
+                        "CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
+                            target_type, target_id, title, content
+                        );",
+                    )?;
                     tx.execute(
                         "INSERT INTO search_fts (target_type, target_id, title, content) VALUES ('asset', ?1, ?2, ?3)",
                         params![id, title, fts_content],
@@ -245,6 +268,146 @@ impl Indexer {
 
         Ok((watcher, rx))
     }
+
+    /// Index or update a single asset in `assets_index`.
+    pub fn index_single_asset(ws: &Workspace, rel_path: &str) -> Result<()> {
+        let normalized = rel_path.replace('\\', "/");
+        let abs_path = ws.root().join(&normalized);
+        if !abs_path.is_file() {
+            return Ok(());
+        }
+        let file_name = abs_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        if file_name.ends_with(".meta.yaml") || file_name.starts_with('.') {
+            return Ok(());
+        }
+
+        let metadata = fs::metadata(&abs_path)?;
+        let size_bytes = metadata.len();
+        let sidecar_path = PathBuf::from(format!("{}.meta.yaml", abs_path.display()));
+        let sidecar: AssetSidecarMeta = if sidecar_path.exists() {
+            fs::read_to_string(&sidecar_path)
+                .ok()
+                .and_then(|s| serde_yaml::from_str(&s).ok())
+                .unwrap_or_default()
+        } else {
+            AssetSidecarMeta::default()
+        };
+
+        let title = sidecar.title.clone().unwrap_or_else(|| file_name.clone());
+        let mime = sidecar
+            .mime
+            .clone()
+            .unwrap_or_else(|| guess_mime(&abs_path));
+        let meta_json = serde_json::to_string(&sidecar).unwrap_or_else(|_| "{}".into());
+        let sha256 = hash_file(&abs_path)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let (source, project, brand) = determine_asset_origin(&normalized, &sidecar);
+
+        let mut db = WorkspaceDb::open(ws)?;
+        let tx = db.conn_mut().transaction()?;
+        tx.execute(
+            "INSERT INTO assets_index (id, path, name, mime_type, size_bytes, sha256, metadata_json, updated_at, source, project, brand)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(id) DO UPDATE SET
+                path = excluded.path,
+                name = excluded.name,
+                mime_type = excluded.mime_type,
+                size_bytes = excluded.size_bytes,
+                sha256 = excluded.sha256,
+                metadata_json = excluded.metadata_json,
+                updated_at = excluded.updated_at,
+                source = excluded.source,
+                project = excluded.project,
+                brand = excluded.brand",
+            params![
+                normalized,
+                normalized,
+                title,
+                mime,
+                size_bytes,
+                sha256,
+                meta_json,
+                now,
+                source,
+                project,
+                brand,
+            ],
+        )?;
+
+        let fts_content = sidecar.description.unwrap_or_default();
+        tx.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
+                target_type, target_id, title, content
+            );",
+        )?;
+        tx.execute(
+            "DELETE FROM search_fts WHERE target_type = 'asset' AND target_id = ?1",
+            params![normalized],
+        )?;
+        tx.execute(
+            "INSERT INTO search_fts (target_type, target_id, title, content) VALUES ('asset', ?1, ?2, ?3)",
+            params![normalized, title, fts_content],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Remove a single asset from `assets_index` and `search_fts`.
+    pub fn remove_single_asset(ws: &Workspace, rel_path: &str) -> Result<()> {
+        let normalized = rel_path.replace('\\', "/");
+        let mut db = WorkspaceDb::open(ws)?;
+        let tx = db.conn_mut().transaction()?;
+        tx.execute(
+            "DELETE FROM assets_index WHERE path = ?1 OR id = ?1",
+            params![normalized],
+        )?;
+        tx.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
+                target_type, target_id, title, content
+            );",
+        )?;
+        tx.execute(
+            "DELETE FROM search_fts WHERE target_type = 'asset' AND target_id = ?1",
+            params![normalized],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+}
+
+/// Helper to determine source, project slug, and brand for an asset based on path and sidecar metadata.
+pub fn determine_asset_origin(
+    rel_path: &str,
+    sidecar: &AssetSidecarMeta,
+) -> (String, Option<String>, Option<String>) {
+    let normalized = rel_path.replace('\\', "/");
+    let mut project = None;
+    if let Some(rest) = normalized.strip_prefix("projects/") {
+        if let Some((proj, _)) = rest.split_once('/') {
+            project = Some(proj.to_string());
+        }
+    }
+
+    let source = if let Some(ref s) = sidecar.source {
+        s.clone()
+    } else if normalized.contains("/assets/generated/")
+        || sidecar.provider.is_some()
+        || sidecar.prompt.is_some()
+    {
+        "generated".to_string()
+    } else if normalized.starts_with("library/imports/") {
+        "imported".to_string()
+    } else {
+        "uploaded".to_string()
+    };
+
+    let brand = sidecar.brand.clone();
+
+    (source, project, brand)
 }
 
 fn pathdiff(base: &Path, path: &Path) -> String {
