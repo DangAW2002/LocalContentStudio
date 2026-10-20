@@ -16,12 +16,13 @@ pub fn detect_lan_ip() -> Option<IpAddr> {
     }
 }
 
-/// Format the access URL for LAN users.
-pub fn format_lan_url(port: u16) -> String {
+/// Format the access URL for LAN users (defaults to https when TLS is enabled).
+pub fn format_lan_url(port: u16, use_https: bool) -> String {
+    let scheme = if use_https { "https" } else { "http" };
     if let Some(ip) = detect_lan_ip() {
-        format!("http://{ip}:{port}")
+        format!("{scheme}://{ip}:{port}")
     } else {
-        format!("http://127.0.0.1:{port}")
+        format!("{scheme}://127.0.0.1:{port}")
     }
 }
 
@@ -31,8 +32,12 @@ mod tests {
 
     #[test]
     fn test_format_lan_url() {
-        let url = format_lan_url(3000);
-        assert!(url.starts_with("http://"));
-        assert!(url.ends_with(":3000"));
+        let url_http = format_lan_url(3000, false);
+        assert!(url_http.starts_with("http://"));
+        assert!(url_http.ends_with(":3000"));
+
+        let url_https = format_lan_url(3000, true);
+        assert!(url_https.starts_with("https://"));
+        assert!(url_https.ends_with(":3000"));
     }
 }

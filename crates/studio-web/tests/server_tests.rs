@@ -84,6 +84,8 @@ fn setup_test_app() -> (
         journal: studio_web::events::EventJournal::attach(&tx),
         lan_allowed: false,
         port: 3000,
+        tls_info: None,
+        limits: studio_web::WebLimitsConfig::default(),
     });
     (build_router(state), dispatcher, tx)
 }
@@ -404,4 +406,81 @@ async fn test_https_session_cookie_secure_flag() {
         .to_str()
         .unwrap();
     assert!(cookie_origin.contains("Secure"));
+}
+
+#[tokio::test]
+async fn test_json_and_upload_body_limits() {
+    let dispatcher = Arc::new(MockDispatcher::new());
+    let (tx, _) = broadcast::channel(16);
+    // Custom limit: JSON limit 500 bytes, Upload limit 2 KB
+    let limits = studio_web::WebLimitsConfig {
+        json_body_limit_bytes: 500,
+        upload_body_limit_bytes: 2048,
+    };
+    let state = Arc::new(WebServerState {
+        dispatcher: dispatcher.clone(),
+        sessions: Arc::new(studio_web::auth::SessionStore::new()),
+        rate_limiter: Arc::new(studio_web::auth::LoginRateLimiter::new()),
+        journal: studio_web::events::EventJournal::attach(&tx),
+        lan_allowed: false,
+        port: 3000,
+        tls_info: None,
+        limits,
+    });
+    let app = build_router(state.clone());
+
+    // 1. JSON payload over 500 bytes -> 413 Payload Too Large
+    let big_json = serde_json::to_string(&json!({ "password": "a".repeat(600) })).unwrap();
+    let req_big_json = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/login")
+        .header("host", "127.0.0.1:3000")
+        .header("x-studio-csrf", "1")
+        .header("content-type", "application/json")
+        .body(Body::from(big_json))
+        .unwrap();
+
+    let res_big_json = app.clone().oneshot(req_big_json).await.unwrap();
+    assert_eq!(res_big_json.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+    let session = state.sessions.create_session();
+    // 2. Streamed multipart body exceeding upload limit -> 413 Payload Too Large
+    let boundary = "------------------------1234567890";
+    let chunk = vec![b'x'; 3000];
+    let stream = futures_util::stream::iter(vec![
+        Ok::<_, std::io::Error>(bytes::Bytes::from(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"limit-test-413.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n"))),
+        Ok(bytes::Bytes::from(chunk.clone())),
+        Ok(bytes::Bytes::from(chunk.clone())),
+        Ok(bytes::Bytes::from(chunk.clone())), // > 3KB total, exceeds 2048 bytes
+        Ok(bytes::Bytes::from(format!("\r\n--{boundary}--\r\n"))),
+    ]);
+    let req_big_upload = Request::builder()
+        .method(Method::POST)
+        .uri("/api/upload")
+        .header("host", "127.0.0.1:3000")
+        .header("cookie", format!("studio_session={}", session.token))
+        .header("x-studio-csrf", "1")
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from_stream(stream))
+        .unwrap();
+
+    let res_big_upload = app.oneshot(req_big_upload).await.unwrap();
+    assert_eq!(res_big_upload.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+    // The rejected upload leaves no partial file behind.
+    let leftovers = std::fs::read_dir(std::env::temp_dir().join("studio_uploads"))
+        .map(|d| {
+            d.filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.file_name()
+                        .to_string_lossy()
+                        .ends_with("_limit-test-413.bin")
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    assert_eq!(leftovers, 0);
 }

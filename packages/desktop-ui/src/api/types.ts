@@ -856,6 +856,29 @@ export interface YoutubeClientStatus {
   configured: boolean;
   clientIdLast6?: string;
 }
+export interface FacebookPageAccount {
+  id: string;
+  name: string;
+  category?: string;
+  avatarUrl?: string;
+  connectedAt: string;
+}
+
+export interface FacebookClientConfigResult {
+  appIdLast4: string;
+  message: string;
+}
+
+export interface FacebookClientStatus {
+  configured: boolean;
+  appIdLast4?: string;
+}
+
+export interface FacebookDisconnectResult {
+  success: boolean;
+  message: string;
+}
+
 export interface YoutubeDisconnectResult {
   success: boolean;
   revokeUrl: string;
@@ -944,19 +967,24 @@ export interface TtsSetConfigRequest {
 
 export interface WebStatus {
   enabled: boolean;
-  lan_allowed: boolean;
+  lanAllowed: boolean;
   port: number;
-  has_password: boolean;
-  local_url?: string;
-  lan_url?: string;
-  lan_ip?: string;
-  qr_code_svg?: string;
-  active_sessions: number;
+  hasPassword: boolean;
+  localUrl?: string;
+  lanUrl?: string;
+  lanIp?: string;
+  qrCodeSvg?: string;
+  activeSessions: number;
+  tlsFingerprint?: string;
+  uploadLimitMb?: number;
+  jsonLimitMb?: number;
 }
 
 export interface WebConfigureRequest {
   enabled?: boolean;
-  lan_allowed?: boolean;
+  lanAllowed?: boolean;
   port?: number;
   password?: string;
+  uploadLimitMb?: number;
+  jsonLimitMb?: number;
 }

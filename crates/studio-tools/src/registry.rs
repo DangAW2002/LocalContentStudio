@@ -161,6 +161,8 @@ impl Registry {
         let mut set: std::collections::BTreeSet<String> = [
             crate::publish::KEY_YOUTUBE_CLIENT_ID,
             crate::publish::KEY_YOUTUBE_CLIENT_SECRET,
+            crate::publish::KEY_FACEBOOK_APP_ID,
+            crate::publish::KEY_FACEBOOK_APP_SECRET,
         ]
         .iter()
         .map(|k| k.to_string())
