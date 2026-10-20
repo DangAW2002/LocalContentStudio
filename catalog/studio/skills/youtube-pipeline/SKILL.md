@@ -12,7 +12,8 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
 - **File là nguồn sự thật:** Mọi kịch bản (`text.md`), timeline (`timeline.json`), thumbnail (`index.html`) và metadata được lưu trong `projects/<slug>/`.
 - **Chỉ sử dụng Studio MCP tools có sẵn:**
   - `brand_get`, `channel_get` để lấy thông tin nhận diện thương hiệu và tiêu chuẩn kênh YouTube (`channels/youtube.yaml`).
-  - `capability_run` để chạy các tác vụ: `tts.synthesize@1` (giọng đọc), `media.import@1` (tải b-roll / video tư liệu / file cục bộ), `image.generate@1` (sinh ảnh nền/minh họa), `video.generate@1` (sinh b-roll video ngắn).
+  - `capability_run` để chạy các tác vụ: `tts.synthesize@1` (giọng đọc), `media.import@1` (tải b-roll / video tư liệu / file cục bộ), `image.generate@1` (sinh ảnh nền/minh họa), `video.generate@1` (sinh b-roll video ngắn), `media.inspect@1` (kiểm tra chi tiết media, thời lượng, loudness LUFS, khung hình mẫu).
+  - **Dùng `media.inspect` thay vì Bash ffprobe:** Khi cần kiểm tra thông số kỹ thuật của clip video hoặc audio (thời lượng, kích thước, fps, loudness ebur128, khung hình mẫu), luôn gọi capability `media.inspect@1` qua `capability_run` với tham số `{ "path": "<đường dẫn tương đối>" }`, tuyệt đối không gọi Bash chạy ffprobe ngoài terminal.
   - `artifact_list`, `artifact_get` để xem artifact; tạo/sửa artifact `timeline`, `design`, `text` bằng cách ghi trực tiếp
     `projects/<slug>/artifacts/<id>/artifact.yaml` + tệp nguồn (`timeline.json`, `index.html`, `text.md`).
   - `artifact_render` để xuất video MP4 hoặc ảnh PNG thumbnail.
@@ -35,42 +36,64 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
 - Tạo giọng đọc qua capability `tts.synthesize@1`:
   - Gọi `capability_run` với công cụ `tts.windows-sapi` (hoặc provider khả dụng).
   - Đảm bảo đầu ra âm thanh định dạng `.wav` hoặc `.mp3` được ghi nhận trong thư mục asset của lượt/dự án.
-  - Ghi nhận thời lượng chính xác của từng file âm thanh để căn khớp timeline.
+  - Ghi nhận thời lượng chính xác của từng file âm thanh qua `duration_seconds` trả về sẵn (hoặc kiểm tra bằng `media.inspect@1`) để căn khớp timeline.
 
 ### 3. Tư liệu hình ảnh & B-Roll (Media Gathering & Gen)
 - Thu thập hoặc sinh tư liệu hình ảnh/video bổ trợ (B-roll):
   - **Tải từ web hoặc nhập tệp sẵn có:** Dùng `media.import@1` (`url` hoặc `path`) để tải video/audio tư liệu vào dự án.
   - **Sinh ảnh minh hoạ AI:** Dùng `image.generate@1` (`google.imagen` hoặc `openai.images`) với tỷ lệ 16:9 (`width: 1280, height: 720` hoặc `1920x1080`).
   - **Sinh video AI:** Dùng `video.generate@1` (`google.veo` hoặc `openai.videos`) cho các phân cảnh chuyển động ấn tượng.
+  - **Kiểm tra tệp tư liệu:** Dùng `media.inspect@1` để xác thực độ phân giải, fps và âm thanh của b-roll đã tải.
 
 ### 4. Dựng dòng thời gian (Timeline Assembly)
 - Khởi tạo hoặc cập nhật artifact loại `timeline` (`timeline.json`) (ghi `artifact.yaml` + `timeline.json` trong `projects/<slug>/artifacts/<id>/`):
   - `width`: 1920, `height`: 1080 (hoặc 1280x720), `fps`: 30.0.
-  - **Track video:** Danh sách clips hình ảnh và video B-roll, gán đúng `start` và `duration`.
+  - **Track video gốc (Base track):** Track video đầu tiên trong danh sách là chuỗi video chính, các clip được nối tiếp nhau và quyết định tổng thời lượng video.
+  - **Track video lớp phủ (Overlay tracks):** Mọi track video nằm sau track đầu tiên được xem là lớp phủ (overlay), hiển thị đè lên base sequence với bộ lọc FFmpeg `overlay` (`enable='between(t,start,start+duration)'`) theo thứ tự track.
+    - Hỗ trợ các thuộc tính vị trí & tỷ lệ: `x`, `y` (khoảng cách px từ góc trên-trái, mặc định 0), `width` / `height` (co giãn giữ tỷ lệ nếu chỉ cho một chiều), `opacity` (0.0 đến 1.0).
+    - Clip ảnh (PNG/JPG/WEBP) tự động lặp theo thời lượng `duration`. Clip video được cắt theo `in_point` và `duration`.
+    - **Lưu ý định dạng SVG:** FFmpeg không giải mã trực tiếp SVG trong timeline. Hãy render tệp SVG logo sang PNG qua design artifact trước khi chèn vào overlay track.
   - **Track audio:** Ghép các đoạn voiceover từ bước 2 và nhạc nền nhẹ nhàng (nếu có).
   - **Track caption (phụ đề):** Đặt lời thoại khớp với âm thanh hiển thị theo mốc thời gian.
-- Kiểm tra tính hợp lệ của cấu trúc `timeline.json`. Mẫu tối thiểu hợp lệ (`source` là đường dẫn tính từ gốc workspace như
-  `projects/<slug>/assets/...`, hoặc tính từ thư mục
-  artifact `projects/<slug>/artifacts/<id>/`; mỗi track/clip bắt buộc có `id`, mỗi clip bắt buộc có `source` + `duration`):
+- Kiểm tra tính hợp lệ của cấu trúc `timeline.json`. Mẫu chuẩn có logo overlay (`source` là đường dẫn tính từ gốc workspace hoặc thư mục artifact; mỗi track/clip bắt buộc có `id`, mỗi clip bắt buộc có `source` + `duration`):
 
   ```json
   {
     "width": 1920, "height": 1080, "fps": 30,
     "tracks": [
-      { "id": "video", "kind": "video", "clips": [
-        { "id": "s1", "source": "../../renders/scene-01/<hash>/output.png", "start": 0, "duration": 8.2, "transition": "fade", "transition_duration": 0.5 },
-        { "id": "s2", "source": "color:#1E88E5", "start": 8.2, "duration": 3 }
-      ]},
-      { "id": "voice", "kind": "audio", "clips": [
-        { "id": "vo1", "source": "../../assets/vo/vo-01.wav", "start": 0, "duration": 8.2 }
-      ]},
-      { "id": "subs", "kind": "captions", "clips": [
-        { "id": "t1", "source": "Vì sao một ly cà phê nhỏ giọt chậm…", "start": 0, "duration": 8.2 }
-      ]}
+      {
+        "id": "video-base",
+        "kind": "video",
+        "clips": [
+          { "id": "s1", "source": "../../renders/scene-01/<hash>/output.png", "start": 0, "duration": 8.2, "transition": "fade", "transition_duration": 0.5 },
+          { "id": "s2", "source": "color:#1E88E5", "start": 8.2, "duration": 3 }
+        ]
+      },
+      {
+        "id": "logo-overlay",
+        "kind": "video",
+        "clips": [
+          { "id": "brand-logo", "source": "brand/logo.png", "start": 0, "duration": 11.2, "x": 60, "y": 60, "width": 180, "opacity": 0.9 }
+        ]
+      },
+      {
+        "id": "voice",
+        "kind": "audio",
+        "clips": [
+          { "id": "vo1", "source": "../../assets/vo/vo-01.wav", "start": 0, "duration": 8.2 }
+        ]
+      },
+      {
+        "id": "subs",
+        "kind": "captions",
+        "clips": [
+          { "id": "t1", "source": "Vì sao một ly cà phê nhỏ giọt chậm…", "start": 0, "duration": 8.2 }
+        ]
+      }
     ]
   }
   ```
-- Thời lượng giọng đọc: `tts.synthesize@1` trả `duration_seconds` cho tệp WAV — dùng số này, không cần chạy ffprobe.
+- Thời lượng giọng đọc: `tts.synthesize@1` trả `duration_seconds` cho tệp WAV — dùng số này hoặc capability `media.inspect@1`, không cần chạy Bash ffprobe.
 
 ### 5. Kết xuất & Kiểm tra chất lượng (Render & Validation)
 - Thực hiện kết xuất video qua `artifact_render` cho artifact timeline:
@@ -78,14 +101,15 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
   - Âm thanh tự chuẩn hoá theo `loudness_lufs` của kênh trong `artifact.yaml` (youtube: −14 LUFS) — không cần tự chỉnh
     `volume` hay đo bằng Bash. Muốn mức khác thì ghi `"loudness_lufs": -16` ở gốc `timeline.json`.
 - Chạy kiểm tra quy chuẩn kênh bằng `check_run`:
-  - Đảm bảo video đạt chuẩn 16:9, thời lượng không vượt giới hạn kênh, không vi phạm từ cấm trong giọng đọc.
+  - Đảm bảo video đạt chuẩn 16:9, thời lượng không vượt giới hạn kênh, logo brand hiện diện đầy đủ trên overlay track, không vi phạm từ cấm trong giọng đọc.
+  - Dùng `media.inspect@1` để xem lại các khung hình mẫu (10%, 50%, 90%) và loudness tích hợp sau khi render nếu muốn tự đánh giá trước khi đăng.
   - Nếu phát hiện lỗi (finding), tự động điều chỉnh lại `timeline.json` hoặc audio/text và render lại.
 
 ### 6. Thiết kế ảnh bìa (Thumbnail Design)
 - Tạo artifact `design` (`index.html`) cho thumbnail kích thước 1280x720:
   - Áp dụng màu sắc chủ đạo từ Brand (`brand_get`).
   - Đặt chữ tiêu đề to, tương phản cao, tối đa 4-6 từ dễ đọc trên thiết bị di động.
-  - Sử dụng các lớp `data-layer` để người dùng có thể tinh chỉnh trực tiếp trên Stage.
+  - Sử dụng các lớp `data-layer` (bao gồm `data-layer="logo"` nếu muốn gắn logo badge) để người dùng có thể tinh chỉnh trực tiếp trên Stage.
 - Render thumbnail ra ảnh PNG qua `artifact_render`.
 - Chạy `check_run` kiểm tra thumbnail đạt chuẩn kênh (tỷ lệ 16:9, dung lượng < 2MB, safe zones tránh che khuất bởi timestamp ở góc dưới bên phải).
 
