@@ -884,6 +884,10 @@ fn test_series_create_episode() {
         content.contains("reference"),
         "starter must declare reference role"
     );
+    // The title has ':' — the file must still be valid YAML with the title intact.
+    let parsed: serde_yaml::Value = serde_yaml::from_str(&content).expect("valid YAML");
+    assert_eq!(parsed["title"].as_str(), Some("Kịch bản - Tập 1: Mở đầu"));
+    assert_eq!(parsed["inputs"][0]["role"].as_str(), Some("reference"));
 }
 
 #[test]

@@ -218,30 +218,47 @@ impl SeriesService {
         let script_dir = project.artifacts_dir().join("script-01");
         fs::create_dir_all(&script_dir)?;
 
+        // Titles are user text (often with ':' or quotes): serialize, never splice into YAML.
+        let to_yaml = |v: &serde_yaml::Value| {
+            serde_yaml::to_string(v).map_err(|e| WorkspaceError::Serialization(e.to_string()))
+        };
+        let front = to_yaml(
+            &serde_yaml::to_value(BTreeMap::from([
+                ("title", episode_title),
+                ("channel", "youtube"),
+            ]))
+            .map_err(|e| WorkspaceError::Serialization(e.to_string()))?,
+        )?;
         let starter_md = format!(
-            "---\ntitle: {}\nchannel: youtube\n---\n\n# {}\n\nKịch bản cho tập mới thuộc series {}.\n",
-            episode_title, episode_title, series.title
+            "---\n{front}---\n\n# {episode_title}\n\nKịch bản cho tập mới thuộc series {}.\n",
+            series.title
         );
         fs::write(script_dir.join("text.md"), starter_md)?;
 
-        let mut inputs_yaml = Vec::new();
-        for ref_id in &series.references {
-            inputs_yaml.push(format!(
-                "  - ref: \"artifact:{ref_id}\"\n    role: reference"
-            ));
-        }
-
-        let inputs_block = if inputs_yaml.is_empty() {
-            "inputs: []\n".to_string()
-        } else {
-            format!("inputs:\n{}\n", inputs_yaml.join("\n"))
-        };
-
-        let art_yaml = format!(
-            "id: script-01\nkind: text\ntitle: Kịch bản - {}\nsource: text.md\nchannels:\n  - youtube\n{}",
-            episode_title, inputs_block
+        let inputs: Vec<serde_yaml::Value> = series
+            .references
+            .iter()
+            .map(|ref_id| {
+                let mut m = serde_yaml::Mapping::new();
+                m.insert("ref".into(), format!("artifact:{ref_id}").into());
+                m.insert("role".into(), "reference".into());
+                serde_yaml::Value::Mapping(m)
+            })
+            .collect();
+        let mut art = serde_yaml::Mapping::new();
+        art.insert("id".into(), "script-01".into());
+        art.insert("kind".into(), "text".into());
+        art.insert("title".into(), format!("Kịch bản - {episode_title}").into());
+        art.insert("source".into(), "text.md".into());
+        art.insert(
+            "channels".into(),
+            vec![serde_yaml::Value::from("youtube")].into(),
         );
-        fs::write(script_dir.join("artifact.yaml"), art_yaml)?;
+        art.insert("inputs".into(), inputs.into());
+        fs::write(
+            script_dir.join("artifact.yaml"),
+            to_yaml(&serde_yaml::Value::Mapping(art))?,
+        )?;
 
         Ok(project)
     }
