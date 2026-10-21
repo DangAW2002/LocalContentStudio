@@ -181,6 +181,34 @@ pub async fn publish_confirm_impl(
         ));
     }
 
+    // Re-check at confirm time: the draft may have been prepared with blocking findings, or the
+    // render/metadata may have changed since.
+    let check = studio_tools::publish::validate_publish(
+        &ws,
+        db.conn(),
+        &req.project,
+        &req.artifact,
+        &req.channel,
+        &req.metadata,
+    )
+    .map_err(CmdError::from)?;
+    if check.has_blocking_errors {
+        let hints: Vec<String> = check
+            .findings
+            .iter()
+            .filter(|f| f.severity == studio_brand::checkers::Severity::Error)
+            .map(|f| {
+                f.fix_hint_vi
+                    .clone()
+                    .unwrap_or_else(|| f.message_vi.clone())
+            })
+            .collect();
+        return Err(CmdError::msg(format!(
+            "Bản đăng còn lỗi phải sửa trước khi đăng: {}",
+            hints.join(" ")
+        )));
+    }
+
     // Atomic claim: refuses concurrent confirmations and anything not awaiting/failed.
     let now = chrono::Utc::now().to_rfc3339();
     if !PublishRequest::claim_for_publishing(db.conn(), &req.id, &now)? {
@@ -841,4 +869,58 @@ pub async fn youtube_channel_disconnect(
     channel_id: String,
 ) -> CmdResult<YoutubeDisconnectResult> {
     youtube_channel_disconnect_impl(&state, channel_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use studio_tools::publish::PublishPrivacy;
+    use studio_workspace::{Project, Workspace};
+
+    #[tokio::test]
+    async fn confirm_refuses_a_draft_with_blocking_findings() {
+        let temp = tempfile::tempdir().unwrap();
+        let ws_dir = temp.path().join("ws");
+        let ws = Workspace::create(&ws_dir, "Test").unwrap();
+        let proj = Project::create(&ws, "p1", "P1").unwrap();
+        // An artifact that was never rendered: validation reports a blocking finding.
+        std::fs::create_dir_all(proj.artifacts_dir().join("video")).unwrap();
+        let state = AppState::new();
+        *state.current.lock().unwrap() = Some(ws_dir);
+        let meta = PublishMetadata {
+            title: "Tiêu đề".into(),
+            description: String::new(),
+            tags: vec![],
+            privacy: PublishPrivacy::Private,
+            schedule: None,
+            thumbnail: None,
+        };
+        let outcome = publish_prepare_impl(
+            &state,
+            Some("p1".into()),
+            "video".into(),
+            "youtube".into(),
+            "youtube".into(),
+            meta,
+        )
+        .unwrap();
+        assert!(
+            outcome
+                .findings
+                .iter()
+                .any(|f| f.severity == studio_brand::checkers::Severity::Error),
+            "expected a blocking finding: {:?}",
+            outcome.findings
+        );
+
+        let err = publish_confirm_impl(&state, outcome.id.clone(), None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("còn lỗi"), "{err}");
+        let db = WorkspaceDb::open(&ws).unwrap();
+        let req = PublishRequest::get(db.conn(), &outcome.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(req.status, PublishStatus::AwaitingConfirmation);
+    }
 }

@@ -20,6 +20,10 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
   - `artifact_render` để xuất video MP4 hoặc ảnh PNG thumbnail.
   - `check_run` (sau khi render) để kiểm tra tuân thủ kích thước, thời lượng, safe-zone, bảng màu và từ cấm.
 - **Tự động & an toàn:** Luôn tôn trọng checkpoint CAS tự động của Studio trước mỗi lượt; không tự tiện ghi đè tệp ngoài workspace.
+- **Ghi/sửa tệp bằng tool Write/Edit, đọc bằng Read** (`artifact.yaml`, `index.html`, `text.md`, `metadata.yaml`, `timeline.json`):
+  không dùng Bash (`cat > … <<EOF`, `sed -i`, `python -c`) — mỗi lệnh Bash như vậy bắt người dùng duyệt quyền.
+  Bash chỉ dùng khi thật sự cần (ví dụ `cp` ảnh vào thư mục artifact).
+- **Tạo lại bản nháp đăng:** gọi lại `publish_prepare` cho cùng artifact/kênh sẽ cập nhật bản nháp đang mở, không tạo bản mới.
 
 ## 7 giai đoạn thực hiện
 

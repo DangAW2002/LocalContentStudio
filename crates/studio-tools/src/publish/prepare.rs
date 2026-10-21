@@ -129,8 +129,24 @@ pub fn prepare_publish(
     // Run compliance checks against channel and renders
     let validation = validate_publish(ws, conn, &project_slug, &artifact_id, channel, &metadata)?;
 
-    let id = uuid::Uuid::new_v4().to_string();
+    // Preparing again (e.g. after fixing metadata) updates the open draft for the same artifact,
+    // channel and target instead of leaving one stale draft per attempt.
+    let open = PublishRequest::list(conn, Some(&project_slug))?
+        .into_iter()
+        .find(|r| {
+            r.artifact == artifact_id
+                && r.channel == channel
+                && r.target == target
+                && matches!(
+                    r.status,
+                    PublishStatus::Draft | PublishStatus::AwaitingConfirmation
+                )
+        });
     let now = chrono::Utc::now().to_rfc3339();
+    let (id, created_at) = match open {
+        Some(r) => (r.id, r.created_at),
+        None => (uuid::Uuid::new_v4().to_string(), now.clone()),
+    };
 
     let request = PublishRequest {
         id: id.clone(),
@@ -143,7 +159,7 @@ pub fn prepare_publish(
         status: PublishStatus::AwaitingConfirmation,
         result_url: None,
         error: None,
-        created_at: now.clone(),
+        created_at,
         updated_at: now,
     };
 
@@ -156,4 +172,68 @@ pub fn prepare_publish(
         files: validation.files,
         request,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::publish::model::PublishPrivacy;
+    use studio_workspace::WorkspaceDb;
+
+    #[test]
+    fn preparing_again_updates_the_open_draft() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(tmp.path(), "Test").unwrap();
+        let proj = Project::create(&ws, "p1", "P1").unwrap();
+        std::fs::create_dir_all(proj.artifacts_dir().join("video")).unwrap();
+        let db = WorkspaceDb::open(&ws).unwrap();
+        let meta = |title: &str| PublishMetadata {
+            title: title.into(),
+            description: String::new(),
+            tags: vec![],
+            privacy: PublishPrivacy::Private,
+            schedule: None,
+            thumbnail: None,
+        };
+        let first = prepare_publish(
+            &ws,
+            db.conn(),
+            "video",
+            Some("p1"),
+            "youtube",
+            PublishTarget::Youtube,
+            meta("A"),
+        )
+        .unwrap();
+        let second = prepare_publish(
+            &ws,
+            db.conn(),
+            "video",
+            Some("p1"),
+            "youtube",
+            PublishTarget::Youtube,
+            meta("B"),
+        )
+        .unwrap();
+        assert_eq!(first.id, second.id);
+        let all = PublishRequest::list(db.conn(), Some("p1")).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].metadata.title, "B");
+
+        // A request that already left the draft stage is not reused.
+        let mut done = all[0].clone();
+        done.status = PublishStatus::Published;
+        done.save(db.conn()).unwrap();
+        let third = prepare_publish(
+            &ws,
+            db.conn(),
+            "video",
+            Some("p1"),
+            "youtube",
+            PublishTarget::Youtube,
+            meta("C"),
+        )
+        .unwrap();
+        assert_ne!(third.id, first.id);
+    }
 }
