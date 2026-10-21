@@ -245,6 +245,11 @@ fn build_context(
             "Dùng các tool MCP của server \"studio\" (brand_get, channel_get, playbook_get, capability_search, capability_run, check_run, artifact_render) để lấy Brand/spec kênh, chạy năng lực và tự kiểm tra sản phẩm trước khi báo xong. Không cài skill bằng npx skills. Chỉ thao tác bên trong thư mục workspace hiện tại."
                 .into(),
         );
+        // Bash needs the owner's approval each time; the file tools do not.
+        lines.push(
+            "Tạo/sửa tệp bằng tool Write/Edit và đọc bằng Read (artifact.yaml, index.html, timeline.json…), không dùng Bash (heredoc, sed, python) cho việc đó: mỗi lệnh Bash phải chờ người dùng duyệt."
+                .into(),
+        );
     }
     lines.push("Trả lời bằng tiếng Việt, ngắn gọn.".into());
     if let Some(n) = note {
@@ -965,6 +970,7 @@ mod tests {
 
         let claude_ctx = build_context(&ws, None, &[], None, true);
         assert!(claude_ctx.contains("Dùng các tool MCP của server \"studio\""));
+        assert!(claude_ctx.contains("Tạo/sửa tệp bằng tool Write/Edit"));
         assert!(!claude_ctx.contains("call_mcp_tool"));
     }
 
