@@ -25,11 +25,26 @@ const nodeTypes: any = {
   content: ContentNode,
 };
 
+
+/** The app theme (`data-theme` on <html>), not the OS one: the canvas must match the rest of the UI. */
+function useAppColorMode(): "light" | "dark" {
+  const read = () =>
+    document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  const [mode, setMode] = React.useState<"light" | "dark">(read);
+  React.useEffect(() => {
+    const obs = new MutationObserver(() => setMode(read()));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => obs.disconnect();
+  }, []);
+  return mode;
+}
+
 export const GraphFlow: React.FC<GraphFlowProps> = ({
   projectSlug,
   onSendToAgent,
   onOpenArtifact,
 }) => {
+  const colorMode = useAppColorMode();
   const [data, setData] = React.useState<ContentGraphResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [selectedNodeIds, setSelectedNodeIds] = React.useState<string[]>([]);
@@ -200,10 +215,11 @@ export const GraphFlow: React.FC<GraphFlowProps> = ({
           nodesConnectable={false}
           elementsSelectable={true}
           fitView
-          fitViewOptions={{ padding: 0.2 }}
+          fitViewOptions={{ padding: 0.2, maxZoom: 1.2 }}
           minZoom={0.2}
-          maxZoom={2}
-          colorMode="system"
+          maxZoom={1.5}
+          colorMode={colorMode}
+          style={{ background: "var(--cs-bg-canvas)" }}
         >
           <Background color="var(--cs-canvas-grid)" gap={20} size={1} />
           <Controls showInteractive={false} />
