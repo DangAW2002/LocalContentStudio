@@ -703,3 +703,47 @@ fn test_turn_undo_workspace_level_semantics() {
         err_msg
     );
 }
+
+#[test]
+fn restore_under_and_changed_under_touch_only_the_given_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(tmp.path(), "WS").unwrap();
+    let a = ws.root().join("projects/p/artifacts/a_1");
+    let b = ws.root().join("projects/p/artifacts/aX1"); // `_` must not act as a wildcard
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(&b).unwrap();
+    std::fs::write(a.join("index.html"), "A v1").unwrap();
+    std::fs::write(b.join("index.html"), "B v1").unwrap();
+    let cp = CheckpointService::create(&ws, "trước", None).unwrap();
+    let count_before = CheckpointService::list(&ws).unwrap().len();
+
+    std::fs::write(a.join("index.html"), "A v2").unwrap();
+    std::fs::write(a.join("extra.css"), "new").unwrap();
+    std::fs::write(b.join("index.html"), "B v2").unwrap();
+
+    let prefixes = vec![
+        "projects/p/artifacts/a_1/".to_string(),
+        "projects/p/artifacts/none/".to_string(),
+    ];
+    let changed = CheckpointService::changed_under(&ws, &cp, &prefixes).unwrap();
+    assert_eq!(changed, vec!["projects/p/artifacts/a_1/".to_string()]);
+    assert_eq!(
+        CheckpointService::list(&ws).unwrap().len(),
+        count_before,
+        "no checkpoint created"
+    );
+
+    CheckpointService::restore_under(&ws, &cp, "projects/p/artifacts/a_1/").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(a.join("index.html")).unwrap(),
+        "A v1"
+    );
+    assert!(!a.join("extra.css").exists());
+    assert_eq!(
+        std::fs::read_to_string(b.join("index.html")).unwrap(),
+        "B v2"
+    );
+    assert!(CheckpointService::changed_under(&ws, &cp, &prefixes)
+        .unwrap()
+        .is_empty());
+}

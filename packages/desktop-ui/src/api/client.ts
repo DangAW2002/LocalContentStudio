@@ -93,6 +93,8 @@ import type {
   CheckpointCreateResult,
   ArtifactSummary,
   ContentGraphResponse,
+  DownstreamPlan,
+  DownstreamRunResult,
   ArtifactRenderRequest,
   ArtifactRenderResult,
   ArtifactCheckRequest,
@@ -550,6 +552,46 @@ export class StudioApiClient {
   /** Command: `graph_get`. */
   async getGraph(project: string): Promise<ContentGraphResponse> {
     return invoke<ContentGraphResponse>("graph_get", { project });
+  }
+
+  /** Command: `graph_link`. */
+  async linkGraphEdge(project: string, fromId: string, toRef: string, role?: string): Promise<void> {
+    return invoke<void>("graph_link", { project, fromId, toRef, role });
+  }
+
+  /** Command: `graph_unlink`. */
+  async unlinkGraphEdge(project: string, fromId: string, toRef: string): Promise<void> {
+    return invoke<void>("graph_unlink", { project, fromId, toRef });
+  }
+
+  /** Command: `graph_set_pinned`. */
+  async setGraphNodePinned(project: string, id: string, pinned: boolean): Promise<void> {
+    return invoke<void>("graph_set_pinned", { project, id, pinned });
+  }
+
+  /** Command: `graph_set_notes`. */
+  async setGraphNodeNotes(project: string, id: string, notes: string[]): Promise<void> {
+    return invoke<void>("graph_set_notes", { project, id, notes });
+  }
+
+  /** Command: `graph_create_variant`. */
+  async createGraphVariant(project: string, sourceId: string, newId: string, title?: string): Promise<{ id: string; kind: string; title: string }> {
+    return invoke<{ id: string; kind: string; title: string }>("graph_create_variant", { project, sourceId, newId, title });
+  }
+
+  /** Command: `graph_update_downstream_plan`. */
+  async getGraphDownstreamPlan(project: string, targetRef: string): Promise<DownstreamPlan> {
+    return invoke<DownstreamPlan>("graph_update_downstream_plan", { project, targetRef });
+  }
+
+  /** Command: `graph_update_downstream_run`. */
+  async runGraphDownstreamUpdate(project: string, targetRef: string, runPaid?: boolean): Promise<DownstreamRunResult> {
+    return invoke<DownstreamRunResult>("graph_update_downstream_run", { project, targetRef, runPaid });
+  }
+
+  /** Command: `restore_pinned_artifact`. */
+  async restorePinnedArtifact(project: string, artifactId: string, checkpointId: string): Promise<void> {
+    return invoke<void>("restore_pinned_artifact", { project, artifactId, checkpointId });
   }
 
   /** Command: `artifact_render`. */

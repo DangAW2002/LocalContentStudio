@@ -977,3 +977,54 @@ async fn test_mcp_timeline_build_with_generated_wavs() {
     assert_eq!(tl_doc.tracks[2].id, "audio");
     assert_eq!(tl_doc.tracks[3].id, "captions");
 }
+
+#[tokio::test]
+async fn test_mcp_pinned_refusal() {
+    let ws_tmp = tempdir().unwrap();
+    let ws = Workspace::create(ws_tmp.path(), "MCP Pinned WS").unwrap();
+    let proj = studio_workspace::Project::create(&ws, "pinned-proj", "Pinned Proj").unwrap();
+
+    let mut art = studio_artifacts::Artifact::create(
+        &proj,
+        "art-pinned",
+        "design",
+        "Design",
+        None,
+        vec![],
+        None,
+    )
+    .unwrap();
+    art.pinned = true;
+    art.save(&proj).unwrap();
+
+    let state = state();
+    let token = state.tokens.issue(ctx(ws.root(), EngineKind::Claude));
+    let srv = server::start(state.clone(), 0).await.unwrap();
+    let port = srv.addr.port();
+
+    // Call artifact_render on pinned artifact
+    let (status, body) = post(
+        port,
+        Some(&token),
+        None,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "artifact_render",
+                "arguments": {
+                    "project": "pinned-proj",
+                    "artifact": "art-pinned"
+                }
+            }
+        }),
+    )
+    .await;
+
+    assert_eq!(status, 200);
+    let is_error = body["result"]["isError"].as_bool().unwrap_or(false);
+    assert!(is_error);
+    let text = body["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("đang khoá — mở khoá trong tab Sơ đồ"));
+}

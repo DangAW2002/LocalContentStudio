@@ -18,6 +18,7 @@ export const CHECK_ERROR_LABELS: Record<string, string> = {
   TEXT_LIMIT_EXCEEDED: "Vượt giới hạn ký tự",
   VOICE_WORD_DISALLOWED: "Chứa từ ngữ thương hiệu cấm dùng",
   BRAND_NOT_FOUND: "Không tìm thấy cấu hình thương hiệu",
+  INPUTS_UNDECLARED: "Dùng tệp chưa khai báo trong inputs",
 };
 
 /**

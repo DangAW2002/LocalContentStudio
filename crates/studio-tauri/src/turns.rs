@@ -617,6 +617,33 @@ async fn run_turn(t: TurnTask, mut turn: Turn, cancel: Arc<Notify>) {
             )
             .unwrap_or(0.0);
 
+        // Post-turn lock check (ADR-011 §5 / Task G2 §4)
+        if let Ok(ws) = t.state.workspace() {
+            if let Ok(cps) = studio_workspace::CheckpointService::list(&ws) {
+                if let Some(pre_cp) = cps
+                    .into_iter()
+                    .find(|c| c.turn_id.as_deref() == Some(&t.turn_id))
+                {
+                    if let Ok(modified_pinned) =
+                        studio_artifacts::check_pinned_modifications_after_turn(&ws, &pre_cp.id)
+                    {
+                        for art_id in modified_pinned {
+                            let warn_ev = json!({
+                                "type": "Text",
+                                "text": format!("Cảnh báo: Agent đã sửa tệp thuộc artifact khoá '{}' trong lượt này.", art_id),
+                                "pinnedArtifactWarning": {
+                                    "artifactId": art_id,
+                                    "checkpointId": pre_cp.id
+                                }
+                            });
+                            let _ = persist(db, &t.turn_id, &warn_ev);
+                            emit(&t.state, &t.thread_id, &t.turn_id, &warn_ev);
+                        }
+                    }
+                }
+            }
+        }
+
         if cap_cost > 0.0 {
             let existing_usage: Option<(String, Value)> = db
                 .conn()

@@ -1599,6 +1599,212 @@ pub fn graph_get(state: State<'_, AppState>, project: String) -> CmdResult<Value
     graph_get_impl(&state, project)
 }
 
+pub fn graph_link_impl(
+    state: &AppState,
+    project: String,
+    from_id: String,
+    to_ref: String,
+    role: Option<String>,
+) -> CmdResult<()> {
+    let ws = state.workspace()?;
+    let p = Project::open(&ws, &project)?;
+    let input_role = match role.as_deref() {
+        Some("reference") => studio_artifacts::InputRole::Reference,
+        Some("variant_of") => studio_artifacts::InputRole::VariantOf,
+        _ => studio_artifacts::InputRole::Uses,
+    };
+    studio_artifacts::graph_link(&ws, &p, &from_id, &to_ref, input_role)
+        .map_err(|e| CmdError::msg(e.to_string()))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn graph_link(
+    state: State<'_, AppState>,
+    project: String,
+    from_id: String,
+    to_ref: String,
+    role: Option<String>,
+) -> CmdResult<()> {
+    graph_link_impl(&state, project, from_id, to_ref, role)
+}
+
+pub fn graph_unlink_impl(
+    state: &AppState,
+    project: String,
+    from_id: String,
+    to_ref: String,
+) -> CmdResult<()> {
+    let ws = state.workspace()?;
+    let p = Project::open(&ws, &project)?;
+    studio_artifacts::graph_unlink(&ws, &p, &from_id, &to_ref)
+        .map_err(|e| CmdError::msg(e.to_string()))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn graph_unlink(
+    state: State<'_, AppState>,
+    project: String,
+    from_id: String,
+    to_ref: String,
+) -> CmdResult<()> {
+    graph_unlink_impl(&state, project, from_id, to_ref)
+}
+
+pub fn graph_set_pinned_impl(
+    state: &AppState,
+    project: String,
+    id: String,
+    pinned: bool,
+) -> CmdResult<()> {
+    let ws = state.workspace()?;
+    let p = Project::open(&ws, &project)?;
+    studio_artifacts::graph_set_pinned(&ws, &p, &id, pinned)
+        .map_err(|e| CmdError::msg(e.to_string()))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn graph_set_pinned(
+    state: State<'_, AppState>,
+    project: String,
+    id: String,
+    pinned: bool,
+) -> CmdResult<()> {
+    graph_set_pinned_impl(&state, project, id, pinned)
+}
+
+pub fn graph_set_notes_impl(
+    state: &AppState,
+    project: String,
+    id: String,
+    notes: Vec<String>,
+) -> CmdResult<()> {
+    let ws = state.workspace()?;
+    let p = Project::open(&ws, &project)?;
+    studio_artifacts::graph_set_notes(&ws, &p, &id, notes)
+        .map_err(|e| CmdError::msg(e.to_string()))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn graph_set_notes(
+    state: State<'_, AppState>,
+    project: String,
+    id: String,
+    notes: Vec<String>,
+) -> CmdResult<()> {
+    graph_set_notes_impl(&state, project, id, notes)
+}
+
+pub fn graph_create_variant_impl(
+    state: &AppState,
+    project: String,
+    source_id: String,
+    new_id: String,
+    title: Option<String>,
+) -> CmdResult<Value> {
+    let ws = state.workspace()?;
+    let p = Project::open(&ws, &project)?;
+    let variant = studio_artifacts::graph_create_variant(&ws, &p, &source_id, &new_id, title)
+        .map_err(|e| CmdError::msg(e.to_string()))?;
+    Ok(json!({
+        "id": variant.id,
+        "kind": variant.kind,
+        "title": variant.title,
+    }))
+}
+
+#[tauri::command]
+pub fn graph_create_variant(
+    state: State<'_, AppState>,
+    project: String,
+    source_id: String,
+    new_id: String,
+    title: Option<String>,
+) -> CmdResult<Value> {
+    graph_create_variant_impl(&state, project, source_id, new_id, title)
+}
+
+pub fn graph_update_downstream_plan_impl(
+    state: &AppState,
+    project: String,
+    target_ref: String,
+) -> CmdResult<Value> {
+    let ws = state.workspace()?;
+    let p = Project::open(&ws, &project)?;
+    let plan = studio_artifacts::graph_update_downstream_plan(&ws, &p, &target_ref)
+        .map_err(|e| CmdError::msg(e.to_string()))?;
+    serde_json::to_value(plan).map_err(|e| CmdError::msg(e.to_string()))
+}
+
+#[tauri::command]
+pub fn graph_update_downstream_plan(
+    state: State<'_, AppState>,
+    project: String,
+    target_ref: String,
+) -> CmdResult<Value> {
+    graph_update_downstream_plan_impl(&state, project, target_ref)
+}
+
+pub async fn graph_update_downstream_run_impl(
+    state: &AppState,
+    project: String,
+    target_ref: String,
+    run_paid: Option<bool>,
+) -> CmdResult<Value> {
+    let ws = state.workspace()?;
+    let p = Project::open(&ws, &project)?;
+    let res = studio_artifacts::graph_update_downstream_run(
+        &ws,
+        &p,
+        &target_ref,
+        &state.scheduler,
+        run_paid.unwrap_or(false),
+    )
+    .await
+    .map_err(|e| CmdError::msg(e.to_string()))?;
+    serde_json::to_value(res).map_err(|e| CmdError::msg(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn graph_update_downstream_run(
+    state: State<'_, AppState>,
+    project: String,
+    target_ref: String,
+    run_paid: Option<bool>,
+) -> CmdResult<Value> {
+    graph_update_downstream_run_impl(&state, project, target_ref, run_paid).await
+}
+
+pub fn restore_pinned_artifact_impl(
+    state: &AppState,
+    project: String,
+    artifact_id: String,
+    checkpoint_id: String,
+) -> CmdResult<()> {
+    let ws = state.workspace()?;
+    studio_artifacts::restore_artifact_files_from_checkpoint(
+        &ws,
+        &project,
+        &artifact_id,
+        &checkpoint_id,
+    )
+    .map_err(|e| CmdError::msg(e.to_string()))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn restore_pinned_artifact(
+    state: State<'_, AppState>,
+    project: String,
+    artifact_id: String,
+    checkpoint_id: String,
+) -> CmdResult<()> {
+    restore_pinned_artifact_impl(&state, project, artifact_id, checkpoint_id)
+}
+
 pub fn artifact_list_impl(state: &AppState, project: String) -> CmdResult<Vec<Value>> {
     let ws = state.workspace()?;
     let p = Project::open(&ws, &project)?;

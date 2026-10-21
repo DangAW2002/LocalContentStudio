@@ -6,6 +6,7 @@ pub mod artifact;
 pub mod cache;
 pub mod error;
 pub mod graph;
+pub mod graph_edit;
 pub mod kind;
 pub mod probe;
 pub mod render;
@@ -25,6 +26,7 @@ pub use graph::{
     build_project_graph, calculate_impact, detect_cycle, normalize_ref, topo_sort, ContentGraph,
     GraphEdge, GraphNode, ImpactNode, NodeStatus,
 };
+pub use graph_edit::*;
 pub use kind::{KindRegistry, KindSpec};
 pub use probe::{probe_chromium, probe_ffmpeg, probe_ffprobe, probe_node_npx, ProbeReport};
 pub use render::{

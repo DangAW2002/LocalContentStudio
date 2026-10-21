@@ -138,6 +138,27 @@ pub fn definitions() -> Vec<Value> {
             }),
             &["ref"]
         ),
+        tool(
+            "graph_link",
+            "Thêm liên kết phụ thuộc giữa 2 artifact (from_artifact -> to_ref) kèm role (uses, reference, variant_of).",
+            json!({
+                "project": s("Slug của project (tùy chọn nếu đang trong ngữ cảnh project)"),
+                "from": s("ID artifact phụ thuộc (from_id)"),
+                "to": s("Tham chiếu artifact hoặc asset đích (to_ref)"),
+                "role": s("Vai trò liên kết: uses, reference, variant_of (mặc định uses)")
+            }),
+            &["from", "to"]
+        ),
+        tool(
+            "graph_unlink",
+            "Xóa liên kết phụ thuộc giữa 2 artifact.",
+            json!({
+                "project": s("Slug của project (tùy chọn nếu đang trong ngữ cảnh project)"),
+                "from": s("ID artifact (from_id)"),
+                "to": s("Tham chiếu cần xóa khỏi inputs (to_ref)")
+            }),
+            &["from", "to"]
+        ),
         tool("approve", "Nội bộ: xử lý yêu cầu cấp quyền của engine.", json!({ "tool_name": s("tên tool"), "input": { "type": "object" } }), &["tool_name", "input"]),
     ]
 }
@@ -361,6 +382,16 @@ pub async fn call(
             let project_raw = arg(args, "project");
             let format_raw = arg(args, "format");
             let (proj, id) = resolve_artifact_target(&ws, ctx, artifact_raw, project_raw)?;
+
+            // Check if artifact is pinned
+            if let Ok(p) = Project::open(&ws, &proj) {
+                if let Ok(art) = studio_artifacts::Artifact::load(&p, &id) {
+                    if art.pinned {
+                        return Err(format!("Artifact {} đang khoá — mở khoá trong tab Sơ đồ trước khi render/gen lại.", id));
+                    }
+                }
+            }
+
             render_artifact_shared(&ws, &state.scheduler, &proj, &id, format_raw).await?
         }
         "check_run" => check_run(&ws, args)?,
@@ -398,6 +429,8 @@ pub async fn call(
         }
         "graph_get" => graph_get(&ws, ctx, args)?,
         "graph_impact" => graph_impact(&ws, ctx, args)?,
+        "graph_link" => graph_link(&ws, ctx, args)?,
+        "graph_unlink" => graph_unlink(&ws, ctx, args)?,
         other => return Err(format!("Không có tool \"{other}\".")),
     };
     Ok(inline_or_file(&ws, out))
@@ -545,6 +578,54 @@ fn graph_impact(ws: &Workspace, ctx: &TurnContext, args: &Value) -> Result<Value
     }))
 }
 
+fn graph_link(ws: &Workspace, ctx: &TurnContext, args: &Value) -> Result<Value, String> {
+    let project_slug = arg(args, "project")
+        .map(String::from)
+        .or_else(|| ctx.project.clone())
+        .ok_or_else(|| "Cần chỉ định slug của project.".to_string())?;
+
+    let from_id = required(args, "from")?;
+    let to_ref = required(args, "to")?;
+    let role_str = arg(args, "role").unwrap_or("uses");
+
+    let role = match role_str {
+        "reference" => studio_artifacts::InputRole::Reference,
+        "variant_of" => studio_artifacts::InputRole::VariantOf,
+        _ => studio_artifacts::InputRole::Uses,
+    };
+
+    let proj = Project::open(ws, &project_slug).map_err(|e| e.to_string())?;
+    studio_artifacts::graph_link(ws, &proj, from_id, to_ref, role).map_err(|e| e.to_string())?;
+
+    Ok(json!({
+        "status": "ok",
+        "project": project_slug,
+        "from": from_id,
+        "to": to_ref,
+        "role": role.as_str()
+    }))
+}
+
+fn graph_unlink(ws: &Workspace, ctx: &TurnContext, args: &Value) -> Result<Value, String> {
+    let project_slug = arg(args, "project")
+        .map(String::from)
+        .or_else(|| ctx.project.clone())
+        .ok_or_else(|| "Cần chỉ định slug của project.".to_string())?;
+
+    let from_id = required(args, "from")?;
+    let to_ref = required(args, "to")?;
+
+    let proj = Project::open(ws, &project_slug).map_err(|e| e.to_string())?;
+    studio_artifacts::graph_unlink(ws, &proj, from_id, to_ref).map_err(|e| e.to_string())?;
+
+    Ok(json!({
+        "status": "ok",
+        "project": project_slug,
+        "from": from_id,
+        "to": to_ref
+    }))
+}
+
 fn artifact_list(ws: &Workspace, project: Option<&str>) -> Result<Value, String> {
     let projects = match project {
         Some(slug) => vec![Project::open(ws, slug).map_err(|e| e.to_string())?],
@@ -683,6 +764,27 @@ async fn capability_run(
         return Err(format!("Capability \"{cap}\" không được bật cho lượt này."));
     }
     let input = args.get("input").cloned().unwrap_or_else(|| json!({}));
+
+    // If output goes into a pinned artifact's directory, refuse
+    for key in ["output_path", "path", "target_path"] {
+        if let Some(target_p) = input.get(key).and_then(Value::as_str) {
+            let norm_target = target_p.replace('\\', "/");
+            if let Ok(projects) = ws.list_projects() {
+                for proj in projects {
+                    let art_prefix = format!("projects/{}/artifacts/", proj.slug());
+                    if norm_target.starts_with(&art_prefix) {
+                        let sub = &norm_target[art_prefix.len()..];
+                        let art_id = sub.split('/').next().unwrap_or(sub);
+                        if let Ok(art) = studio_artifacts::Artifact::load(&proj, art_id) {
+                            if art.pinned {
+                                return Err(format!("Artifact {} đang khoá — mở khoá trong tab Sơ đồ trước khi render/gen lại.", art.id));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     let reg = Registry::load(ws);
     let tools: Vec<_> = reg.list_tools().into_iter().cloned().collect();
     let providers = route(cap, arg(args, "provider"), ws, &tools);
