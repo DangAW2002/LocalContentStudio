@@ -59,10 +59,11 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
 - Dùng công cụ Studio MCP `timeline_build` để tự động tạo artifact timeline (`artifact.yaml` + `timeline.json`). Không cần viết Python qua Bash hay tự tính toán thời lượng thủ công:
   - `timeline_build` tự động probe thời lượng từng tệp âm thanh (WAV/MP3), sắp xếp các phân cảnh nối tiếp nhau với các khoảng đệm mượt mà (`lead_s`, `gap_s`, `tail_s`).
   - Tự động chia lời thoại kịch bản thành phụ đề cân đối theo câu và độ dài (tối đa 2 dòng ~42 ký tự mỗi dòng), gán mốc thời gian chính xác khớp với giọng đọc.
+  - Hỗ trợ tùy biến định dạng phụ đề qua `caption_style` (hoặc trường `style` trên track `captions` trong `timeline.json`): `font` (tên font chữ), `font_size` (cỡ chữ px, mặc định ~4.5% chiều cao khung hình), `color` (màu chữ #RRGGBB), `outline` (độ dày viền px), `box` (bật/tắt hộp nền), `box_color` (màu hộp nền, vd `#000000` hoặc `black@0.6`), `margin_bottom` (khoảng cách mép đáy px, mặc định ~8% chiều cao), `max_width_ratio` (tỷ lệ rộng tối đa 0-1). Cả khối phụ đề nhiều dòng được giữ trọn vẹn trong khung hình (`y=h-text_h-margin`).
   - Hỗ trợ lớp phủ (overlays) hiển thị xuyên suốt video (ví dụ logo brand định dạng PNG) hoặc theo khoảng thời gian tùy chọn.
   - Tự động thiết lập kích thước và khung hình theo chuẩn của kênh YouTube (1920x1080@30fps).
 - **Lưu ý định dạng SVG:** FFmpeg không giải mã trực tiếp SVG trong timeline. Hãy render tệp SVG logo sang PNG qua design artifact trước khi truyền vào `overlays` của `timeline_build`.
-- **Ví dụ gọi công cụ `timeline_build`:**
+- **Ví dụ gọi công cụ `timeline_build` (kèm `caption_style` và overlay logo):**
 
   ```json
   {
@@ -80,6 +81,16 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
         "visual": "projects/ca-phe-phin/renders/scene-02/output.png"
       }
     ],
+    "caption_style": {
+      "font": "segoeui",
+      "font_size": 48,
+      "color": "#ffffff",
+      "outline": 0,
+      "box": true,
+      "box_color": "black@0.6",
+      "margin_bottom": 86,
+      "max_width_ratio": 0.8
+    },
     "overlays": [
       {
         "source": "projects/ca-phe-phin/renders/logo-badge/output.png",

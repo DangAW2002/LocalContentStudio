@@ -18,6 +18,7 @@ export interface TimelineTrack {
   id: string;
   kind: "video" | "audio" | "captions" | "caption";
   clips: TimelineClip[];
+  style?: Record<string, any>;
 }
 
 export interface TimelineDoc {
