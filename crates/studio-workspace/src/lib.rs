@@ -24,4 +24,4 @@ pub use org::{Org, OrgMeta};
 pub use scope::{ResolutionLayer, ResolvedItem, ScopeChain};
 pub use series::{SeriesMeta, SeriesRecipe, SeriesService};
 pub use usage::{disk_usage, DiskUsage};
-pub use workspace::{Project, ProjectMeta, Workspace, WorkspaceMeta};
+pub use workspace::{Project, ProjectMeta, StallWatchdogConfig, Workspace, WorkspaceMeta};
