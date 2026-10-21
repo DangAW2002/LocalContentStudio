@@ -440,6 +440,116 @@ pub fn escape_ffmpeg_subtitles_path(path: &Path) -> String {
     escaped_colon.replace('\'', "'\\''")
 }
 
+/// Escape special characters in text for FFmpeg `drawtext=text='...'`.
+///
+/// Escapes `\`, `:`, `%`, and `,` per FFmpeg filtergraph and drawtext rules. A straight quote
+/// cannot be escaped inside the quoted value (it ends the value and breaks the whole graph), so it
+/// becomes the typographic apostrophe.
+pub fn escape_drawtext_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() * 2);
+    for ch in text.chars() {
+        match ch {
+            '\\' => out.push_str(r"\\"),
+            '\'' => out.push('\u{2019}'),
+            ':' => out.push_str(r"\:"),
+            '%' => out.push_str(r"\%"),
+            ',' => out.push_str(r"\,"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Whether the local FFmpeg's drawtext has `text_align` (FFmpeg 6.1+), used to center each
+/// caption line; older builds reject unknown options, so it is only added when present.
+pub fn drawtext_supports_text_align() -> bool {
+    static SUPPORTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SUPPORTED.get_or_init(|| {
+        let Some(ffmpeg) = crate::probe::probe_ffmpeg().path else {
+            return false;
+        };
+        std::process::Command::new(ffmpeg)
+            .args(["-hide_banner", "-h", "filter=drawtext"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains("text_align"))
+            .unwrap_or(false)
+    })
+}
+
+/// Resolve a font file for captions with Vietnamese glyph support.
+///
+/// On Windows, searches `C:/Windows/Fonts`:
+/// - If `style_font` names a font, checks common filenames (e.g. Segoe UI -> segoeui.ttf, Arial -> arial.ttf).
+/// - If not found or not specified, defaults to `segoeui.ttf` (or `segoeuib.ttf` if bold was requested),
+///   falling back to `arial.ttf`.
+///
+/// Returns the escaped path string suitable for FFmpeg `fontfile='...'`, or None if not found.
+pub fn resolve_caption_font(style_font: Option<&str>) -> Option<String> {
+    #[cfg(windows)]
+    {
+        let fonts_dir = Path::new("C:/Windows/Fonts");
+        if fonts_dir.is_dir() {
+            if let Some(font_name) = style_font {
+                let trimmed = font_name.trim();
+                let lower = trimmed.to_ascii_lowercase();
+                let is_bold =
+                    lower.contains("bold") || lower.ends_with(" b") || lower.ends_with("bd");
+                let stripped = lower.replace("bold", "").replace([' ', '-', '_'], "");
+
+                let mut candidates = Vec::new();
+                if trimmed.ends_with(".ttf") || trimmed.ends_with(".otf") {
+                    candidates.push(trimmed.to_string());
+                }
+                if is_bold {
+                    candidates.push(format!("{stripped}b.ttf"));
+                    candidates.push(format!("{stripped}bd.ttf"));
+                    candidates.push(format!("{stripped}_bold.ttf"));
+                }
+                candidates.push(format!("{stripped}.ttf"));
+                candidates.push(format!("{stripped}.otf"));
+
+                for candidate in candidates {
+                    let p = fonts_dir.join(&candidate);
+                    if p.is_file() {
+                        return Some(escape_ffmpeg_subtitles_path(&p));
+                    }
+                }
+            }
+
+            let segoe = fonts_dir.join("segoeui.ttf");
+            if segoe.is_file() {
+                return Some(escape_ffmpeg_subtitles_path(&segoe));
+            }
+            let arial = fonts_dir.join("arial.ttf");
+            if arial.is_file() {
+                return Some(escape_ffmpeg_subtitles_path(&arial));
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        for dir in [
+            "/usr/share/fonts",
+            "/usr/local/share/fonts",
+            "/System/Library/Fonts",
+            "/Library/Fonts",
+        ] {
+            let p = Path::new(dir);
+            if p.is_dir() {
+                for candidate in ["DejaVuSans.ttf", "LiberationSans-Regular.ttf", "Arial.ttf"] {
+                    let font_file = p.join(candidate);
+                    if font_file.is_file() {
+                        return Some(escape_ffmpeg_subtitles_path(&font_file));
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 /// Build an FFmpeg filtergraph and arguments for rendering a `timeline.json` document to MP4 H.264/AAC.
 pub fn build_timeline_ffmpeg_args(
     timeline_doc: &crate::timeline::TimelineDoc,
@@ -466,7 +576,7 @@ pub fn build_timeline_ffmpeg_args(
     // Separate video tracks, audio clips, and caption clips
     let mut video_tracks = Vec::new();
     let mut audio_clips = Vec::new();
-    let mut caption_clips = Vec::new();
+    let mut caption_entries = Vec::new();
 
     for track in &timeline_doc.tracks {
         match track.kind {
@@ -480,7 +590,7 @@ pub fn build_timeline_ffmpeg_args(
             }
             crate::timeline::TrackKind::Captions | crate::timeline::TrackKind::Caption => {
                 for clip in &track.clips {
-                    caption_clips.push(clip);
+                    caption_entries.push((track.style.as_ref(), clip));
                 }
             }
         }
@@ -632,16 +742,67 @@ pub fn build_timeline_ffmpeg_args(
     }
 
     // 3. Burn in captions if any
-    for c in &caption_clips {
+    for (style_opt, c) in &caption_entries {
         if is_subtitle_file(&c.source) {
             let escaped_path = escape_ffmpeg_subtitles_path(Path::new(&c.source));
             let sub_filter = format!("[v]subtitles='{}'[v]", escaped_path);
             v_filter_parts.push(sub_filter);
         } else {
-            let escaped_text = c.source.replace(':', "\\:").replace('\'', "");
+            let fontfile_part =
+                match resolve_caption_font(style_opt.and_then(|s| s.font.as_deref())) {
+                    Some(ref path) => format!("fontfile='{}':", path),
+                    None => String::new(),
+                };
+
+            let font_size = style_opt
+                .and_then(|s| s.font_size)
+                .unwrap_or_else(|| ((timeline_doc.height as f64) * 0.045).round() as u32);
+            let margin_bottom = style_opt
+                .and_then(|s| s.margin_bottom)
+                .unwrap_or_else(|| ((timeline_doc.height as f64) * 0.08).round() as u32);
+
+            let text_color_raw = style_opt
+                .and_then(|s| s.color.as_deref())
+                .unwrap_or("white");
+            let font_color = if let Some(hex) = text_color_raw.strip_prefix('#') {
+                format!("0x{}", hex)
+            } else {
+                text_color_raw.to_string()
+            };
+
+            let is_box = style_opt.and_then(|s| s.is_box).unwrap_or(true);
+            let box_part = if is_box {
+                let box_color_raw = style_opt
+                    .and_then(|s| s.box_color.as_deref())
+                    .unwrap_or("black@0.6");
+                let box_color = if let Some(hex) = box_color_raw.strip_prefix('#') {
+                    format!("0x{}", hex)
+                } else {
+                    box_color_raw.to_string()
+                };
+                let box_border_w = (font_size / 5).max(8);
+                format!(":box=1:boxcolor={box_color}:boxborderw={box_border_w}")
+            } else {
+                ":box=0".to_string()
+            };
+
+            let outline_part = match style_opt.and_then(|s| s.outline) {
+                Some(w) if w > 0 => format!(":borderw={w}:bordercolor=black"),
+                _ => String::new(),
+            };
+
+            let line_spacing = (font_size / 6).max(4);
+            let escaped_text = escape_drawtext_text(&c.source);
+
+            let align_part = if drawtext_supports_text_align() {
+                ":text_align=C"
+            } else {
+                ""
+            };
             let text_filter = format!(
-                "[v]drawtext=text='{}':enable='between(t,{},{})':fontsize=36:fontcolor=white:x=(w-text_w)/2:y=h-100:box=1:boxcolor=black@0.6[v]",
-                escaped_text, c.start, c.start + c.duration
+                "[v]drawtext={fontfile_part}text='{escaped_text}':expansion=none{align_part}:enable='between(t,{},{})':fontsize={font_size}:fontcolor={font_color}{box_part}{outline_part}:line_spacing={line_spacing}:x=(w-text_w)/2:y=h-text_h-{margin_bottom}[v]",
+                c.start,
+                c.start + c.duration
             );
             v_filter_parts.push(text_filter);
         }

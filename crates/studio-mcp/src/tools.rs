@@ -88,7 +88,11 @@ pub fn definitions() -> Vec<Value> {
                 "width": json!({ "type": "integer", "description": "Chiều rộng khung hình (mặc định lấy theo kênh, hoặc 1920)" }),
                 "height": json!({ "type": "integer", "description": "Chiều cao khung hình (mặc định lấy theo kênh, hoặc 1080)" }),
                 "fps": json!({ "type": "number", "description": "Tốc độ khung hình (mặc định lấy theo kênh, hoặc 30.0)" }),
-                "min_duration_s": json!({ "type": "number", "description": "Thời lượng tối thiểu của video (kéo dài phần đệm đuôi nếu chưa đạt)" })
+                "min_duration_s": json!({ "type": "number", "description": "Thời lượng tối thiểu của video (kéo dài phần đệm đuôi nếu chưa đạt)" }),
+                "caption_style": json!({
+                    "type": "object",
+                    "description": "Tùy biến định dạng phụ đề: font (tên font), font_size (px), color (#RRGGBB), outline (px), box (bool), box_color (#RRGGBBAA hoặc black@0.6), margin_bottom (px), max_width_ratio (0-1)"
+                })
             }),
             &["project", "artifact", "segments"]
         ),
