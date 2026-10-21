@@ -5,6 +5,7 @@
     Runs design-system build, desktop-ui build, and Tauri release build.
     Ensures release mode packages frontend assets from frontendDist without dev server.
     Does not code sign; does not bundle Node, FFmpeg, or Chrome.
+    Copies installer and generates SHA256SUMS.txt into .local/release/.
 #>
 
 $ErrorActionPreference = "Stop"
@@ -36,7 +37,10 @@ if (Test-Path $TauriCli) {
 if ($LASTEXITCODE -ne 0) { throw "Tauri build failed with exit code $LASTEXITCODE" }
 
 Write-Host "=== 4. Locating NSIS Installer ===" -ForegroundColor Cyan
-$NsisDir = Join-Path $RepoRoot "target\release\bundle\nsis"
+$NsisDir = if ($env:CARGO_TARGET_DIR) { Join-Path $env:CARGO_TARGET_DIR "release\bundle\nsis" } else { Join-Path $RepoRoot "target\release\bundle\nsis" }
+if (-not (Test-Path $NsisDir)) {
+    $NsisDir = Join-Path $RepoRoot "target\release\bundle\nsis"
+}
 if (-not (Test-Path $NsisDir)) {
     throw "NSIS output directory not found at $NsisDir"
 }
@@ -49,16 +53,31 @@ if ($Installers.Count -eq 0) {
 $TargetInstaller = $Installers[0]
 $SizeMb = [math]::Round($TargetInstaller.Length / 1MB, 2)
 
+Write-Host "=== 5. Copying to .local/release and Computing SHA-256 ===" -ForegroundColor Cyan
+$LocalReleaseDir = Join-Path $RepoRoot ".local\release"
+if (-not (Test-Path $LocalReleaseDir)) {
+    New-Item -ItemType Directory -Force -Path $LocalReleaseDir | Out-Null
+}
+
+$DestInstaller = Join-Path $LocalReleaseDir $TargetInstaller.Name
+Copy-Item -Path $TargetInstaller.FullName -Destination $DestInstaller -Force
+
+$Hash = (Get-FileHash -Algorithm SHA256 -Path $DestInstaller).Hash.ToLower()
+$ShaFile = Join-Path $LocalReleaseDir "SHA256SUMS.txt"
+Set-Content -Path $ShaFile -Value "$Hash *$($TargetInstaller.Name)" -Encoding utf8
+
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host " Local Content Studio NSIS Installer Built Successfully! " -ForegroundColor Green
-Write-Host " Path: $($TargetInstaller.FullName)" -ForegroundColor Green
+Write-Host " Path: $DestInstaller" -ForegroundColor Green
 Write-Host " Size: $SizeMb MB ($($TargetInstaller.Length) bytes)" -ForegroundColor Green
+Write-Host " SHA-256: $Hash" -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 
 [PSCustomObject]@{
     Name = $TargetInstaller.Name
-    Path = $TargetInstaller.FullName
+    Path = $DestInstaller
     SizeBytes = $TargetInstaller.Length
     SizeMB = $SizeMb
+    SHA256 = $Hash
 }
