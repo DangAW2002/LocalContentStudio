@@ -747,3 +747,178 @@ fn restore_under_and_changed_under_touch_only_the_given_directory() {
         .unwrap()
         .is_empty());
 }
+
+// ===== G3 Series / Reference tests =====
+
+#[test]
+fn test_series_create_list_get() {
+    use studio_workspace::{SeriesRecipe, SeriesService};
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path(), "Test WS").unwrap();
+
+    // Initially empty
+    let list = SeriesService::list(&ws).unwrap();
+    assert!(list.is_empty());
+
+    // Create a series
+    let recipe = SeriesRecipe {
+        kit: Some("youtube-pipeline".into()),
+        modules: vec!["studio.brand".into()],
+        playbook: Some("youtube-video".into()),
+        extra: Default::default(),
+    };
+    let meta = SeriesService::create(
+        &ws,
+        "lich-su-vn",
+        "Lịch Sử Việt Nam",
+        "Series khám phá lịch sử VN",
+        recipe,
+        vec!["nv-an".into()],
+    )
+    .unwrap();
+
+    assert_eq!(meta.slug, "lich-su-vn");
+    assert_eq!(meta.title, "Lịch Sử Việt Nam");
+    assert_eq!(meta.references, vec!["nv-an".to_string()]);
+    assert!(meta.recipe.kit.as_deref() == Some("youtube-pipeline"));
+
+    // List now has 1
+    let list = SeriesService::list(&ws).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].slug, "lich-su-vn");
+
+    // Get by slug
+    let fetched = SeriesService::get(&ws, "lich-su-vn").unwrap();
+    assert_eq!(fetched.description, "Series khám phá lịch sử VN");
+
+    // series.yaml round-trip: save updated metadata
+    let mut updated = fetched.clone();
+    updated.description = "Updated description".into();
+    SeriesService::save(&ws, &updated).unwrap();
+    let reloaded = SeriesService::get(&ws, "lich-su-vn").unwrap();
+    assert_eq!(reloaded.description, "Updated description");
+    assert_eq!(reloaded.references, vec!["nv-an".to_string()]); // preserved
+
+    // Duplicate slug is rejected
+    let err = SeriesService::create(
+        &ws,
+        "lich-su-vn",
+        "Dup",
+        "",
+        SeriesRecipe::default(),
+        vec![],
+    )
+    .unwrap_err();
+    assert!(
+        format!("{}", err).contains("tồn tại"),
+        "error should mention 'tồn tại': {}",
+        err
+    );
+}
+
+#[test]
+fn test_series_slug_validation() {
+    use studio_workspace::{SeriesRecipe, SeriesService};
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path(), "Test WS").unwrap();
+
+    // Invalid slugs
+    for bad in &["", "a/b", "a\\b", "a..b", "a:b"] {
+        let err = SeriesService::create(&ws, bad, "Title", "", SeriesRecipe::default(), vec![])
+            .unwrap_err();
+        assert!(
+            format!("{}", err).contains("hợp lệ")
+                || format!("{}", err).to_lowercase().contains("invalid"),
+            "expected validation error for slug '{}', got: {}",
+            bad,
+            err
+        );
+    }
+}
+
+#[test]
+fn test_series_create_episode() {
+    use studio_workspace::{SeriesRecipe, SeriesService};
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path(), "Test WS").unwrap();
+
+    let recipe = SeriesRecipe {
+        kit: Some("youtube-pipeline".into()),
+        modules: vec!["studio.brand".into()],
+        playbook: Some("youtube-video".into()),
+        extra: Default::default(),
+    };
+    SeriesService::create(
+        &ws,
+        "my-series",
+        "My Series",
+        "A series",
+        recipe,
+        vec!["nv-an".into()],
+    )
+    .unwrap();
+
+    // Create an episode
+    let episode =
+        SeriesService::create_episode(&ws, "my-series", "tap-01", "Tập 1: Mở đầu").unwrap();
+    assert_eq!(episode.slug(), "tap-01");
+
+    // project.yaml should have series set
+    let meta = episode.meta().unwrap();
+    assert_eq!(meta.series.as_deref(), Some("my-series"));
+    assert_eq!(meta.kit.as_deref(), Some("youtube-pipeline"));
+    assert_eq!(meta.playbook.as_deref(), Some("youtube-video"));
+
+    // starter artifact artifact.yaml should have reference edge to "nv-an"
+    let art_yaml = episode
+        .artifacts_dir()
+        .join("script-01")
+        .join("artifact.yaml");
+    assert!(art_yaml.is_file(), "starter artifact.yaml must exist");
+    let content = fs::read_to_string(&art_yaml).unwrap();
+    assert!(
+        content.contains("nv-an"),
+        "starter must have reference edge to nv-an"
+    );
+    assert!(
+        content.contains("reference"),
+        "starter must declare reference role"
+    );
+}
+
+#[test]
+fn test_project_meta_series_yaml_round_trip() {
+    use studio_workspace::SeriesService;
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path(), "Test WS").unwrap();
+
+    SeriesService::create(
+        &ws,
+        "my-series",
+        "My Series",
+        "",
+        Default::default(),
+        vec![],
+    )
+    .unwrap();
+
+    let proj = Project::create(&ws, "my-project", "My Project").unwrap();
+    // Initially no series
+    let meta = proj.meta().unwrap();
+    assert!(meta.series.is_none());
+
+    // Write series directly to project.yaml
+    let yaml_path = proj.root().join("project.yaml");
+    let mut content = fs::read_to_string(&yaml_path).unwrap();
+    content.push_str("series: my-series\n");
+    fs::write(&yaml_path, &content).unwrap();
+
+    // Reload
+    let meta2 = proj.meta().unwrap();
+    assert_eq!(meta2.series.as_deref(), Some("my-series"));
+
+    // Round trip: serialize and reparse
+    let yaml2 = serde_yaml::to_string(&meta2).unwrap();
+    let meta3: studio_workspace::ProjectMeta = serde_yaml::from_str(&yaml2).unwrap();
+    assert_eq!(meta3.series.as_deref(), Some("my-series"));
+}

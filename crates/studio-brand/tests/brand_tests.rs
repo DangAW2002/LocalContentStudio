@@ -287,3 +287,290 @@ captions_required: true
     // Since VOICE_WORD_AVOID is Warn, not Error, overall channel passed should be true
     assert!(ch_report.passed);
 }
+
+// ===== G3 Consistency checker tests =====
+
+/// Helper: create a fake project structure with a timeline artifact.
+fn setup_series_project(
+    ws_root: &std::path::Path,
+    proj_slug: &str,
+    series_slug: &str,
+    intro_source: &str,
+    outro_source: &str,
+    font: &str,
+    voice: &str,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    // project.yaml
+    let proj_dir = ws_root.join("projects").join(proj_slug);
+    let arts_dir = proj_dir.join("artifacts");
+    let art_dir = arts_dir.join("timeline-01");
+    fs::create_dir_all(&art_dir).unwrap();
+
+    let project_yaml = format!("slug: {proj_slug}\ntitle: Title\nseries: {series_slug}\n");
+    fs::write(proj_dir.join("project.yaml"), &project_yaml).unwrap();
+
+    // timeline.json with intro/outro
+    let timeline_json = serde_json::json!({
+        "version": 1,
+        "width": 1920,
+        "height": 1080,
+        "fps": 30.0,
+        "tracks": [
+            {
+                "id": "video",
+                "kind": "video",
+                "clips": [
+                    { "id": "c1", "source": intro_source, "in_point": 0.0, "out_point": 2.0, "start": 0.0, "duration": 2.0, "transition": "none" },
+                    { "id": "c2", "source": "main.mp4", "in_point": 0.0, "out_point": 10.0, "start": 2.0, "duration": 10.0, "transition": "none" },
+                    { "id": "c3", "source": outro_source, "in_point": 0.0, "out_point": 2.0, "start": 12.0, "duration": 2.0, "transition": "none" },
+                ]
+            }
+        ]
+    });
+    fs::write(
+        art_dir.join("timeline.json"),
+        serde_json::to_string(&timeline_json).unwrap(),
+    )
+    .unwrap();
+
+    // thumbnail with font
+    let html = format!("<html><head><style>h1 {{ font-family: {font}; color: #fff; }}</style></head><body><h1>Thumb</h1></body></html>");
+    let thumb_dir = arts_dir.join("thumb-01");
+    fs::create_dir_all(&thumb_dir).unwrap();
+    fs::write(thumb_dir.join("index.html"), &html).unwrap();
+
+    // audio with voice
+    let art_yaml = format!(
+        "id: voice-01\nkind: audio\ntitle: Voice\nsource: script.md\nparams:\n  voice: {voice}\n"
+    );
+    let voice_dir = arts_dir.join("voice-01");
+    fs::create_dir_all(&voice_dir).unwrap();
+    fs::write(voice_dir.join("artifact.yaml"), &art_yaml).unwrap();
+    fs::write(
+        voice_dir.join("script.md"),
+        format!("voice: {voice}\n\nHello world"),
+    )
+    .unwrap();
+
+    (art_dir, thumb_dir)
+}
+
+#[test]
+fn test_consistency_checker_intro_outro_match() {
+    use studio_brand::checkers::consistency::ConsistencyChecker;
+    use studio_brand::checkers::{CheckInput, Checker};
+
+    let tmp = tempdir().unwrap();
+    let ws_root = tmp.path();
+
+    // Two episodes with SAME intro/outro
+    let (art_dir1, _) = setup_series_project(
+        ws_root,
+        "ep-01",
+        "my-series",
+        "intro.mp4",
+        "outro.mp4",
+        "Roboto",
+        "vn-female-1",
+    );
+    let (_art_dir2, _) = setup_series_project(
+        ws_root,
+        "ep-02",
+        "my-series",
+        "intro.mp4",
+        "outro.mp4",
+        "Roboto",
+        "vn-female-1",
+    );
+
+    let brand = example_brand();
+    let channel = youtube_channel();
+    let checker = ConsistencyChecker::new();
+    let input = CheckInput {
+        artifact_dir: &art_dir1,
+        source_content: None,
+        source_file: None,
+        renders: &[],
+        ffprobe_json: None,
+        brand: &brand,
+        brand_dir: None,
+        channel: &channel,
+    };
+    let findings = checker.check(&input);
+    // Same intro/outro: no SERIES_INTRO_MISMATCH or SERIES_OUTRO_MISMATCH
+    assert!(
+        !findings.iter().any(|f| f.code == "SERIES_INTRO_MISMATCH"),
+        "No intro mismatch expected"
+    );
+    assert!(
+        !findings.iter().any(|f| f.code == "SERIES_OUTRO_MISMATCH"),
+        "No outro mismatch expected"
+    );
+}
+
+#[test]
+fn test_consistency_checker_intro_outro_mismatch() {
+    use studio_brand::checkers::consistency::ConsistencyChecker;
+    use studio_brand::checkers::{CheckInput, Checker};
+
+    let tmp = tempdir().unwrap();
+    let ws_root = tmp.path();
+
+    // Two episodes with DIFFERENT intro/outro
+    let (art_dir1, _) = setup_series_project(
+        ws_root,
+        "ep-01",
+        "my-series",
+        "intro-a.mp4",
+        "outro-a.mp4",
+        "Roboto",
+        "vn-female-1",
+    );
+    let (_art_dir2, _) = setup_series_project(
+        ws_root,
+        "ep-02",
+        "my-series",
+        "intro-b.mp4",
+        "outro-b.mp4",
+        "Roboto",
+        "vn-female-1",
+    );
+
+    let brand = example_brand();
+    let channel = youtube_channel();
+    let checker = ConsistencyChecker::new();
+    let input = CheckInput {
+        artifact_dir: &art_dir1,
+        source_content: None,
+        source_file: None,
+        renders: &[],
+        ffprobe_json: None,
+        brand: &brand,
+        brand_dir: None,
+        channel: &channel,
+    };
+    let findings = checker.check(&input);
+    assert!(
+        findings.iter().any(|f| f.code == "SERIES_INTRO_MISMATCH"),
+        "Expected SERIES_INTRO_MISMATCH finding"
+    );
+    assert!(
+        findings.iter().any(|f| f.code == "SERIES_OUTRO_MISMATCH"),
+        "Expected SERIES_OUTRO_MISMATCH finding"
+    );
+}
+
+#[test]
+fn test_consistency_checker_reference_missing() {
+    use studio_brand::checkers::consistency::ConsistencyChecker;
+    use studio_brand::checkers::{CheckInput, Checker};
+
+    let tmp = tempdir().unwrap();
+    let ws_root = tmp.path();
+
+    // Create series.yaml that requires reference "nv-an"
+    let series_dir = ws_root.join("series").join("my-series");
+    fs::create_dir_all(&series_dir).unwrap();
+    let series_yaml = "slug: my-series\ntitle: My Series\nreferences:\n  - nv-an\n";
+    fs::write(series_dir.join("series.yaml"), series_yaml).unwrap();
+
+    // Project ep-01 does NOT have reference edge to "nv-an"
+    let proj_dir = ws_root.join("projects").join("ep-01");
+    let arts_dir = proj_dir.join("artifacts");
+    let art_dir = arts_dir.join("script-01");
+    fs::create_dir_all(&art_dir).unwrap();
+    fs::write(
+        proj_dir.join("project.yaml"),
+        "slug: ep-01\ntitle: T\nseries: my-series\n",
+    )
+    .unwrap();
+    fs::write(
+        art_dir.join("artifact.yaml"),
+        "id: script-01\nkind: text\ntitle: T\nsource: t.md\ninputs: []\n",
+    )
+    .unwrap();
+
+    let brand = example_brand();
+    let channel = youtube_channel();
+    let checker = ConsistencyChecker::new();
+    let input = CheckInput {
+        artifact_dir: &art_dir,
+        source_content: None,
+        source_file: None,
+        renders: &[],
+        ffprobe_json: None,
+        brand: &brand,
+        brand_dir: None,
+        channel: &channel,
+    };
+    let findings = checker.check(&input);
+    assert!(
+        findings
+            .iter()
+            .any(|f| f.code == "SERIES_REFERENCE_MISSING"),
+        "Expected SERIES_REFERENCE_MISSING finding, got: {:?}",
+        findings.iter().map(|f| &f.code).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_consistency_checker_reference_present() {
+    use studio_brand::checkers::consistency::ConsistencyChecker;
+    use studio_brand::checkers::{CheckInput, Checker};
+
+    let tmp = tempdir().unwrap();
+    let ws_root = tmp.path();
+
+    // Create series.yaml that requires reference "nv-an"
+    let series_dir = ws_root.join("series").join("my-series");
+    fs::create_dir_all(&series_dir).unwrap();
+    let series_yaml = "slug: my-series\ntitle: My Series\nreferences:\n  - nv-an\n";
+    fs::write(series_dir.join("series.yaml"), series_yaml).unwrap();
+
+    // Project ep-01 HAS reference edge to "nv-an"
+    let proj_dir = ws_root.join("projects").join("ep-01");
+    let arts_dir = proj_dir.join("artifacts");
+    let art_dir = arts_dir.join("script-01");
+    fs::create_dir_all(&art_dir).unwrap();
+    fs::write(
+        proj_dir.join("project.yaml"),
+        "slug: ep-01\ntitle: T\nseries: my-series\n",
+    )
+    .unwrap();
+    let art_yaml = "id: script-01\nkind: text\ntitle: T\nsource: t.md\ninputs:\n  - ref: \"artifact:nv-an\"\n    role: reference\n";
+    fs::write(art_dir.join("artifact.yaml"), art_yaml).unwrap();
+
+    let brand = example_brand();
+    let channel = youtube_channel();
+    let checker = ConsistencyChecker::new();
+    let input = CheckInput {
+        artifact_dir: &art_dir,
+        source_content: None,
+        source_file: None,
+        renders: &[],
+        ffprobe_json: None,
+        brand: &brand,
+        brand_dir: None,
+        channel: &channel,
+    };
+    let findings = checker.check(&input);
+    assert!(
+        !findings
+            .iter()
+            .any(|f| f.code == "SERIES_REFERENCE_MISSING"),
+        "SERIES_REFERENCE_MISSING must NOT fire when reference edge is present"
+    );
+}
+
+/// The shipped example brand (checkers under test do not depend on its values).
+fn example_brand() -> BrandSpec {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("defaults");
+    serde_yaml::from_str(&fs::read_to_string(dir.join("brands/example/brand.yaml")).unwrap())
+        .unwrap()
+}
+
+/// The shipped youtube channel.
+fn youtube_channel() -> ChannelSpec {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("defaults");
+    serde_yaml::from_str(&fs::read_to_string(dir.join("channels/youtube.yaml")).unwrap()).unwrap()
+}

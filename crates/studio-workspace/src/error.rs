@@ -48,6 +48,18 @@ pub enum WorkspaceError {
     #[error("Lượt này đã được hoàn tác trước đó.")]
     TurnAlreadyUndone,
 
+    /// Series not found
+    #[error("Series not found: {0}")]
+    SeriesNotFound(String),
+
+    /// Series already exists
+    #[error("Series already exists: {0}")]
+    SeriesAlreadyExists(String),
+
+    /// Invalid input parameter
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
     /// Generic internal error
     #[error("{0}")]
     Internal(String),

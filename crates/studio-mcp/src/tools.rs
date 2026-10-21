@@ -39,7 +39,8 @@ pub fn definitions() -> Vec<Value> {
         tool("catalog_enable", "Bật thêm một module catalog (skill) cho project hiện tại.", json!({ "module": s("id module, vd render.hyperframes") }), &["module"]),
         tool("capability_search", "Tìm capability theo từ khóa (vd tts, render, ảnh).", json!({ "query": s("từ khóa") }), &["query"]),
         tool("capability_describe", "Mô tả một capability: schema vào/ra và các provider.", json!({ "id": s("vd tts.synthesize@1") }), &["id"]),
-        tool("capability_run", "Chạy một capability qua provider đã chọn (hoặc mặc định, có dự phòng).", json!({ "capability": s("vd tts.synthesize@1"), "provider": s("id tool, tùy chọn"), "input": { "type": "object" } }), &["capability", "input"]),
+        tool("capability_run", "Chạy một capability qua provider đã chọn (hoặc mặc định, có dự phòng). Nhận 'reference' (ID hồ sơ hoặc tham chiếu) để ghim ảnh/seed/voice nhất quán.", json!({ "capability": s("vd tts.synthesize@1"), "provider": s("id tool, tùy chọn"), "input": { "type": "object", "description": "Tham số đầu vào. Có thể chứa 'reference': '<artifact-id>' để dùng hồ sơ tham chiếu nhất quán." } }), &["capability", "input"]),
+        tool("series_get", "Lấy thông tin series (tiêu đề, mô tả, recipe, danh sách hồ sơ). Bỏ trống slug để lấy series của project hiện tại hoặc liệt kê tất cả series.", json!({ "slug": s("slug của series (tùy chọn)") }), &[]),
         tool("check_run", "Kiểm artifact theo Brand và kênh (hãy render trước rồi kiểm tra — render first, then check).", json!({ "artifact_dir": s("thư mục artifact tương đối"), "brand": s("slug brand"), "channels": { "type": "array", "items": { "type": "string" } }, "renders": { "type": "array", "items": { "type": "string" } } }), &["artifact_dir", "brand", "channels"]),
         tool(
             "timeline_build",
@@ -435,6 +436,7 @@ pub async fn call(
         "graph_impact" => graph_impact(&ws, ctx, args)?,
         "graph_link" => graph_link(&ws, ctx, args)?,
         "graph_unlink" => graph_unlink(&ws, ctx, args)?,
+        "series_get" => series_get(&ws, ctx, args)?,
         other => return Err(format!("Không có tool \"{other}\".")),
     };
     Ok(inline_or_file(&ws, out))
@@ -757,6 +759,104 @@ fn wav_duration_seconds(path: &std::path::Path) -> Option<f64> {
     None
 }
 
+fn resolve_reference_profile(
+    ws: &Workspace,
+    ctx: &TurnContext,
+    input: &Value,
+    args: &Value,
+) -> Option<(String, PathBuf, studio_artifacts::Artifact)> {
+    let ref_candidate = input
+        .get("reference")
+        .and_then(Value::as_str)
+        .or_else(|| args.get("reference").and_then(Value::as_str))
+        .map(String::from);
+
+    let candidate = if let Some(r) = ref_candidate {
+        Some(r)
+    } else {
+        let mut target_art_id = None;
+        if let Some(art) = input.get("artifact").and_then(Value::as_str) {
+            target_art_id = Some(art.to_string());
+        } else {
+            for key in ["output_path", "path", "target_path"] {
+                if let Some(target_p) = input.get(key).and_then(Value::as_str) {
+                    let norm = target_p.replace('\\', "/");
+                    if let Some(proj) = &ctx.project {
+                        let prefix = format!("projects/{proj}/artifacts/");
+                        if norm.starts_with(&prefix) {
+                            let sub = &norm[prefix.len()..];
+                            let id = sub.split('/').next().unwrap_or(sub);
+                            target_art_id = Some(id.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if let (Some(proj_slug), Some(art_id)) = (&ctx.project, target_art_id) {
+            if let Ok(proj) = Project::open(ws, proj_slug) {
+                if let Ok(art) = studio_artifacts::Artifact::load(&proj, &art_id) {
+                    art.inputs
+                        .iter()
+                        .find(|inp| inp.role == studio_artifacts::InputRole::Reference)
+                        .map(|inp| inp.reference.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    let raw_ref = candidate?;
+    let norm_ref = studio_artifacts::normalize_ref(&raw_ref);
+
+    // Look in:
+    // A. Project artifacts
+    if let Some(proj_slug) = &ctx.project {
+        if let Ok(proj) = Project::open(ws, proj_slug) {
+            if let Ok(art) = studio_artifacts::Artifact::load(&proj, &norm_ref) {
+                let dir = proj.artifacts_dir().join(&norm_ref);
+                return Some((norm_ref, dir, art));
+            }
+
+            // B. Series references
+            if let Ok(meta) = proj.meta() {
+                if let Some(series_slug) = meta.series {
+                    if let Ok(refs_dir) =
+                        studio_workspace::series::SeriesService::references_dir(ws, &series_slug)
+                    {
+                        let candidate_dir = refs_dir.join(&norm_ref);
+                        if let Ok(art) = studio_artifacts::Artifact::load_from_dir(&candidate_dir) {
+                            return Some((norm_ref, candidate_dir, art));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // C. Check across all series if not found
+    if let Ok(all_series) = studio_workspace::series::SeriesService::list(ws) {
+        for s in all_series {
+            if let Ok(refs_dir) =
+                studio_workspace::series::SeriesService::references_dir(ws, &s.slug)
+            {
+                let candidate_dir = refs_dir.join(&norm_ref);
+                if let Ok(art) = studio_artifacts::Artifact::load_from_dir(&candidate_dir) {
+                    return Some((norm_ref, candidate_dir, art));
+                }
+            }
+        }
+    }
+
+    None
+}
+
 async fn capability_run(
     state: &ServerState,
     ctx: &TurnContext,
@@ -767,7 +867,7 @@ async fn capability_run(
     if !allowed(ctx, cap) {
         return Err(format!("Capability \"{cap}\" không được bật cho lượt này."));
     }
-    let input = args.get("input").cloned().unwrap_or_else(|| json!({}));
+    let mut input = args.get("input").cloned().unwrap_or_else(|| json!({}));
 
     // If output goes into a pinned artifact's directory, refuse
     for key in ["output_path", "path", "target_path"] {
@@ -789,6 +889,122 @@ async fn capability_run(
             }
         }
     }
+
+    let mut warnings = Vec::new();
+    let mut resolved_reference_id = None;
+
+    if let Some((ref_id, ref_dir, ref_art)) = resolve_reference_profile(ws, ctx, &input, args) {
+        resolved_reference_id = Some(ref_id.clone());
+
+        // Scan images in ref_dir
+        let mut ref_images = Vec::new();
+        if let Some(arr) = ref_art
+            .params
+            .get("reference_images")
+            .and_then(Value::as_array)
+        {
+            for v in arr {
+                if let Some(s) = v.as_str() {
+                    ref_images.push(s.to_string());
+                }
+            }
+        }
+        if let Ok(entries) = std::fs::read_dir(&ref_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_file() {
+                    let ext = p
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if ["png", "jpg", "jpeg", "webp"].contains(&ext.as_str()) {
+                        if let Ok(rel) = p.strip_prefix(ws.root()) {
+                            let rel_str = rel.to_string_lossy().replace('\\', "/");
+                            if !ref_images.contains(&rel_str) {
+                                ref_images.push(rel_str);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Apply profile params according to capability
+        if cap.starts_with("image.") {
+            if let Some(prof_seed) = ref_art.params.get("seed") {
+                if let Some(direct_seed) = input.get("seed") {
+                    if direct_seed != prof_seed {
+                        warnings.push(format!(
+                            "Tham số 'seed' ({direct_seed}) ghi đè giá trị từ hồ sơ ({prof_seed})."
+                        ));
+                    }
+                } else {
+                    input["seed"] = prof_seed.clone();
+                }
+            }
+            if let Some(prof_model) = ref_art.params.get("model") {
+                if let Some(direct_model) = input.get("model") {
+                    if direct_model != prof_model {
+                        warnings.push(format!("Tham số 'model' ({direct_model}) ghi đè giá trị từ hồ sơ ({prof_model})."));
+                    }
+                } else {
+                    input["model"] = prof_model.clone();
+                }
+            }
+            if !ref_images.is_empty() {
+                if let Some(direct_refs) = input.get("reference_images") {
+                    let direct_matches = direct_refs.as_array()
+                        == Some(&ref_images.iter().map(|s| json!(s)).collect::<Vec<_>>());
+                    if !direct_matches {
+                        warnings.push(
+                            "Tham số 'reference_images' ghi đè ảnh tham chiếu từ hồ sơ."
+                                .to_string(),
+                        );
+                    }
+                } else {
+                    input["reference_images"] = json!(ref_images);
+                }
+            }
+        } else if cap.starts_with("video.") {
+            if let Some(prof_model) = ref_art.params.get("model") {
+                if let Some(direct_model) = input.get("model") {
+                    if direct_model != prof_model {
+                        warnings.push(format!("Tham số 'model' ({direct_model}) ghi đè giá trị từ hồ sơ ({prof_model})."));
+                    }
+                } else {
+                    input["model"] = prof_model.clone();
+                }
+            }
+            if let Some(first_img) = ref_images.first() {
+                if input.get("reference_image").is_none() && input.get("reference_images").is_none()
+                {
+                    input["reference_image"] = json!(first_img);
+                    input["reference_images"] = json!(ref_images);
+                }
+            }
+        } else if cap.starts_with("tts.") {
+            if let Some(prof_voice) = ref_art.params.get("voice") {
+                if let Some(direct_voice) = input.get("voice") {
+                    if direct_voice != prof_voice {
+                        warnings.push(format!("Tham số 'voice' ({direct_voice}) ghi đè giọng đọc từ hồ sơ ({prof_voice})."));
+                    }
+                } else {
+                    input["voice"] = prof_voice.clone();
+                }
+            }
+            if let Some(prof_speed) = ref_art.params.get("speed") {
+                if let Some(direct_speed) = input.get("speed") {
+                    if direct_speed != prof_speed {
+                        warnings.push(format!("Tham số 'speed' ({direct_speed}) ghi đè tốc độ từ hồ sơ ({prof_speed})."));
+                    }
+                } else {
+                    input["speed"] = prof_speed.clone();
+                }
+            }
+        }
+    }
+
     let reg = Registry::load(ws);
     let tools: Vec<_> = reg.list_tools().into_iter().cloned().collect();
     let providers = route(cap, arg(args, "provider"), ws, &tools);
@@ -809,12 +1025,39 @@ async fn capability_run(
     };
     let mut errors = Vec::new();
     for provider in &providers {
+        let mut provider_warnings = warnings.clone();
+        if provider == "openai.images" {
+            if let Some(arr) = input.get("reference_images").and_then(Value::as_array) {
+                if !arr.is_empty() {
+                    provider_warnings.push("Provider 'openai.images' không hỗ trợ ảnh tham chiếu (reference_images) — ảnh tham chiếu sẽ không được sử dụng.".to_string());
+                }
+            }
+        } else if provider == "openai.videos"
+            && (input.get("reference_image").is_some() || input.get("reference_images").is_some())
+        {
+            provider_warnings.push("Provider 'openai.videos' không hỗ trợ ảnh tham chiếu — ảnh tham chiếu sẽ không được sử dụng.".to_string());
+        }
+
         match run_tool(&reg, provider, input.clone(), &run_ctx).await {
             Ok(run) => {
                 let mut output = run.to_json_output();
-                relocate_and_index_generated_files(ws, ctx, provider, &input, &mut output);
+                relocate_and_index_generated_files(
+                    ws,
+                    ctx,
+                    provider,
+                    &input,
+                    &mut output,
+                    resolved_reference_id.as_deref(),
+                );
                 annotate_audio_duration(ws, &mut output);
-                return Ok(json!({ "provider": provider, "result": output }));
+                if !provider_warnings.is_empty() {
+                    output["warnings"] = json!(provider_warnings);
+                }
+                let mut ret = json!({ "provider": provider, "result": output });
+                if !provider_warnings.is_empty() {
+                    ret["warnings"] = json!(provider_warnings);
+                }
+                return Ok(ret);
             }
             Err(e) => errors.push(format!("{provider}: {e}")),
         }
@@ -828,6 +1071,7 @@ fn relocate_and_index_generated_files(
     provider: &str,
     input: &Value,
     output: &mut Value,
+    reference_id: Option<&str>,
 ) {
     // Only files the generator wrote into this turn's cache are moved; paths the agent passed in
     // (or anything else in the workspace) are never touched.
@@ -922,6 +1166,7 @@ fn relocate_and_index_generated_files(
                                 prompt: prompt.clone(),
                                 cost_usd: cost,
                                 turn_id: Some(ctx.turn_id.clone()),
+                                reference: reference_id.map(String::from),
                                 ..Default::default()
                             };
 
@@ -1452,5 +1697,32 @@ mod audio_duration_tests {
         assert!((d - 1.5).abs() < 1e-6, "{d}");
         std::fs::write(&p, b"not a wav").unwrap();
         assert!(wav_duration_seconds(&p).is_none());
+    }
+}
+
+fn series_get(ws: &Workspace, ctx: &TurnContext, args: &Value) -> Result<Value, String> {
+    let slug = arg(args, "slug").map(String::from).or_else(|| {
+        if let Some(proj_slug) = &ctx.project {
+            if let Ok(proj) = Project::open(ws, proj_slug) {
+                if let Ok(meta) = proj.meta() {
+                    return meta.series;
+                }
+            }
+        }
+        None
+    });
+
+    if let Some(s) = slug {
+        let meta = studio_workspace::series::SeriesService::get(ws, &s)
+            .map_err(|e| format!("Không tìm thấy series \"{s}\": {e}"))?;
+        Ok(json!({
+            "series": meta
+        }))
+    } else {
+        let all = studio_workspace::series::SeriesService::list(ws)
+            .map_err(|e| format!("Không thể liệt kê series: {e}"))?;
+        Ok(json!({
+            "series": all
+        }))
     }
 }

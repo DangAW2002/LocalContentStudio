@@ -3,15 +3,15 @@ use serde::{Deserialize, Serialize};
 /// Kind specification in the kind registry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KindSpec {
-    /// Unique kind identifier, e.g. "design", "motion", "timeline", "text", "generation", "audio".
+    /// Unique kind identifier, e.g. "design", "motion", "timeline", "text", "generation", "audio", "reference".
     pub id: String,
-    /// Default source filename, e.g. "index.html", "timeline.json", "text.md".
+    /// Default source filename, e.g. "index.html", "timeline.json", "text.md", "profile.md".
     pub default_source: String,
     /// Default renderer tool id, e.g. "render.html_png@1", "render.html_video@1", "render.timeline_ffmpeg@1".
     pub renderer: Option<String>,
     /// Expected output formats, e.g. ["png", "pdf"], ["mp4", "webm"].
     pub outputs: Vec<String>,
-    /// Viewer type name for UI stage rendering, e.g. "canvas", "player", "timeline", "text".
+    /// Viewer type name for UI stage rendering, e.g. "canvas", "player", "timeline", "text", "reference".
     pub viewer: String,
 }
 
@@ -28,6 +28,7 @@ impl KindRegistry {
             Self::text(),
             Self::generation(),
             Self::audio(),
+            Self::reference(),
         ]
     }
 
@@ -99,6 +100,17 @@ impl KindRegistry {
             renderer: Some("tts.synthesize@1".into()),
             outputs: vec!["wav".into(), "mp3".into()],
             viewer: "audio".into(),
+        }
+    }
+
+    /// Reference kind: Consistency profile (character, style, voice, fixed clips).
+    pub fn reference() -> KindSpec {
+        KindSpec {
+            id: "reference".into(),
+            default_source: "profile.md".into(),
+            renderer: None,
+            outputs: vec!["md".into()],
+            viewer: "reference".into(),
         }
     }
 }

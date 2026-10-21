@@ -60,7 +60,16 @@ pub async fn run_google_veo(
         "prompt": prompt
     });
 
-    if let Some(ref_img) = input.get("reference_image").and_then(Value::as_str) {
+    let ref_img_opt = input
+        .get("reference_image")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            input
+                .get("reference_images")
+                .and_then(|arr| arr.get(0))
+                .and_then(Value::as_str)
+        });
+    if let Some(ref_img) = ref_img_opt {
         let ref_path = ws.scoped_path(ref_img).map_err(ToolError::WorkspaceError)?;
         if ref_path.is_file() {
             let bytes = tokio::fs::read(&ref_path)

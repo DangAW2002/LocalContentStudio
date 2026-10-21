@@ -22,6 +22,7 @@ import type { ContentGraphResponse, DownstreamPlan } from "../../../api/types";
 import { RolePickerDialog } from "./RolePickerDialog";
 import { NotesDialog } from "./NotesDialog";
 import { VariantDialog } from "./VariantDialog";
+import { AttachProfileDialog } from "./AttachProfileDialog";
 import { DownstreamPlanDialog } from "./DownstreamPlanDialog";
 
 export interface GraphFlowProps {
@@ -64,6 +65,7 @@ export const GraphFlow: React.FC<GraphFlowProps> = ({
   const [pendingConnect, setPendingConnect] = React.useState<{ source: string; target: string } | null>(null);
   const [notesTarget, setNotesTarget] = React.useState<{ id: string; notes: string[] } | null>(null);
   const [variantTarget, setVariantTarget] = React.useState<string | null>(null);
+  const [attachTarget, setAttachTarget] = React.useState<string | null>(null);
   const [downstreamPlan, setDownstreamPlan] = React.useState<DownstreamPlan | null>(null);
 
   // Context menu state
@@ -273,6 +275,35 @@ export const GraphFlow: React.FC<GraphFlowProps> = ({
     if (!variantTarget) return;
     await studioApi.createGraphVariant(projectSlug, variantTarget, newId, title);
     await loadGraph();
+  };
+
+  const handleMakeReference = async () => {
+    if (!contextMenu) return;
+    const nodeId = contextMenu.nodeId;
+    setContextMenu(null);
+    try {
+      await studioApi.makeGraphReference(projectSlug, nodeId);
+      await loadGraph();
+    } catch (err: any) {
+      setErrorToast(err?.message || "Lỗi khi tạo hồ sơ.");
+    }
+  };
+
+  const handleOpenAttach = () => {
+    if (!contextMenu) return;
+    setAttachTarget(contextMenu.nodeId);
+    setContextMenu(null);
+  };
+
+  const handleAttachProfile = async (profileId: string) => {
+    if (!attachTarget) return;
+    try {
+      await studioApi.linkGraphEdge(projectSlug, attachTarget, `artifact:${profileId}`, "reference");
+      setAttachTarget(null);
+      await loadGraph();
+    } catch (err: any) {
+      setErrorToast(err?.message || "Lỗi khi gắn hồ sơ.");
+    }
   };
 
   const handleOpenDownstream = async () => {
@@ -506,6 +537,12 @@ export const GraphFlow: React.FC<GraphFlowProps> = ({
           <button type="button" className="cs-menu-item" onClick={handleOpenVariant}>
             Tạo biến thể
           </button>
+          <button type="button" className="cs-menu-item" onClick={handleMakeReference}>
+            Đặt làm hồ sơ
+          </button>
+          <button type="button" className="cs-menu-item" onClick={handleOpenAttach}>
+            Gắn hồ sơ...
+          </button>
           <button type="button" className="cs-menu-item" onClick={handleOpenDownstream}>
             Cập nhật phía dưới
           </button>
@@ -546,6 +583,18 @@ export const GraphFlow: React.FC<GraphFlowProps> = ({
           sourceId={variantTarget}
           onClose={() => setVariantTarget(null)}
           onCreate={handleCreateVariant}
+        />
+      )}
+
+      {attachTarget && (
+        <AttachProfileDialog
+          open={Boolean(attachTarget)}
+          targetNodeId={attachTarget}
+          availableProfiles={(data?.nodes ?? [])
+            .filter((n) => n.kind === "reference" && n.id !== attachTarget)
+            .map((n) => ({ id: n.id, title: n.title }))}
+          onClose={() => setAttachTarget(null)}
+          onAttach={handleAttachProfile}
         />
       )}
 

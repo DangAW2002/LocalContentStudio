@@ -216,6 +216,80 @@ pub fn graph_create_variant(
     Ok(variant)
 }
 
+/// Create a reference profile from an artifact or asset node.
+/// Checkpoint before creation.
+pub fn graph_make_reference(
+    ws: &Workspace,
+    project: &Project,
+    node_id: &str,
+    new_id: Option<String>,
+    title: Option<String>,
+) -> Result<Artifact> {
+    let clean_id = crate::graph::normalize_ref(node_id);
+    let ref_id = new_id.unwrap_or_else(|| {
+        if clean_id.starts_with("ref-") {
+            clean_id.clone()
+        } else {
+            format!("ref-{}", clean_id.replace(['/', '\\'], "-"))
+        }
+    });
+
+    CheckpointService::create(ws, &format!("Đặt làm hồ sơ tham chiếu: {}", ref_id), None)?;
+
+    // Check if node is an existing artifact in project
+    if let Ok(source_art) = Artifact::load(project, &clean_id) {
+        let ref_title = title.unwrap_or_else(|| format!("Hồ sơ {}", source_art.title));
+        let art = Artifact::create(
+            project,
+            &ref_id,
+            "reference",
+            ref_title,
+            source_art.brand.clone(),
+            source_art.channels.clone(),
+            Some(source_art.params.clone()),
+        )?;
+
+        // Copy any images from source artifact dir
+        let src_dir = project.artifacts_dir().join(&clean_id);
+        let dest_dir = project.artifacts_dir().join(&ref_id);
+        if src_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&src_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let ext = path
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if ["png", "jpg", "jpeg", "webp"].contains(&ext.as_str()) {
+                        if let Some(name) = path.file_name() {
+                            let _ = std::fs::copy(&path, dest_dir.join(name));
+                        }
+                    }
+                }
+            }
+        }
+        reindex_project_edges(ws, project)?;
+        Ok(art)
+    } else {
+        // Node is an asset or path
+        let ref_title = title.unwrap_or_else(|| format!("Hồ sơ {}", clean_id));
+        let art = Artifact::create(project, &ref_id, "reference", ref_title, None, vec![], None)?;
+
+        // If node_id is an image in workspace, copy it to the reference folder
+        if let Ok(asset_path) = ws.scoped_path(std::path::Path::new(&clean_id)) {
+            if asset_path.is_file() {
+                let dest_dir = project.artifacts_dir().join(&ref_id);
+                if let Some(name) = asset_path.file_name() {
+                    let _ = std::fs::copy(&asset_path, dest_dir.join(name));
+                }
+            }
+        }
+        reindex_project_edges(ws, project)?;
+        Ok(art)
+    }
+}
+
 /// Downstream execution step.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DownstreamStep {

@@ -10,6 +10,7 @@ pub mod error;
 pub mod indexer;
 pub mod org;
 pub mod scope;
+pub mod series;
 pub mod usage;
 pub mod workspace;
 
@@ -21,5 +22,6 @@ pub use error::{Result, WorkspaceError};
 pub use indexer::{ArtifactYaml, AssetSidecarMeta, Indexer};
 pub use org::{Org, OrgMeta};
 pub use scope::{ResolutionLayer, ResolvedItem, ScopeChain};
+pub use series::{SeriesMeta, SeriesRecipe, SeriesService};
 pub use usage::{disk_usage, DiskUsage};
 pub use workspace::{Project, ProjectMeta, Workspace, WorkspaceMeta};

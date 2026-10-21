@@ -46,6 +46,8 @@ import type {
   BudgetStatus,
   ProjectSummary,
   ProjectCreateRequest,
+  SeriesSummary,
+  SeriesRecipe,
   ProjectFileEntry,
   FileReadRequest,
   FileReadResult,
@@ -577,6 +579,31 @@ export class StudioApiClient {
   /** Command: `graph_create_variant`. */
   async createGraphVariant(project: string, sourceId: string, newId: string, title?: string): Promise<{ id: string; kind: string; title: string }> {
     return invoke<{ id: string; kind: string; title: string }>("graph_create_variant", { project, sourceId, newId, title });
+  }
+
+  /** Command: `graph_make_reference`. */
+  async makeGraphReference(project: string, nodeId: string, newId?: string, title?: string): Promise<{ id: string; kind: string; title: string }> {
+    return invoke<{ id: string; kind: string; title: string }>("graph_make_reference", { project, nodeId, newId, title });
+  }
+
+  /** Command: `series_list`. */
+  async listSeries(): Promise<SeriesSummary[]> {
+    return invoke<SeriesSummary[]>("series_list");
+  }
+
+  /** Command: `series_get`. */
+  async getSeries(slug: string): Promise<SeriesSummary> {
+    return invoke<SeriesSummary>("series_get", { slug });
+  }
+
+  /** Command: `series_create`. */
+  async createSeries(req: { slug: string; title: string; description?: string; recipe?: SeriesRecipe; references?: string[] }): Promise<SeriesSummary> {
+    return invoke<SeriesSummary>("series_create", req);
+  }
+
+  /** Command: `series_create_episode`. */
+  async createEpisodeFromSeries(seriesSlug: string, episodeSlug: string, title: string): Promise<ProjectSummary> {
+    return invoke<ProjectSummary>("series_create_episode", { seriesSlug, episodeSlug, title });
   }
 
   /** Command: `graph_update_downstream_plan`. */
