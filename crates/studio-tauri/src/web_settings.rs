@@ -67,10 +67,14 @@ pub fn web_status_impl(state: &AppState) -> CmdResult<Value> {
         None
     };
 
-    let tls_fingerprint = if let Ok(slot) = state.web_server.lock() {
-        slot.as_ref().and_then(|s| s.tls_fingerprint.clone())
-    } else {
-        None
+    let (tls_fingerprint, active_sessions) = match state.web_server.lock() {
+        Ok(slot) => (
+            slot.as_ref().and_then(|s| s.tls_fingerprint.clone()),
+            slot.as_ref()
+                .map(|s| s.sessions.active_count())
+                .unwrap_or(0),
+        ),
+        Err(_) => (None, 0),
     };
 
     // If not running or not in slot, we can also check if a cert exists on disk
@@ -97,7 +101,7 @@ pub fn web_status_impl(state: &AppState) -> CmdResult<Value> {
         "tlsFingerprint": tls_fingerprint,
         "uploadLimitMb": upload_limit_mb,
         "jsonLimitMb": json_limit_mb,
-        "activeSessions": 1,
+        "activeSessions": active_sessions,
     }))
 }
 

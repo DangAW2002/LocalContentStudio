@@ -94,6 +94,8 @@ pub struct RunningWebServer {
     pub addr: SocketAddr,
     pub shutdown: tokio::sync::oneshot::Sender<()>,
     pub tls_fingerprint: Option<String>,
+    /// Login sessions of this server (for the status shown in Settings).
+    pub sessions: Arc<SessionStore>,
 }
 
 /// Binds `addr`, retrying briefly: on restart the previous server may still be shutting down
@@ -151,9 +153,10 @@ pub async fn start(
 
     let tls_fingerprint = tls_info.as_ref().map(|t| t.fingerprint_sha256.clone());
 
+    let sessions = Arc::new(SessionStore::new());
     let state = Arc::new(WebServerState {
         dispatcher,
-        sessions: Arc::new(SessionStore::new()),
+        sessions: sessions.clone(),
         rate_limiter: Arc::new(LoginRateLimiter::new()),
         journal: EventJournal::attach(&events_tx),
         lan_allowed: config.lan_allowed,
@@ -205,6 +208,7 @@ pub async fn start(
         addr,
         shutdown: tx,
         tls_fingerprint,
+        sessions,
     })
 }
 
