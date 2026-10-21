@@ -39,6 +39,9 @@ export function normalizeRef(ref: string): string {
   if (ref.startsWith("artifact:")) {
     return ref.slice("artifact:".length);
   }
+  if (ref.startsWith("series:")) {
+    return ref.slice("series:".length);
+  }
   return ref;
 }
 
@@ -133,7 +136,13 @@ export function computeGraphLayout(
   // Sort nodes in each layer deterministically by id
   const sortedLayers = Array.from(layers.keys()).sort((a, b) => a - b);
   for (const layerIndex of sortedLayers) {
-    layers.get(layerIndex)!.sort((a, b) => a.id.localeCompare(b.id));
+    layers.get(layerIndex)!.sort((a, b) => {
+      // Place reference profiles at the top/front of the layer (left edge)
+      const aIsRef = a.kind === "reference" ? 0 : 1;
+      const bIsRef = b.kind === "reference" ? 0 : 1;
+      if (aIsRef !== bIsRef) return aIsRef - bIsRef;
+      return a.id.localeCompare(b.id);
+    });
   }
 
   // Compute (x, y) coordinates

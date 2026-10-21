@@ -134,3 +134,8 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
   - **Mô tả (Description):** Tóm tắt nội dung, mốc thời gian (timestamps/chapters), liên kết hữu ích, hashtags.
   - **Thẻ từ khoá (Tags):** Các từ khoá cốt lõi liên quan đến chủ đề video.
 - Lưu lại metadata vào `projects/<slug>/metadata.yaml` để người dùng sẵn sàng tải lên hoặc sử dụng publisher tool.
+
+### 8. Hồ sơ & series (Consistency & Series Profiles)
+- **Hồ sơ tham chiếu (reference):** Các nhân vật, phong cách hình ảnh hoặc giọng đọc cố định được lưu dưới dạng artifact kind `reference` (chứa `profile.md` và các ảnh mẫu trong thư mục artifact).
+- **Sinh nội dung nhất quán:** Khi gọi `capability_run` cho `image.generate@1`, `video.generate@1` hoặc `tts.synthesize@1`, truyền tham số `reference: "<id hồ sơ>"` (hoặc khai báo cạnh `{ ref: "artifact:<id>", role: "reference" }` trong `artifact.yaml`). Provider sẽ tự động tiếp nhận ảnh tham chiếu (`reference_images`), seed và voice ghim sẵn, đảm bảo hình ảnh và giọng đọc nhất quán xuyên suốt.
+- **Series:** Nhóm các tập video dùng chung hồ sơ và recipe (kit + modules + playbook). Gọi MCP tool `series_get` để lấy thông tin series và danh sách hồ sơ đang áp dụng. Khi kiểm tra chất lượng qua `check_run`, bộ kiểm tra nhất quán (`consistency`) sẽ so sánh intro/outro, font tiêu đề và giọng đọc giữa các tập cùng series.

@@ -19,6 +19,11 @@ export const CHECK_ERROR_LABELS: Record<string, string> = {
   VOICE_WORD_DISALLOWED: "Chứa từ ngữ thương hiệu cấm dùng",
   BRAND_NOT_FOUND: "Không tìm thấy cấu hình thương hiệu",
   INPUTS_UNDECLARED: "Dùng tệp chưa khai báo trong inputs",
+  SERIES_INTRO_MISMATCH: "Khác clip mở đầu (intro) so với các tập cùng series",
+  SERIES_OUTRO_MISMATCH: "Khác clip kết thúc (outro) so với các tập cùng series",
+  SERIES_FONT_MISMATCH: "Khác font tiêu đề thumbnail so với các tập cùng series",
+  SERIES_VOICE_MISMATCH: "Khác giọng đọc TTS so với các tập cùng series",
+  SERIES_REFERENCE_MISSING: "Chưa gắn hồ sơ tham chiếu của series",
 };
 
 /**

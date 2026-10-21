@@ -4,6 +4,7 @@ import { ThreadPane } from "./project/ThreadPane";
 import { StagePane } from "./project/StagePane";
 import { OutputsPane } from "./project/OutputsPane";
 import { GraphPane } from "./project/graph/GraphPane";
+import { CreateEpisodeDialog } from "./project/CreateEpisodeDialog";
 import { Tabs, Button, Select, ErrorState } from "@studio/design-system";
 import { studioApi } from "../api/client";
 import { Icon } from "../components/Icon";
@@ -56,6 +57,39 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   const [selectedFilePath, setSelectedFilePath] = React.useState<string | null>(null);
   const [pendingInsert, setPendingInsert] = React.useState<string | null>(null);
   const [stageReloadNonce, setStageReloadNonce] = React.useState(0);
+  const [createEpisodeOpen, setCreateEpisodeOpen] = React.useState(false);
+
+  const projectOptions = React.useMemo(() => {
+    if (projects.length === 0) return [{ value: "", label: "Chưa có dự án" }];
+    const withSeries = projects.filter((p) => Boolean(p.series));
+    const withoutSeries = projects.filter((p) => !p.series);
+
+    const groups = new Map<string, ProjectSummary[]>();
+    for (const p of withSeries) {
+      const s = p.series!;
+      if (!groups.has(s)) groups.set(s, []);
+      groups.get(s)!.push(p);
+    }
+
+    const opts: { value: string; label: string }[] = [];
+    for (const [s, sProjects] of groups.entries()) {
+      for (const p of sProjects) {
+        opts.push({
+          value: p.slug,
+          label: `[Series: ${s}] ${p.title}`,
+        });
+      }
+    }
+
+    for (const p of withoutSeries) {
+      opts.push({
+        value: p.slug,
+        label: p.title,
+      });
+    }
+
+    return opts;
+  }, [projects]);
 
   const refreshArtifacts = React.useCallback(async () => {
     if (!currentSlug) return [];
@@ -390,13 +424,18 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 setActiveThreadId("");
                 setSelectedFilePath(null);
               }}
-              options={
-                projects.length > 0
-                  ? projects.map((p) => ({ value: p.slug, label: p.title }))
-                  : [{ value: "", label: "Chưa có dự án" }]
-              }
+              options={projectOptions}
             />
           </div>
+
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setCreateEpisodeOpen(true)}
+            leftIcon={<Icon name="folder" size={12} />}
+          >
+            + Tập từ series
+          </Button>
 
           {threads.length > 0 && (
             <div style={{ width: 240 }}>

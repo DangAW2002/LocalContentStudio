@@ -380,6 +380,39 @@ pub async fn dispatch_invoke(
             let title: Option<String> = get_opt_arg(&args, "title");
             commands::graph_create_variant_impl(state, project, source_id, new_id, title)
         }
+        "graph_make_reference" => {
+            let project: String = get_arg(&args, "project")?;
+            let node_id: String =
+                get_arg(&args, "nodeId").or_else(|_| get_arg(&args, "node_id"))?;
+            let new_id: Option<String> =
+                get_opt_arg(&args, "newId").or_else(|| get_opt_arg(&args, "new_id"));
+            let title: Option<String> = get_opt_arg(&args, "title");
+            commands::graph_make_reference_impl(state, project, node_id, new_id, title)
+        }
+        "series_list" => {
+            let res = commands::series_list_impl(state)?;
+            Ok(serde_json::to_value(res)?)
+        }
+        "series_get" => {
+            let slug: String = get_arg(&args, "slug")?;
+            commands::series_get_impl(state, slug)
+        }
+        "series_create" => {
+            let slug: String = get_arg(&args, "slug")?;
+            let title: String = get_arg(&args, "title")?;
+            let description: Option<String> = get_opt_arg(&args, "description");
+            let recipe: Option<serde_json::Value> = get_opt_arg(&args, "recipe");
+            let references: Option<Vec<String>> = get_opt_arg(&args, "references");
+            commands::series_create_impl(state, slug, title, description, recipe, references)
+        }
+        "series_create_episode" => {
+            let series_slug: String =
+                get_arg(&args, "seriesSlug").or_else(|_| get_arg(&args, "series_slug"))?;
+            let episode_slug: String =
+                get_arg(&args, "episodeSlug").or_else(|_| get_arg(&args, "episode_slug"))?;
+            let title: String = get_arg(&args, "title")?;
+            commands::series_create_episode_impl(state, series_slug, episode_slug, title)
+        }
         "graph_update_downstream_plan" => {
             let project: String = get_arg(&args, "project")?;
             let target_ref: String =

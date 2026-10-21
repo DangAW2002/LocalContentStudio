@@ -202,6 +202,23 @@ fn build_context(
                 }
             }
         }
+
+        // Series and reference profiles summary (ADR-011 §5 / Task G3 §3)
+        if let Ok(meta) = p.meta() {
+            if let Some(series_slug) = meta.series {
+                if let Ok(series) = studio_workspace::series::SeriesService::get(ws, &series_slug) {
+                    let refs_str = if series.references.is_empty() {
+                        "không có".to_string()
+                    } else {
+                        series.references.join(", ")
+                    };
+                    lines.push(format!(
+                        "Series đang áp dụng: {} ({}), hồ sơ: {}.",
+                        series.title, series.slug, refs_str
+                    ));
+                }
+            }
+        }
     }
     if let Ok(set) = studio_brand::BrandSet::load(ws) {
         let join = |v: Vec<&String>| v.into_iter().cloned().collect::<Vec<_>>().join(", ");

@@ -98,16 +98,18 @@ export const StageToolbar: React.FC<StageToolbarProps> = ({
           {/* Artifact Toolbar Actions */}
           {matchingArtifact && (
             <>
-              <Button
-                size="sm"
-                variant="primary"
-                busy={rendering}
-                busyText="Đang render..."
-                onClick={onRenderArtifact}
-                leftIcon={<Icon name="play" size={12} />}
-              >
-                Render
-              </Button>
+              {matchingArtifact.kind !== "reference" && (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  busy={rendering}
+                  busyText="Đang render..."
+                  onClick={onRenderArtifact}
+                  leftIcon={<Icon name="play" size={12} />}
+                >
+                  Render
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="secondary"

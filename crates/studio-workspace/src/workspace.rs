@@ -118,6 +118,15 @@ pub struct ProjectMeta {
     /// Enabled catalog module ids.
     #[serde(default)]
     pub modules: Vec<String>,
+    /// Playbook id for this project (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playbook: Option<String>,
+    /// Series slug this project belongs to (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series: Option<String>,
+    /// Catch-all for extra fields to preserve unknown fields on round-trip
+    #[serde(flatten)]
+    pub extra: std::collections::BTreeMap<String, serde_yaml::Value>,
 }
 
 /// Project handle.
@@ -145,6 +154,9 @@ impl Project {
             created_at: chrono::Utc::now().to_rfc3339(),
             kit: None,
             modules: Vec::new(),
+            playbook: None,
+            series: None,
+            extra: std::collections::BTreeMap::new(),
         };
 
         let yaml = serde_yaml::to_string(&meta)
@@ -263,6 +275,7 @@ impl Workspace {
             "capabilities",
             "library",
             "projects",
+            "series",
             ".studio/blobs",
             ".studio/cache",
             ".studio/backups",

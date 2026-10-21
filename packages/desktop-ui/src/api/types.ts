@@ -148,6 +148,24 @@ export interface ProjectSummary {
   updatedAt: string;
   /** Number of generated artifacts */
   artifactCount?: number;
+  /** Series slug this project belongs to */
+  series?: string;
+  /** Pinned playbook ID if any */
+  playbook?: string;
+}
+
+export interface SeriesRecipe {
+  kit?: string;
+  modules?: string[];
+  playbook?: string;
+}
+
+export interface SeriesSummary {
+  slug: string;
+  title: string;
+  description: string;
+  recipe: SeriesRecipe;
+  references: string[];
 }
 
 export interface ProjectCreateRequest {

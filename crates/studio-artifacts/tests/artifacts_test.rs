@@ -48,7 +48,7 @@ fn create_test_env() -> (TempDir, Workspace, Project) {
 #[test]
 fn test_kind_registry_coverage() {
     let kinds = KindRegistry::all();
-    assert_eq!(kinds.len(), 6);
+    assert_eq!(kinds.len(), 7);
 
     let expected = [
         "design",
@@ -57,10 +57,20 @@ fn test_kind_registry_coverage() {
         "text",
         "generation",
         "audio",
+        "reference",
     ];
     for k in &expected {
         assert!(KindRegistry::get(k).is_some(), "Missing kind: {}", k);
     }
+
+    // reference kind: no renderer, viewer = "reference", default_source = "profile.md"
+    let ref_kind = KindRegistry::get("reference").unwrap();
+    assert!(
+        ref_kind.renderer.is_none(),
+        "reference kind must have no renderer"
+    );
+    assert_eq!(ref_kind.viewer, "reference");
+    assert_eq!(ref_kind.default_source, "profile.md");
 }
 
 #[test]
@@ -2033,5 +2043,104 @@ async fn real_timeline_render_with_vietnamese_captions_and_frame_inspection() {
     assert!(
         mean_brightness < 5.0,
         "Bottom 2% rows must not contain caption pixels; got mean brightness {mean_brightness}"
+    );
+}
+
+// ===== G3 Reference kind tests =====
+
+#[test]
+fn test_reference_kind_load_save_round_trip() {
+    let (_tmp, _ws, proj) = create_test_env();
+
+    // Create a reference artifact
+    let art = Artifact::create(
+        &proj,
+        "nv-an",
+        "reference",
+        "Nhân vật An",
+        None,
+        vec![],
+        Some(serde_json::json!({
+            "seed": 42,
+            "model": "imagen-3.0-generate-001",
+            "voice": "vn-female-1",
+            "speed": 1.05
+        })),
+    )
+    .unwrap();
+
+    assert_eq!(art.id, "nv-an");
+    assert_eq!(art.kind, "reference");
+
+    // starter source file is profile.md
+    let src = art.source_path(&proj);
+    assert!(src.exists(), "profile.md must be created by starter");
+    let src_name = src.file_name().unwrap().to_str().unwrap();
+    assert_eq!(src_name, "profile.md");
+
+    // Load back preserving all params
+    let loaded = Artifact::load(&proj, "nv-an").unwrap();
+    assert_eq!(loaded.kind, "reference");
+    assert_eq!(loaded.params.get("seed").and_then(|v| v.as_u64()), Some(42));
+    assert_eq!(
+        loaded.params.get("model").and_then(|v| v.as_str()),
+        Some("imagen-3.0-generate-001")
+    );
+    assert_eq!(
+        loaded.params.get("voice").and_then(|v| v.as_str()),
+        Some("vn-female-1")
+    );
+
+    // Save updated params and reload
+    let mut updated = loaded.clone();
+    updated.params["seed"] = serde_json::json!(99);
+    updated.save(&proj).unwrap();
+
+    let reloaded = Artifact::load(&proj, "nv-an").unwrap();
+    assert_eq!(
+        reloaded.params.get("seed").and_then(|v| v.as_u64()),
+        Some(99)
+    );
+    // Other params preserved
+    assert_eq!(
+        reloaded.params.get("voice").and_then(|v| v.as_str()),
+        Some("vn-female-1")
+    );
+}
+
+#[test]
+fn test_reference_kind_status_is_fresh_with_content() {
+    use studio_artifacts::{build_project_graph, NodeStatus};
+
+    let (_tmp, ws, proj) = create_test_env();
+
+    let art = Artifact::create(
+        &proj,
+        "ref-with-content",
+        "reference",
+        "Profile",
+        None,
+        vec![],
+        None,
+    )
+    .unwrap();
+
+    // profile.md already exists (created by starter)
+    let src = art.source_path(&proj);
+    assert!(src.exists());
+    // Write real content
+    std::fs::write(&src, "# Nhân vật\nMô tả chi tiết.").unwrap();
+
+    let artifacts = Artifact::list(&proj).unwrap();
+    let graph = build_project_graph(&ws, &proj, &artifacts).unwrap();
+    let node = graph
+        .nodes
+        .iter()
+        .find(|n| n.id == "ref-with-content")
+        .unwrap();
+    assert_eq!(
+        node.status,
+        NodeStatus::Moi,
+        "reference with content must be 'moi' (fresh), never stale"
     );
 }

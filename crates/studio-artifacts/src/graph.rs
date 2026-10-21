@@ -93,6 +93,8 @@ pub struct ImpactNode {
 pub fn normalize_ref(r: &str) -> String {
     if let Some(stripped) = r.strip_prefix("artifact:") {
         stripped.to_string()
+    } else if let Some(stripped) = r.strip_prefix("series:") {
+        stripped.to_string()
     } else {
         r.to_string()
     }
@@ -255,22 +257,37 @@ pub fn build_project_graph(
     // the renderer stores (same brand/renderer defaults and render options), or every freshly
     // rendered artifact would look stale.
     for art in artifacts {
-        let status = match latest_render_on_disk(workspace, project, &art.id) {
-            Ok(Some((disk_hash, _files))) => {
-                let options = crate::render::render_options_for(workspace, art);
-                match crate::render::render_cache_key(workspace, project, art, &options) {
-                    Ok(current_hash) => {
-                        if current_hash == disk_hash {
-                            NodeStatus::Moi
-                        } else {
-                            NodeStatus::LoiThoi
-                        }
-                    }
-                    Err(_) => NodeStatus::Loi,
-                }
+        let status = if art.kind == "reference" {
+            let art_dir = project.artifacts_dir().join(&art.id);
+            let src_file = art_dir.join(&art.source);
+            let has_content = (src_file.is_file()
+                && std::fs::metadata(&src_file)
+                    .map(|m| m.len() > 0)
+                    .unwrap_or(false))
+                || art_dir.exists();
+            if has_content {
+                NodeStatus::Moi
+            } else {
+                NodeStatus::ChuaRender
             }
-            Ok(None) => NodeStatus::ChuaRender,
-            Err(_) => NodeStatus::Loi,
+        } else {
+            match latest_render_on_disk(workspace, project, &art.id) {
+                Ok(Some((disk_hash, _files))) => {
+                    let options = crate::render::render_options_for(workspace, art);
+                    match crate::render::render_cache_key(workspace, project, art, &options) {
+                        Ok(current_hash) => {
+                            if current_hash == disk_hash {
+                                NodeStatus::Moi
+                            } else {
+                                NodeStatus::LoiThoi
+                            }
+                        }
+                        Err(_) => NodeStatus::Loi,
+                    }
+                }
+                Ok(None) => NodeStatus::ChuaRender,
+                Err(_) => NodeStatus::Loi,
+            }
         };
 
         nodes_map.insert(
@@ -292,6 +309,52 @@ pub fn build_project_graph(
                 to: target_ref,
                 role: inp.role,
             });
+        }
+    }
+
+    // 1b. Load series profiles if this project is part of a series
+    if let Ok(meta) = project.meta() {
+        if let Some(series_slug) = meta.series {
+            if let Ok(refs_dir) =
+                studio_workspace::series::SeriesService::references_dir(workspace, &series_slug)
+            {
+                if refs_dir.is_dir() {
+                    if let Ok(entries) = std::fs::read_dir(&refs_dir) {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.is_dir() {
+                                if let Ok(ref_art) = crate::artifact::Artifact::load_from_dir(&path)
+                                {
+                                    if !nodes_map.contains_key(&ref_art.id) {
+                                        let src_file = path.join(&ref_art.source);
+                                        let has_content = (src_file.is_file()
+                                            && std::fs::metadata(&src_file)
+                                                .map(|m| m.len() > 0)
+                                                .unwrap_or(false))
+                                            || path.exists();
+                                        let status = if has_content {
+                                            NodeStatus::Moi
+                                        } else {
+                                            NodeStatus::ChuaRender
+                                        };
+                                        nodes_map.insert(
+                                            ref_art.id.clone(),
+                                            GraphNode {
+                                                id: ref_art.id.clone(),
+                                                kind: "reference".to_string(),
+                                                title: ref_art.title.clone(),
+                                                status,
+                                                pinned: ref_art.pinned,
+                                                notes: ref_art.notes.clone(),
+                                            },
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

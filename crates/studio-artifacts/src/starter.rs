@@ -247,3 +247,12 @@ speed: 1.0
 
 Xin chào, đây là kịch bản âm thanh mẫu.
 "#;
+
+pub const REFERENCE_STARTER_MD: &str = r#"# Hồ sơ tham chiếu
+
+Mô tả đặc điểm nhận dạng nhân vật, phong cách hình ảnh hoặc phong cách giọng đọc.
+
+## Đặc điểm nhận dạng
+- Nhân vật / Phong cách: Mô tả chi tiết diện mạo hoặc phong cách
+- Chi tiết trang phục / bối cảnh: Trang phục cố định, ánh sáng, góc chụp
+"#;

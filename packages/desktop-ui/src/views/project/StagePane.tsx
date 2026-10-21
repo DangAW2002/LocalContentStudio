@@ -10,6 +10,7 @@ import {
 import { studioApi } from "../../api/client";
 import { DesignEditor, type DesignEditorHandle } from "./DesignEditor";
 import { PlainHtmlPreview } from "./PlainHtmlPreview";
+import { ReferenceViewer } from "./stage/ReferenceViewer";
 import { TimelineEditor } from "./TimelineEditor";
 import { MediaViewer } from "./stage/MediaViewer";
 import { StageToolbar } from "./stage/StageToolbar";

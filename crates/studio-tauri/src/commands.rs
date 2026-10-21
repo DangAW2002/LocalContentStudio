@@ -312,6 +312,8 @@ fn project_summary(p: &Project) -> Value {
         "slug": p.slug(), "title": p.title(),
         "kit": meta.as_ref().and_then(|m| m.kit.clone()),
         "modules": meta.as_ref().map(|m| m.modules.clone()).unwrap_or_default(),
+        "series": meta.as_ref().and_then(|m| m.series.clone()),
+        "playbook": meta.as_ref().and_then(|m| m.playbook.clone()),
         "status": "active",
         "createdAt": meta.as_ref().map(|m| m.created_at.clone()).unwrap_or_default(),
         "updatedAt": modified(p.root()).unwrap_or_default(),
@@ -4016,4 +4018,119 @@ source: index.html
             "Second call must hit SQLite cache without running checker"
         );
     }
+}
+
+pub fn series_list_impl(state: &AppState) -> CmdResult<Vec<Value>> {
+    let ws = state.workspace()?;
+    let list = studio_workspace::series::SeriesService::list(&ws)?;
+    Ok(list
+        .into_iter()
+        .map(|s| serde_json::to_value(s).unwrap_or(Value::Null))
+        .collect())
+}
+
+#[tauri::command]
+pub fn series_list(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+    series_list_impl(&state)
+}
+
+pub fn series_get_impl(state: &AppState, slug: String) -> CmdResult<Value> {
+    let ws = state.workspace()?;
+    let meta = studio_workspace::series::SeriesService::get(&ws, &slug)?;
+    Ok(serde_json::to_value(meta).unwrap_or(Value::Null))
+}
+
+#[tauri::command]
+pub fn series_get(state: State<'_, AppState>, slug: String) -> CmdResult<Value> {
+    series_get_impl(&state, slug)
+}
+
+pub fn series_create_impl(
+    state: &AppState,
+    slug: String,
+    title: String,
+    description: Option<String>,
+    recipe: Option<Value>,
+    references: Option<Vec<String>>,
+) -> CmdResult<Value> {
+    let ws = state.workspace()?;
+    let r: studio_workspace::series::SeriesRecipe = recipe
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    let meta = studio_workspace::series::SeriesService::create(
+        &ws,
+        &slug,
+        &title,
+        description.as_deref().unwrap_or(""),
+        r,
+        references.unwrap_or_default(),
+    )?;
+    Ok(serde_json::to_value(meta).unwrap_or(Value::Null))
+}
+
+#[tauri::command]
+pub fn series_create(
+    state: State<'_, AppState>,
+    slug: String,
+    title: String,
+    description: Option<String>,
+    recipe: Option<Value>,
+    references: Option<Vec<String>>,
+) -> CmdResult<Value> {
+    series_create_impl(&state, slug, title, description, recipe, references)
+}
+
+pub fn series_create_episode_impl(
+    state: &AppState,
+    series_slug: String,
+    episode_slug: String,
+    title: String,
+) -> CmdResult<Value> {
+    let ws = state.workspace()?;
+    let proj = studio_workspace::series::SeriesService::create_episode(
+        &ws,
+        &series_slug,
+        &episode_slug,
+        &title,
+    )?;
+    Ok(project_summary(&proj))
+}
+
+#[tauri::command]
+pub fn series_create_episode(
+    state: State<'_, AppState>,
+    series_slug: String,
+    episode_slug: String,
+    title: String,
+) -> CmdResult<Value> {
+    series_create_episode_impl(&state, series_slug, episode_slug, title)
+}
+
+pub fn graph_make_reference_impl(
+    state: &AppState,
+    project: String,
+    node_id: String,
+    new_id: Option<String>,
+    title: Option<String>,
+) -> CmdResult<Value> {
+    let ws = state.workspace()?;
+    let proj = Project::open(&ws, &project)?;
+    let art = studio_artifacts::graph_make_reference(&ws, &proj, &node_id, new_id, title)
+        .map_err(|e| CmdError::msg(e.to_string()))?;
+    Ok(json!({
+        "id": art.id,
+        "kind": art.kind,
+        "title": art.title,
+    }))
+}
+
+#[tauri::command]
+pub fn graph_make_reference(
+    state: State<'_, AppState>,
+    project: String,
+    node_id: String,
+    new_id: Option<String>,
+    title: Option<String>,
+) -> CmdResult<Value> {
+    graph_make_reference_impl(&state, project, node_id, new_id, title)
 }

@@ -107,6 +107,12 @@ pub struct AssetSidecarMeta {
     /// Creation ISO timestamp
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
+    /// Consistency reference profile used
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+    /// Catch-all for extra fields to preserve unknown fields on round-trip
+    #[serde(flatten)]
+    pub extra: std::collections::BTreeMap<String, serde_yaml::Value>,
 }
 
 /// Indexer responsible for scanning and rebuilding search/artifact/asset indexes in `studio.db`.

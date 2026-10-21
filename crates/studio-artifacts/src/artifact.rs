@@ -230,6 +230,9 @@ impl Artifact {
             "audio" => {
                 fs::write(art_dir.join(&default_source), AUDIO_STARTER_MD)?;
             }
+            "reference" => {
+                fs::write(art_dir.join(&default_source), REFERENCE_STARTER_MD)?;
+            }
             _ => {
                 // generic fallback
                 fs::write(art_dir.join(&default_source), "")?;
