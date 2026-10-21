@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use studio_workspace::{Project, Workspace};
 
 use crate::artifact::{Artifact, InputRole};
-use crate::cache::{compute_input_hash, latest_render_on_disk};
+use crate::cache::latest_render_on_disk;
 use crate::error::Result;
 
 /// Status of an artifact node in the content graph.
@@ -251,17 +251,14 @@ pub fn build_project_graph(
     let mut nodes_map: BTreeMap<String, GraphNode> = BTreeMap::new();
     let mut raw_edges: Vec<GraphEdge> = Vec::new();
 
-    let default_brand_version = "v1";
-
-    // 1. First pass: compute local staleness for each artifact
+    // 1. First pass: compute local staleness for each artifact. The key must be exactly the one
+    // the renderer stores (same brand/renderer defaults and render options), or every freshly
+    // rendered artifact would look stale.
     for art in artifacts {
-        let renderer_id = art.renderer.as_deref().unwrap_or("render.none@1");
-        let brand_version = art.brand.as_deref().unwrap_or(default_brand_version);
-
-        let status = match latest_render_on_disk(workspace, &art.id) {
+        let status = match latest_render_on_disk(workspace, project, &art.id) {
             Ok(Some((disk_hash, _files))) => {
-                // Compute current input hash
-                match compute_input_hash(workspace, project, art, brand_version, renderer_id) {
+                let options = crate::render::render_options_for(workspace, art);
+                match crate::render::render_cache_key(workspace, project, art, &options) {
                     Ok(current_hash) => {
                         if current_hash == disk_hash {
                             NodeStatus::Moi
@@ -552,8 +549,9 @@ mod tests {
 
         // Fake render for all artifacts so they have a baseline hash in WorkspaceDb renders table
         for art in [&script, &timeline, &thumb, &style_ref, &poster] {
-            let renderer_id = art.renderer.as_deref().unwrap_or("render.none@1");
-            let h = crate::cache::compute_input_hash(&ws, &proj, art, "v1", renderer_id).unwrap();
+            // The key the renderer stores (render_with uses render_cache_key).
+            let options = crate::render::render_options_for(&ws, art);
+            let h = crate::render::render_cache_key(&ws, &proj, art, &options).unwrap();
             let out_dir = proj
                 .renders_dir()
                 .join(&art.id)
@@ -618,5 +616,54 @@ mod tests {
         assert_eq!(map.get("style"), Some(&NodeStatus::LoiThoi));
         // poster references style -> MUST REMAIN Moi (reference role does NOT propagate staleness!)
         assert_eq!(map.get("poster"), Some(&NodeStatus::Moi));
+    }
+
+    /// What the renderer stores for `art` in `proj` (a fake output file with the real key).
+    fn fake_render(ws: &Workspace, proj: &Project, art: &Artifact) {
+        let options = crate::render::render_options_for(ws, art);
+        let h = crate::render::render_cache_key(ws, proj, art, &options).unwrap();
+        let out_dir = proj
+            .renders_dir()
+            .join(&art.id)
+            .join(crate::cache::hash12(&h));
+        std::fs::create_dir_all(&out_dir).unwrap();
+        let out = out_dir.join("output.mp4");
+        std::fs::write(&out, b"mp4").unwrap();
+        crate::cache::record_render_outputs(ws, &art.id, &h, &[out]).unwrap();
+    }
+
+    #[test]
+    fn freshly_rendered_timeline_without_brand_or_renderer_is_up_to_date() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(tmp.path(), "WS").unwrap();
+        let proj = Project::create(&ws, "p", "P").unwrap();
+        // No brand, no renderer (kind default), youtube channel sets a loudness target.
+        let mut tl =
+            Artifact::create(&proj, "video", "timeline", "Video", None, vec![], None).unwrap();
+        tl.renderer = None;
+        tl.channels = vec!["youtube".into()];
+        tl.save(&proj).unwrap();
+        fake_render(&ws, &proj, &tl);
+        let g = build_project_graph(&ws, &proj, &[tl.clone()]).unwrap();
+        assert_eq!(
+            g.nodes.iter().find(|n| n.id == "video").unwrap().status,
+            NodeStatus::Moi
+        );
+    }
+
+    #[test]
+    fn renders_of_a_same_named_artifact_in_another_project_do_not_count() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(tmp.path(), "WS").unwrap();
+        let a = Project::create(&ws, "a", "A").unwrap();
+        let b = Project::create(&ws, "b", "B").unwrap();
+        let art_a = Artifact::create(&a, "thumb", "design", "T", None, vec![], None).unwrap();
+        let art_b = Artifact::create(&b, "thumb", "design", "T", None, vec![], None).unwrap();
+        fake_render(&ws, &b, &art_b);
+        let g = build_project_graph(&ws, &a, &[art_a]).unwrap();
+        assert_eq!(
+            g.nodes.iter().find(|n| n.id == "thumb").unwrap().status,
+            NodeStatus::ChuaRender
+        );
     }
 }

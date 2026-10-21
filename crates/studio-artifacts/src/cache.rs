@@ -241,19 +241,26 @@ pub struct RenderRecord {
     pub created_at: String,
 }
 
-/// Get the latest render record on disk for an artifact, if any.
+/// Get the latest render record on disk for an artifact of `project`, if any.
 /// Returns `Ok(Some((hash, outputs)))` or `Ok(None)` if never rendered.
+///
+/// The `renders` table has no project column; outputs live under
+/// `projects/<slug>/renders/<artifact>/`, which tells same-named artifacts of other projects apart.
 pub fn latest_render_on_disk(
     workspace: &Workspace,
+    project: &Project,
     artifact_id: &str,
 ) -> Result<Option<(String, Vec<PathBuf>)>> {
     let db = studio_workspace::WorkspaceDb::open(workspace)?;
+    let prefix = format!("projects/{}/renders/{}/", project.slug(), artifact_id);
     let mut stmt = db.conn().prepare(
-        "SELECT hash, output_path FROM renders WHERE artifact_id = ?1 ORDER BY created_at DESC",
+        "SELECT hash, output_path FROM renders
+         WHERE artifact_id = ?1 AND substr(output_path, 1, length(?2)) = ?2
+         ORDER BY created_at DESC",
     )?;
 
     let rows: std::result::Result<Vec<(String, String)>, _> = stmt
-        .query_map(rusqlite::params![artifact_id], |row| {
+        .query_map(rusqlite::params![artifact_id, prefix], |row| {
             Ok((row.get(0)?, row.get(1)?))
         })?
         .collect();

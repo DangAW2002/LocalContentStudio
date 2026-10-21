@@ -1095,14 +1095,7 @@ pub async fn render_artifact_shared(
     }
 
     // Timeline audio is normalized to the loudness target of the first channel that sets one.
-    let loudness_lufs = BrandSet::load(ws).ok().and_then(|set| {
-        artifact
-            .channels
-            .iter()
-            .find_map(|c| set.get_channel(c).and_then(|ch| ch.loudness_lufs))
-            .map(f64::from)
-    });
-    let options = studio_artifacts::RenderOptions { loudness_lufs };
+    let options = studio_artifacts::render_options_for(ws, &artifact);
     let outcome = studio_artifacts::render_with(ws, &p, &artifact, scheduler, &options)
         .await
         .map_err(|e| format!("Render lỗi: {e}"))?;
