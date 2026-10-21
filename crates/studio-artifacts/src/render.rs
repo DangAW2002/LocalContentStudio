@@ -332,16 +332,37 @@ fn artboard_size(artifact: &Artifact, project: &Project) -> Option<(u32, u32)> {
 
 /// Explains a `timeline.json` parse error together with the expected shape, so an agent can fix
 /// the file in one go instead of guessing field by field.
-pub(crate) fn timeline_schema_hint(err: &serde_json::Error) -> String {
+pub fn timeline_schema_hint(err: &serde_json::Error) -> String {
+    let err_str = err.to_string();
+    let detail = if err_str.contains("unknown field")
+        && (err_str.contains("font")
+            || err_str.contains("box")
+            || err_str.contains("margin_bottom")
+            || err_str.contains("max_width_ratio")
+            || err_str.contains("outline")
+            || err_str.contains("color"))
+    {
+        format!(
+            "{err_str}. Trường trong style không hợp lệ; các trường được phép gồm: {}",
+            crate::timeline::CaptionStyle::ALLOWED_FIELDS.join(", ")
+        )
+    } else {
+        err_str
+    };
     format!(
-        "timeline.json không hợp lệ (dòng {}, cột {}): {err}. Cấu trúc đúng: \
+        "timeline.json không hợp lệ (dòng {}, cột {}): {detail}. Cấu trúc đúng: \
          {{\"width\":1920,\"height\":1080,\"fps\":30,\"tracks\":[{{\"id\":\"video\",\"kind\":\"video\",\
          \"clips\":[{{\"id\":\"c1\",\"source\":\"<đường dẫn tương đối từ thư mục artifact, hoặc color:#RRGGBB, \
          hoặc chữ phụ đề>\",\"start\":0,\"duration\":5,\"in_point\":0,\"transition\":\"none\"|\"fade\"}}]}},\
          {{\"id\":\"overlay\",\"kind\":\"video\",\"clips\":[{{\"id\":\"logo\",\"source\":\"assets/logo.png\",\
-         \"start\":0,\"duration\":5,\"x\":50,\"y\":50,\"width\":200,\"opacity\":0.9}}]}}]}}. \
-         Mỗi track và mỗi clip bắt buộc có \"id\"; mỗi clip bắt buộc có \"source\" và \"duration\". \
-         Track video đầu tiên là chuỗi gốc (base), các track video tiếp theo là lớp phủ (overlay). Không dùng file .svg trực tiếp trong timeline (cần render sang PNG trước).",
+         \"start\":0,\"duration\":5,\"x\":50,\"y\":50,\"width\":200,\"opacity\":0.9}}]}},\
+         {{\"id\":\"captions\",\"kind\":\"captions\",\"style\":{{\"font\":\"segoeui\",\"font_size\":48,\"color\":\"#ffffff\",\
+         \"outline\":0,\"box\":true,\"box_color\":\"black@0.6\",\"margin_bottom\":86,\"max_width_ratio\":0.8}},\
+         \"clips\":[{{\"id\":\"cap1\",\"text\":\"Lời phụ đề mẫu\",\"start\":0.5,\"duration\":3.0}}]}}]}}. \
+         Mỗi track và mỗi clip bắt buộc có \"id\"; mỗi clip bắt buộc có \"source\" (hoặc \"text\") và \"duration\". \
+         Track video đầu tiên là chuỗi gốc (base), các track video tiếp theo là lớp phủ (overlay). \
+         Track captions hỗ trợ trường \"style\" tùy chọn (font, font_size, color, outline, box, box_color, margin_bottom, max_width_ratio). \
+         Không dùng file .svg trực tiếp trong timeline (cần render sang PNG trước).",
         err.line(),
         err.column()
     )
@@ -358,6 +379,19 @@ mod timeline_hint_tests {
         let msg = super::timeline_schema_hint(&err);
         assert!(msg.contains("source"), "{msg}");
         assert!(msg.contains("bắt buộc"), "{msg}");
+    }
+
+    #[test]
+    fn hint_rejects_unknown_style_field_with_vietnamese_message() {
+        let err = serde_json::from_str::<crate::timeline::TimelineDoc>(
+            r#"{"tracks":[{"id":"c","kind":"captions","style":{"invalid_prop":123},"clips":[]}]}"#,
+        )
+        .unwrap_err();
+        let msg = super::timeline_schema_hint(&err);
+        assert!(msg.contains("Trường trong style không hợp lệ"), "{msg}");
+        assert!(msg.contains("font"), "{msg}");
+        assert!(msg.contains("margin_bottom"), "{msg}");
+        assert!(msg.contains("max_width_ratio"), "{msg}");
     }
 }
 

@@ -21,14 +21,15 @@ pub use cache::{
 pub use error::{ArtifactError, Result};
 pub use kind::{KindRegistry, KindSpec};
 pub use probe::{probe_chromium, probe_ffmpeg, probe_ffprobe, probe_node_npx, ProbeReport};
-pub use render::{render, render_with, RenderOptions, RenderOutcome};
+pub use render::{render, render_with, timeline_schema_hint, RenderOptions, RenderOutcome};
 pub use renderer::{
     build_html_render_job, build_hyperframes_render_job, build_proxy_job,
     build_timeline_ffmpeg_args, build_timeline_render_job, detect_artboard_size,
-    escape_ffmpeg_subtitles_path, file_url_for, is_image_source, is_subtitle_file, strip_verbatim,
+    escape_drawtext_text, escape_ffmpeg_subtitles_path, file_url_for, is_image_source,
+    is_subtitle_file, strip_verbatim,
 };
 pub use starter::*;
-pub use timeline::{Clip, TimelineDoc, Track, TrackKind, Transition};
+pub use timeline::{CaptionStyle, Clip, TimelineDoc, Track, TrackKind, Transition};
 pub use timeline_build::{
     build_timeline, build_timeline_tool, OverlayInput, SegmentInput, SegmentOutput,
     TimelineBuildParams, TimelineBuildResult,
