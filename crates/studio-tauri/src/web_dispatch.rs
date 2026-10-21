@@ -79,10 +79,25 @@ pub async fn start_web_server(state: &AppState) -> CmdResult<()> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(3000);
 
+    let upload_limit_mb: usize = db
+        .get_setting("web:upload_limit_mb")?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(200);
+    let json_limit_mb: usize = db
+        .get_setting("web:json_limit_mb")?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    let limits = studio_web::WebLimitsConfig {
+        json_body_limit_bytes: json_limit_mb * 1024 * 1024,
+        upload_body_limit_bytes: upload_limit_mb * 1024 * 1024,
+    };
     let config = WebServerConfig {
         bind_host: "127.0.0.1".into(),
         port,
         lan_allowed,
+        app_data_dir: state.app_paths.data_dir().to_path_buf(),
+        redirect_http_to_https: false,
+        limits,
     };
 
     let dispatcher = Arc::new(TauriWebDispatcher::new(state.clone()));

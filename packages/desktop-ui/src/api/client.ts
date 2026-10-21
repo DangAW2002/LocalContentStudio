@@ -753,6 +753,46 @@ export class StudioApiClient {
     return invoke<YoutubeDisconnectResult>("youtube_channel_disconnect", { channelId });
   }
 
+  /**
+   * Configure Facebook App ID and App Secret in Credential Manager.
+   * Command: facebook_client_config
+   */
+  async facebookClientConfig(appId: string, appSecret: string): Promise<import("./types").FacebookClientConfigResult> {
+    return invoke<import("./types").FacebookClientConfigResult>("facebook_client_config", { appId, appSecret });
+  }
+
+  /**
+   * Get Facebook client status.
+   * Command: facebook_client_status
+   */
+  async facebookClientStatus(): Promise<import("./types").FacebookClientStatus> {
+    return invoke<import("./types").FacebookClientStatus>("facebook_client_status");
+  }
+
+  /**
+   * Connect Facebook Pages via OAuth loopback redirect.
+   * Command: facebook_connect
+   */
+  async facebookConnect(): Promise<import("./types").FacebookPageAccount[]> {
+    return invoke<import("./types").FacebookPageAccount[]>("facebook_connect");
+  }
+
+  /**
+   * List connected Facebook Pages.
+   * Command: facebook_pages_list
+   */
+  async facebookPagesList(): Promise<import("./types").FacebookPageAccount[]> {
+    return invoke<import("./types").FacebookPageAccount[]>("facebook_pages_list");
+  }
+
+  /**
+   * Disconnect a Facebook Page.
+   * Command: facebook_page_disconnect
+   */
+  async facebookPageDisconnect(pageId: string): Promise<import("./types").FacebookDisconnectResult> {
+    return invoke<import("./types").FacebookDisconnectResult>("facebook_page_disconnect", { pageId });
+  }
+
   // ==========================================
   // Personal Web Mode (Chế độ web cá nhân)
   // ==========================================
@@ -770,7 +810,7 @@ export class StudioApiClient {
    * Command: `web_configure`
    */
   async webConfigure(req: WebConfigureRequest): Promise<WebStatus> {
-    return invoke<WebStatus>("web_configure", { ...req, req });
+    return invoke<WebStatus>("web_configure", { req });
   }
 
   // ==========================================

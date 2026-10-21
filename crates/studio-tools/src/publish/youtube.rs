@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpListener;
 
 pub const DEFAULT_GOOGLE_UPLOAD_BASE: &str = "https://www.googleapis.com";
@@ -525,24 +525,23 @@ pub async fn connect_youtube(
         .arg(&auth_url)
         .spawn();
 
-    // Wait on loopback listener with timeout
-    let (mut stream, _) =
-        tokio::time::timeout(Duration::from_secs(timeout_secs), listener.accept())
-            .await
-            .map_err(|_| {
-                ToolError::PublishError(map_youtube_error(
-                    None,
-                    "Hết thời gian chờ xác thực YouTube từ trình duyệt (timeout).",
-                ))
-            })?
-            .map_err(|e| ToolError::ExecutionError(format!("Lỗi nhận kết nối loopback: {e}")))?;
-
-    let mut buf = [0u8; 4096];
-    let n = stream
-        .read(&mut buf)
-        .await
-        .map_err(|e| ToolError::ExecutionError(format!("Lỗi đọc yêu cầu loopback: {e}")))?;
-    let request_str = String::from_utf8_lossy(&buf[..n]);
+    // Wait for the browser redirect (preconnects and favicon requests are skipped).
+    let (mut stream, request_str) = crate::publish::loopback::accept_oauth_redirect(
+        &listener,
+        Duration::from_secs(timeout_secs),
+    )
+    .await
+    .map_err(|e| match e {
+        crate::publish::loopback::LoopbackError::Timeout => {
+            ToolError::PublishError(map_youtube_error(
+                None,
+                "Hết thời gian chờ xác thực YouTube từ trình duyệt (timeout).",
+            ))
+        }
+        crate::publish::loopback::LoopbackError::Io(e) => {
+            ToolError::ExecutionError(format!("Lỗi nhận kết nối loopback: {e}"))
+        }
+    })?;
 
     // Parse HTTP GET line: "GET /?code=...&state=... HTTP/1.1"
     let first_line = request_str.lines().next().unwrap_or_default();
@@ -1030,6 +1029,7 @@ pub async fn migrate_legacy_youtube_account(
 mod tests {
     use super::*;
     use tempfile::NamedTempFile;
+    use tokio::io::AsyncReadExt;
 
     #[tokio::test]
     async fn test_pkce_generation() {

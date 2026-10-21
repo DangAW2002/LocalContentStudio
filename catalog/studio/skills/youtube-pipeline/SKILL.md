@@ -1,6 +1,6 @@
 ---
 name: youtube-pipeline
-description: Quy trình sản xuất video YouTube hoàn chỉnh từ đầu đến cuối trong Studio (kịch bản → voice TTS → b-roll media.import / AI gen → timeline → render video → check tiêu chuẩn kênh → thumbnail design → metadata tiêu đề, mô tả, thẻ tags). Dùng khi tạo nội dung video YouTube chuẩn phong cách cá nhân/thương hiệu.
+description: Quy trình sản xuất video YouTube hoàn chỉnh từ đầu đến cuối trong Studio (kịch bản → voice TTS → b-roll media.import / AI gen → timeline_build → render video → check tiêu chuẩn kênh → thumbnail design → metadata tiêu đề, mô tả, thẻ tags). Dùng khi tạo nội dung video YouTube chuẩn phong cách cá nhân/thương hiệu.
 ---
 
 # Quy trình sản xuất video YouTube đầu-cuối (Studio Playbook)
@@ -14,8 +14,9 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
   - `brand_get`, `channel_get` để lấy thông tin nhận diện thương hiệu và tiêu chuẩn kênh YouTube (`channels/youtube.yaml`).
   - `capability_run` để chạy các tác vụ: `tts.synthesize@1` (giọng đọc), `media.import@1` (tải b-roll / video tư liệu / file cục bộ), `image.generate@1` (sinh ảnh nền/minh họa), `video.generate@1` (sinh b-roll video ngắn), `media.inspect@1` (kiểm tra chi tiết media, thời lượng, loudness LUFS, khung hình mẫu).
   - **Dùng `media.inspect` thay vì Bash ffprobe:** Khi cần kiểm tra thông số kỹ thuật của clip video hoặc audio (thời lượng, kích thước, fps, loudness ebur128, khung hình mẫu), luôn gọi capability `media.inspect@1` qua `capability_run` với tham số `{ "path": "<đường dẫn tương đối>" }`, tuyệt đối không gọi Bash chạy ffprobe ngoài terminal.
-  - `artifact_list`, `artifact_get` để xem artifact; tạo/sửa artifact `timeline`, `design`, `text` bằng cách ghi trực tiếp
-    `projects/<slug>/artifacts/<id>/artifact.yaml` + tệp nguồn (`timeline.json`, `index.html`, `text.md`).
+  - `artifact_list`, `artifact_get` để xem artifact; tạo/sửa artifact `timeline` bằng công cụ `timeline_build`; tạo/sửa `design`, `text` bằng cách ghi trực tiếp
+    `projects/<slug>/artifacts/<id>/artifact.yaml` + tệp nguồn (`index.html`, `text.md`).
+  - `timeline_build` để tự động tính toán thời gian, căn khớp voice/b-roll, chia phụ đề và dựng `timeline.json`.
   - `artifact_render` để xuất video MP4 hoặc ảnh PNG thumbnail.
   - `check_run` (sau khi render) để kiểm tra tuân thủ kích thước, thời lượng, safe-zone, bảng màu và từ cấm.
 - **Khai báo liên kết đồ thị (`inputs`) và phân tích ảnh hưởng (`graph_impact`):**
@@ -24,6 +25,10 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
     - Artifact `design` thumbnail dùng `inputs` trỏ tới kịch bản (`artifact:<script-id>`) hoặc nhân vật tham chiếu (`{ ref: "artifact:<nv-id>", role: "reference" }`).
   - Trước khi sửa đổi một artifact nguồn (như kịch bản hay giọng đọc), luôn gọi MCP tool `graph_impact(ref: "...")` để biết danh sách các sản phẩm phía dưới bị ảnh hưởng theo thứ tự topo và ước tính chi phí render/sinh lại.
 - **Tự động & an toàn:** Luôn tôn trọng checkpoint CAS tự động của Studio trước mỗi lượt; không tự tiện ghi đè tệp ngoài workspace.
+- **Ghi/sửa tệp bằng tool Write/Edit, đọc bằng Read** (`artifact.yaml`, `index.html`, `text.md`, `metadata.yaml`, `timeline.json`):
+  không dùng Bash (`cat > … <<EOF`, `sed -i`, `python -c`) — mỗi lệnh Bash như vậy bắt người dùng duyệt quyền.
+  Bash chỉ dùng khi thật sự cần (ví dụ `cp` ảnh vào thư mục artifact).
+- **Tạo lại bản nháp đăng:** gọi lại `publish_prepare` cho cùng artifact/kênh sẽ cập nhật bản nháp đang mở, không tạo bản mới.
 
 ## 7 giai đoạn thực hiện
 
@@ -51,54 +56,48 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
   - **Kiểm tra tệp tư liệu:** Dùng `media.inspect@1` để xác thực độ phân giải, fps và âm thanh của b-roll đã tải.
 
 ### 4. Dựng dòng thời gian (Timeline Assembly)
-- Khởi tạo hoặc cập nhật artifact loại `timeline` (`timeline.json`) (ghi `artifact.yaml` + `timeline.json` trong `projects/<slug>/artifacts/<id>/`):
-  - `width`: 1920, `height`: 1080 (hoặc 1280x720), `fps`: 30.0.
-  - **Track video gốc (Base track):** Track video đầu tiên trong danh sách là chuỗi video chính, các clip được nối tiếp nhau và quyết định tổng thời lượng video.
-  - **Track video lớp phủ (Overlay tracks):** Mọi track video nằm sau track đầu tiên được xem là lớp phủ (overlay), hiển thị đè lên base sequence với bộ lọc FFmpeg `overlay` (`enable='between(t,start,start+duration)'`) theo thứ tự track.
-    - Hỗ trợ các thuộc tính vị trí & tỷ lệ: `x`, `y` (khoảng cách px từ góc trên-trái, mặc định 0), `width` / `height` (co giãn giữ tỷ lệ nếu chỉ cho một chiều), `opacity` (0.0 đến 1.0).
-    - Clip ảnh (PNG/JPG/WEBP) tự động lặp theo thời lượng `duration`. Clip video được cắt theo `in_point` và `duration`.
-    - **Lưu ý định dạng SVG:** FFmpeg không giải mã trực tiếp SVG trong timeline. Hãy render tệp SVG logo sang PNG qua design artifact trước khi chèn vào overlay track.
-  - **Track audio:** Ghép các đoạn voiceover từ bước 2 và nhạc nền nhẹ nhàng (nếu có).
-  - **Track caption (phụ đề):** Đặt lời thoại khớp với âm thanh hiển thị theo mốc thời gian.
-- Kiểm tra tính hợp lệ của cấu trúc `timeline.json`. Mẫu chuẩn có logo overlay (`source` là đường dẫn tính từ gốc workspace hoặc thư mục artifact; mỗi track/clip bắt buộc có `id`, mỗi clip bắt buộc có `source` + `duration`):
+- Dùng công cụ Studio MCP `timeline_build` để tự động tạo artifact timeline (`artifact.yaml` + `timeline.json`). Không cần viết Python qua Bash hay tự tính toán thời lượng thủ công:
+  - `timeline_build` tự động probe thời lượng từng tệp âm thanh (WAV/MP3), sắp xếp các phân cảnh nối tiếp nhau với các khoảng đệm mượt mà (`lead_s`, `gap_s`, `tail_s`).
+  - Tự động chia lời thoại kịch bản thành phụ đề cân đối theo câu và độ dài (tối đa 2 dòng ~42 ký tự mỗi dòng), gán mốc thời gian chính xác khớp với giọng đọc.
+  - Hỗ trợ lớp phủ (overlays) hiển thị xuyên suốt video (ví dụ logo brand định dạng PNG) hoặc theo khoảng thời gian tùy chọn.
+  - Tự động thiết lập kích thước và khung hình theo chuẩn của kênh YouTube (1920x1080@30fps).
+- **Lưu ý định dạng SVG:** FFmpeg không giải mã trực tiếp SVG trong timeline. Hãy render tệp SVG logo sang PNG qua design artifact trước khi truyền vào `overlays` của `timeline_build`.
+- **Ví dụ gọi công cụ `timeline_build`:**
 
   ```json
   {
-    "width": 1920, "height": 1080, "fps": 30,
-    "tracks": [
+    "project": "ca-phe-phin",
+    "artifact": "video",
+    "segments": [
       {
-        "id": "video-base",
-        "kind": "video",
-        "clips": [
-          { "id": "s1", "source": "../../renders/scene-01/<hash>/output.png", "start": 0, "duration": 8.2, "transition": "fade", "transition_duration": 0.5 },
-          { "id": "s2", "source": "color:#1E88E5", "start": 8.2, "duration": 3 }
-        ]
+        "audio": "projects/ca-phe-phin/assets/vo/vo-01.wav",
+        "text": "Vì sao một ly cà phê phin lại cần nhỏ giọt thật chậm?",
+        "visual": "projects/ca-phe-phin/renders/scene-01/output.png"
       },
       {
-        "id": "logo-overlay",
-        "kind": "video",
-        "clips": [
-          { "id": "brand-logo", "source": "brand/logo.png", "start": 0, "duration": 11.2, "x": 60, "y": 60, "width": 180, "opacity": 0.9 }
-        ]
-      },
-      {
-        "id": "voice",
-        "kind": "audio",
-        "clips": [
-          { "id": "vo1", "source": "../../assets/vo/vo-01.wav", "start": 0, "duration": 8.2 }
-        ]
-      },
-      {
-        "id": "subs",
-        "kind": "captions",
-        "clips": [
-          { "id": "t1", "source": "Vì sao một ly cà phê nhỏ giọt chậm…", "start": 0, "duration": 8.2 }
-        ]
+        "audio": "projects/ca-phe-phin/assets/vo/vo-02.wav",
+        "text": "Bí quyết nằm ở nhiệt độ nước và độ nén vừa phải của phin nhôm.",
+        "visual": "projects/ca-phe-phin/renders/scene-02/output.png"
       }
-    ]
+    ],
+    "overlays": [
+      {
+        "source": "projects/ca-phe-phin/renders/logo-badge/output.png",
+        "x": 60,
+        "y": 60,
+        "width": 180,
+        "opacity": 0.9
+      }
+    ],
+    "brand": "demo",
+    "channels": ["youtube"],
+    "lead_s": 0.5,
+    "gap_s": 0.4,
+    "tail_s": 1.5,
+    "transition": "fade"
   }
   ```
-- Thời lượng giọng đọc: `tts.synthesize@1` trả `duration_seconds` cho tệp WAV — dùng số này hoặc capability `media.inspect@1`, không cần chạy Bash ffprobe.
+- Kết quả trả về gồm: `{ "artifact": "video", "duration_s": 65.2, "segments": [{"start": 0.0, "duration": 8.5}, ...], "captions_count": 8 }`. Không cần can thiệp tay vào `timeline.json`. Sau bước này, chuyển ngay sang bước 5 để kết xuất video.
 
 ### 5. Kết xuất & Kiểm tra chất lượng (Render & Validation)
 - Thực hiện kết xuất video qua `artifact_render` cho artifact timeline:

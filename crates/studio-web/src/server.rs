@@ -1,14 +1,16 @@
 //! Axum web server implementation for Local Content Studio web mode.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::extract::{ConnectInfo, Path as AxumPath, Query, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Path as AxumPath, Query, State};
 use axum::http::header::{self, HeaderMap};
 use axum::http::{Method, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use axum_server::tls_rustls::RustlsConfig;
 use include_dir::{include_dir, Dir};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -24,9 +26,28 @@ use crate::qr::generate_qr_svg;
 use crate::security::{
     forbidden_response, sudo_required_response, verify_csrf_header, verify_origin_and_host,
 };
+use crate::tls::{ensure_tls_certificate, TlsCertificateInfo};
 use crate::upload::handle_upload;
 
 static UI_DIST: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../packages/desktop-ui/dist");
+
+/// Configurable body limits for JSON and Upload routes.
+#[derive(Debug, Clone)]
+pub struct WebLimitsConfig {
+    /// Limit for JSON routes (default 1 MB, hard ceiling 10 MB).
+    pub json_body_limit_bytes: usize,
+    /// Limit for Upload route (default 200 MB, hard ceiling 1 GB).
+    pub upload_body_limit_bytes: usize,
+}
+
+impl Default for WebLimitsConfig {
+    fn default() -> Self {
+        Self {
+            json_body_limit_bytes: 1024 * 1024,         // 1 MB
+            upload_body_limit_bytes: 200 * 1024 * 1024, // 200 MB
+        }
+    }
+}
 
 /// Configuration for starting the web server.
 #[derive(Debug, Clone)]
@@ -34,6 +55,12 @@ pub struct WebServerConfig {
     pub bind_host: String,
     pub port: u16,
     pub lan_allowed: bool,
+    /// Base directory where TLS certificates and keys are stored (e.g. app data dir).
+    pub app_data_dir: PathBuf,
+    /// Optional redirect from HTTP to HTTPS on LAN.
+    pub redirect_http_to_https: bool,
+    /// Body limits.
+    pub limits: WebLimitsConfig,
 }
 
 impl Default for WebServerConfig {
@@ -42,6 +69,9 @@ impl Default for WebServerConfig {
             bind_host: "127.0.0.1".into(),
             port: 3000,
             lan_allowed: false,
+            app_data_dir: std::env::temp_dir().join("studio_web_default"),
+            redirect_http_to_https: false,
+            limits: WebLimitsConfig::default(),
         }
     }
 }
@@ -55,12 +85,47 @@ pub struct WebServerState {
     pub journal: Arc<EventJournal>,
     pub lan_allowed: bool,
     pub port: u16,
+    pub tls_info: Option<TlsCertificateInfo>,
+    pub limits: WebLimitsConfig,
 }
 
 /// Running server handle.
 pub struct RunningWebServer {
     pub addr: SocketAddr,
     pub shutdown: tokio::sync::oneshot::Sender<()>,
+    pub tls_fingerprint: Option<String>,
+    /// Login sessions of this server (for the status shown in Settings).
+    pub sessions: Arc<SessionStore>,
+}
+
+/// Binds `addr`, retrying briefly: on restart the previous server may still be shutting down
+/// (graceful shutdown up to 2 s) and holding the port.
+async fn bind_with_retry(addr: SocketAddr) -> std::io::Result<std::net::TcpListener> {
+    let mut attempt = 0;
+    loop {
+        match std::net::TcpListener::bind(addr) {
+            Ok(listener) => {
+                listener.set_nonblocking(true)?;
+                return Ok(listener);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && attempt < 15 => {
+                attempt += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// Loads the TLS server config for `cert`.
+///
+/// Several crates link rustls; without a process default provider rustls panics while building
+/// the server config, and that panic left the configure command hanging. Install ring first.
+pub async fn load_rustls_config(cert: &TlsCertificateInfo) -> std::io::Result<RustlsConfig> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    RustlsConfig::from_pem_file(&cert.cert_path, &cert.key_path)
+        .await
+        .map_err(|e| std::io::Error::other(format!("Lỗi cấu hình rustls: {e}")))
 }
 
 /// Start the web server.
@@ -75,38 +140,84 @@ pub async fn start(
         config.bind_host.as_str()
     };
 
+    let (tls_info, rustls_config) = if config.lan_allowed {
+        let cert_dir = config.app_data_dir.join("tls");
+        let cert_info = ensure_tls_certificate(&cert_dir, None).map_err(std::io::Error::other)?;
+
+        let rustls = load_rustls_config(&cert_info).await?;
+
+        (Some(cert_info), Some(rustls))
+    } else {
+        (None, None)
+    };
+
+    let tls_fingerprint = tls_info.as_ref().map(|t| t.fingerprint_sha256.clone());
+
+    let sessions = Arc::new(SessionStore::new());
     let state = Arc::new(WebServerState {
         dispatcher,
-        sessions: Arc::new(SessionStore::new()),
+        sessions: sessions.clone(),
         rate_limiter: Arc::new(LoginRateLimiter::new()),
         journal: EventJournal::attach(&events_tx),
         lan_allowed: config.lan_allowed,
         port: config.port,
+        tls_info,
+        limits: config.limits.clone(),
     });
 
     let app = build_router(state);
 
-    let listener = tokio::net::TcpListener::bind((host, config.port)).await?;
-    let addr = listener.local_addr()?;
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
 
-    tokio::spawn(async move {
-        let _ = axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .with_graceful_shutdown(async {
-            let _ = rx.await;
-        })
-        .await;
-    });
+    let addr: SocketAddr = format!("{host}:{}", config.port)
+        .parse()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
 
-    Ok(RunningWebServer { addr, shutdown: tx })
+    if let Some(rustls) = rustls_config {
+        // Bind here so a busy port reaches the caller instead of dying inside the task.
+        let listener = bind_with_retry(addr).await?;
+        tokio::spawn(async move {
+            let handle = axum_server::Handle::new();
+            let handle_clone = handle.clone();
+            tokio::spawn(async move {
+                let _ = rx.await;
+                handle_clone.graceful_shutdown(Some(std::time::Duration::from_secs(2)));
+            });
+
+            let _ = axum_server::from_tcp_rustls(listener, rustls)
+                .handle(handle)
+                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+                .await;
+        });
+    } else {
+        // Run HTTP server via standard hyper/axum
+        let listener = tokio::net::TcpListener::from_std(bind_with_retry(addr).await?)?;
+        tokio::spawn(async move {
+            let _ = axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(async {
+                let _ = rx.await;
+            })
+            .await;
+        });
+    }
+
+    Ok(RunningWebServer {
+        addr,
+        shutdown: tx,
+        tls_fingerprint,
+        sessions,
+    })
 }
 
 /// Build the router with all web endpoints and static UI fallback.
 pub fn build_router(state: Arc<WebServerState>) -> Router {
-    Router::new()
+    let json_limit = state.limits.json_body_limit_bytes;
+    let upload_limit = state.limits.upload_body_limit_bytes;
+
+    let api_routes = Router::new()
         .route("/api/auth/status", get(auth_status))
         .route("/api/auth/login", post(auth_login))
         .route("/api/auth/logout", post(auth_logout))
@@ -114,8 +225,18 @@ pub fn build_router(state: Arc<WebServerState>) -> Router {
         .route("/api/invoke/:command", post(invoke_handler))
         .route("/api/file", get(file_handler))
         .route("/api/events", get(events_handler))
+        .layer(DefaultBodyLimit::max(json_limit));
+
+    let upload_routes = Router::new()
         .route("/api/upload", post(upload_handler))
-        .route("/api/qr", get(qr_handler))
+        .layer(DefaultBodyLimit::max(upload_limit));
+
+    let misc_routes = Router::new().route("/api/qr", get(qr_handler));
+
+    Router::new()
+        .merge(api_routes)
+        .merge(upload_routes)
+        .merge(misc_routes)
         .fallback(static_or_spa_fallback)
         .layer(axum::middleware::map_response(security_headers))
         .with_state(state)
@@ -156,7 +277,10 @@ fn extract_session_token(headers: &HeaderMap) -> Option<String> {
     None
 }
 
-fn is_https_request(headers: &HeaderMap) -> bool {
+fn is_https_request(headers: &HeaderMap, state_tls_enabled: bool) -> bool {
+    if state_tls_enabled {
+        return true;
+    }
     if let Some(proto) = headers
         .get("x-forwarded-proto")
         .and_then(|v| v.to_str().ok())
@@ -204,6 +328,8 @@ struct AuthStatusResponse {
     is_sudo: bool,
     #[serde(rename = "sudoUntil")]
     sudo_until: Option<String>,
+    #[serde(rename = "tlsFingerprint")]
+    tls_fingerprint: Option<String>,
 }
 
 async fn auth_status(State(state): State<Arc<WebServerState>>, headers: HeaderMap) -> Response {
@@ -226,11 +352,17 @@ async fn auth_status(State(state): State<Arc<WebServerState>>, headers: HeaderMa
         .and_then(|s| s.last_sudo)
         .map(|t| (t + chrono::Duration::seconds(600)).to_rfc3339());
 
+    let tls_fingerprint = state
+        .tls_info
+        .as_ref()
+        .map(|t| t.fingerprint_sha256.clone());
+
     Json(AuthStatusResponse {
         authenticated,
         has_password,
         is_sudo,
         sudo_until,
+        tls_fingerprint,
     })
     .into_response()
 }
@@ -286,7 +418,11 @@ async fn auth_login(
     if verify_password(&body.password, &stored_hash) {
         state.rate_limiter.record_success(ip);
         let session = state.sessions.create_session();
-        let cookie = make_cookie(&session.token, 86400, is_https_request(&headers));
+        let cookie = make_cookie(
+            &session.token,
+            86400,
+            is_https_request(&headers, state.tls_info.is_some()),
+        );
 
         Response::builder()
             .status(StatusCode::OK)
@@ -335,7 +471,7 @@ async fn auth_logout(State(state): State<Arc<WebServerState>>, headers: HeaderMa
     if let Some(token) = extract_session_token(&headers) {
         state.sessions.remove(&token);
     }
-    let expired_cookie = make_cookie("", 0, is_https_request(&headers));
+    let expired_cookie = make_cookie("", 0, is_https_request(&headers, state.tls_info.is_some()));
 
     Response::builder()
         .status(StatusCode::OK)
@@ -529,7 +665,7 @@ async fn upload_handler(
 // ──────────────────────────────── QR Route ───────────────────────────────────
 
 async fn qr_handler(State(state): State<Arc<WebServerState>>) -> Response {
-    let url = format_lan_url(state.port);
+    let url = format_lan_url(state.port, state.lan_allowed);
     match generate_qr_svg(&url) {
         Ok(svg) => Response::builder()
             .status(StatusCode::OK)

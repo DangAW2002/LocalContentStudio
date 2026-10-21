@@ -122,6 +122,15 @@ impl SessionStore {
         None
     }
 
+    /// Number of sessions that have not expired.
+    pub fn active_count(&self) -> usize {
+        let now = Utc::now();
+        let map = self.sessions.read().expect("lock poisoned");
+        map.values()
+            .filter(|s| (now - s.last_active).num_seconds() < SESSION_TTL.as_secs() as i64)
+            .count()
+    }
+
     /// Refresh sudo for an active session.
     pub fn refresh_sudo(&self, token: &str) -> bool {
         let mut map = self.sessions.write().expect("lock poisoned");
@@ -222,6 +231,15 @@ mod tests {
         let hash = hash_password(pass).expect("hash success");
         assert!(verify_password(pass, &hash));
         assert!(!verify_password("wrong_password", &hash));
+    }
+
+    #[test]
+    fn active_count_counts_live_sessions() {
+        let store = SessionStore::new();
+        assert_eq!(store.active_count(), 0);
+        store.create_session();
+        store.create_session();
+        assert_eq!(store.active_count(), 2);
     }
 
     #[test]

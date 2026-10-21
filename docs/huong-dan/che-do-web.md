@@ -1,75 +1,79 @@
 # Chế độ Web Cá nhân (Personal Web Mode) — Local Content Studio
 
-Chế độ Web Cá nhân cho phép bạn truy cập và điều khiển Local Content Studio từ trình duyệt web (trên chính máy tính này, hoặc từ điện thoại/máy tính bảng/laptop trong cùng mạng Wi-Fi/LAN).
+Chế độ Web Cá nhân cho phép bạn điều khiển và theo dõi Local Content Studio từ trình duyệt web trên điện thoại, máy tính bảng hoặc laptop khác khi đang kết nối trong cùng mạng Wi-Fi/LAN gia đình.
 
-Tất cả tác vụ, luồng hội thoại AI, job render và tệp tin lưu trữ đều tiếp tục chạy trực tiếp trên máy tính chính của bạn. Đây là chế độ dành riêng cho **một chủ sở hữu duy nhất** (single-owner), không yêu cầu tài khoản đám mây hay dịch vụ trung gian nào.
-
----
-
-## 1. Cách kích hoạt trong Studio
-
-1. Mở ứng dụng Studio trên máy tính.
-2. Điều hướng tới **Tools & Cài đặt** (hoặc nhấn `Ctrl+5`) → Chọn tab **Truy cập Web**.
-3. Bấm **Thiết lập mật khẩu**:
-   - Nhập mật khẩu chủ sở hữu (tối thiểu 6 ký tự).
-   - Mật khẩu được mã hóa an toàn bằng thuật toán **Argon2id** và lưu trực tiếp trong cơ sở dữ liệu `app.db` của máy.
-4. Bấm **Bật Chế độ Web**:
-   - Dịch vụ web cá nhân sẽ khởi chạy trên cổng mặc định `3000`.
-   - Trình duyệt trên máy tính có thể truy cập ngay tại: `http://localhost:3000`.
+Tất cả tác vụ, luồng xử lý AI, công việc render và tệp tin lưu trữ đều tiếp tục chạy trực tiếp trên máy tính chính của bạn. Đây là chế độ dành riêng cho **một chủ sở hữu duy nhất (single-owner)**, không cần qua bất kỳ máy chủ đám mây hay bên trung gian nào.
 
 ---
 
-## 2. Kết nối từ Điện thoại hoặc Laptop qua Wi-Fi/LAN
+## 1. Kích hoạt Chế độ Web trong Studio
 
-1. Trong tab **Truy cập Web**, bật tuỳ chọn: **Cho phép truy cập từ mạng LAN**.
-   - Studio sẽ chuyển sang lắng nghe trên `0.0.0.0` để tiếp nhận kết nối nội bộ.
-   - Địa chỉ LAN sẽ xuất hiện dưới dạng: `http://192.168.x.x:3000`.
-2. **Quét mã QR**:
-   - Trên màn hình Cài đặt sẽ hiển thị một mã QR tự động.
-   - Mở ứng dụng Camera trên điện thoại hoặc máy tính bảng kết nối cùng mạng Wi-Fi, quét mã để mở ngay trang Studio.
-3. Nhập mật khẩu chủ sở hữu đã thiết lập để đăng nhập.
+1. Mở ứng dụng Local Content Studio trên máy tính chính.
+2. Nhấn **`Ctrl+5`** để mở **Tools & Cài đặt** → Chọn tab **Truy cập Web cá nhân** (Web Access).
+3. **Thiết lập mật khẩu chủ sở hữu (Master Password):**
+   - Nếu là lần đầu tiên, bấm nút **Thiết lập mật khẩu**.
+   - Nhập mật khẩu chủ sở hữu (tối thiểu 6 ký tự) và xác nhận.
+   - Mật khẩu được mã hóa an toàn bằng thuật toán **Argon2id** và lưu trực tiếp trong tệp cơ sở dữ liệu `app.db` trên máy tính của bạn.
+4. **Bật chế độ Web cục bộ:**
+   - Bấm nút **Bật Chế độ Web**.
+   - Máy chủ web cá nhân sẽ khởi chạy ở chế độ cục bộ (mặc định cổng `3000`).
+   - Bạn có thể mở trình duyệt trên máy tính tại địa chỉ: `http://localhost:3000`.
+
+---
+
+## 2. Kết nối từ Điện thoại qua Mạng Wi-Fi/LAN (HTTPS Tự ký)
+
+![Cài đặt Truy cập Web LAN, Vân tay SHA-256 và Mã QR](anh/11-settings-web-https.png)
+
+Để truy cập từ điện thoại hoặc máy tính bảng:
+
+1. Trong tab **Truy cập Web cá nhân**, gạt bật tuỳ chọn: **Cho phép truy cập từ mạng LAN (HTTPS Tự ký)**.
+2. Studio sẽ tự động tạo chứng chỉ bảo mật TLS tự ký (self-signed) dành riêng cho địa chỉ IP mạng nội bộ của bạn và khởi động kết nối **HTTPS**.
+3. **Địa chỉ LAN và Mã QR:**
+   - Màn hình sẽ hiển thị địa chỉ truy cập (ví dụ: `https://192.168.1.15:3000`) cùng một **Mã QR trực quan**.
+   - Chuỗi **Vân tay SHA-256 (SHA-256 Fingerprint)** của chứng chỉ (dạng `AA:BB:CC:DD:...`) cũng được hiển thị rõ ràng trên giao diện Cài đặt.
+4. **Quét mã QR từ điện thoại:**
+   - Mở ứng dụng Camera hoặc trình duyệt trên điện thoại (đảm bảo điện thoại đang bắt cùng mạng Wi-Fi với máy tính).
+   - Quét mã QR để mở trang web.
+5. **Chấp nhận Cảnh báo Chứng chỉ trên Trình duyệt Điện thoại:**
+   - Vì đây là chứng chỉ SSL tự ký cá nhân tạo trên máy bạn (không mua từ tổ chức cấp phát chứng chỉ thương mại), trình duyệt điện thoại (Chrome, Safari, Firefox) sẽ hiển thị cảnh báo lần đầu: *"Kết nối của bạn không phải là kết nối riêng tư"* hoặc *"Chứng chỉ không đáng tin cậy"*.
+   - **Đối chiếu Vân tay SHA-256 an toàn:** Bấm vào biểu tượng ổ khóa hoặc nút *Xem thông tin chứng chỉ* trên trình duyệt điện thoại, so sánh chuỗi vân tay SHA-256 xem có trùng khớp hoàn toàn với chuỗi hiển thị trên màn hình Studio ở máy tính hay không. Khi trùng khớp, bạn hoàn toàn yên tâm đây chính là máy tính của mình.
+   - Bấm **Nâng cao (Advanced)** → Chọn **Tiếp tục truy cập (Proceed to... / Accept Risk)**.
+6. **Đăng nhập:** Nhập mật khẩu chủ sở hữu bạn đã thiết lập để vào giao diện làm việc.
 
 > [!WARNING]
-> **Lưu ý an toàn mạng Wi-Fi:** Khi bật kết nối LAN, bất kỳ ai kết nối vào mạng Wi-Fi của bạn đều có thể thấy trang đăng nhập của Studio. Hãy luôn đặt mật khẩu đủ mạnh và chỉ bật kết nối LAN trên mạng Wi-Fi tin cậy (nhà riêng).
+> **Lưu ý mạng Wi-Fi:** Chỉ nên bật tuỳ chọn truy cập LAN trên mạng Wi-Fi tin cậy (tại nhà riêng). Không bật trên mạng Wi-Fi công cộng (quán cà phê, sân bay) để tránh nguy cơ bị dò quét cổng.
 
 ---
 
-## 3. Các Cơ chế An ninh Nghiêm ngặt
+## 3. Các cơ chế an toàn và bảo mật tích hợp
 
-Vì Studio trao quyền cho các agent AI thực thi công cụ và quản lý tệp tin, lớp bảo mật của chế độ web được thiết kế theo chuẩn nghiêm ngặt:
+Vì Studio có khả năng điều khiển các tác vụ dòng lệnh và xuất bản video, hệ thống áp dụng các lớp bảo vệ nghiêm ngặt:
 
-1. **Phiên đăng nhập an toàn (HttpOnly Cookie):**
-   - Phiên đăng nhập được quản lý bằng cookie `studio_session` với các cờ `HttpOnly`, `SameSite=Strict`, và `Path=/`. Trình duyệt web không thể đọc hoặc làm rò rỉ cookie này qua script phía client. Khi yêu cầu đến qua kết nối HTTPS (reverse proxy hoặc TLS tương lai), cờ `Secure` sẽ tự động được thêm vào cookie.
-2. **Chống dò mật khẩu (Rate Limiting):**
-   - Nhập sai mật khẩu liên tiếp 5 lần sẽ bị khóa đăng nhập tạm thời trong 60 giây.
-3. **Xác thực quyền quản trị (Sudo Mode):**
-   - Các hành động có tác động lớn hoặc làm thay đổi hệ thống ngoài (đăng video YouTube `publish_confirm`, cài đặt/gỡ công cụ `tool_install_confirm`, tải mô hình/binary giọng đọc `tts_model_install`, cấu hình khoá bí mật `secret_set`/`secret_delete`, phục hồi checkpoint hoặc hoàn tác lượt `turn_undo`) bắt buộc bạn phải nhập lại mật khẩu chủ sở hữu trong vòng 10 phút gần nhất.
-4. **Chống tấn công CSRF & DNS Rebinding:**
-   - Mọi yêu cầu `POST` bắt buộc phải có header `x-studio-csrf: 1`.
-   - Máy chủ kiểm tra nghiêm ngặt header `Origin` và `Host`. Mọi yêu cầu từ domain bên ngoài hoặc không khớp với loopback/LAN IP đều bị từ chối ngay lập tức (HTTP 403 Forbidden).
-   - Không hỗ trợ CORS cho bên ngoài.
-5. **Bảo mật Khoá bí mật (Zero Leaks):**
-   - Các khoá API (Anthropic, Gemini, OpenAI, YouTube client secret...) chỉ cho phép ghi một chiều (`write-only`) vào Credential Manager, không bao giờ gửi giá trị khoá thô về trình duyệt web.
-6. **Xem tệp an toàn (Safe File Scoping):**
-   - API xem trước tệp `/api/file` chỉ cho phép đọc các tệp nằm bên trong workspace hiện tại; mọi nỗ lực vượt quyền (path traversal như `../`) đều bị chặn đứng và ghi nhật ký cảnh báo.
-
----
-
-## 4. Trải nghiệm trên Trình duyệt Di động & Web
-
-- **Giao diện đáp ứng (Responsive):**
-  - Màn hình Dự án trên màn hình nhỏ (điện thoại) tự động chuyển sang chế độ chuyển tab mượt mà giữa **Hội thoại (Thread)**, **Stage (Khu vực xem trước)** và **Thành phẩm (Outputs)**.
-  - Trên màn hình điện thoại (≤ 480px) và màn hình hẹp (< 600px), thanh tiêu cự (top bar) tự động thu gọn thanh tìm kiếm thành icon button, rút gọn breadcrumb và ẩn gợi ý phím tắt (`Ctrl+K`, `Ctrl+J`) để không tràn layout.
-  - Thanh trạng thái (status bar) tự động điều chỉnh và ưu tiên hiển thị thông tin workspace cùng số tác vụ đang chạy.
-- **Hỗ trợ Giọng đọc ngoại tuyến (TTS):** Giao diện web hỗ trợ đầy đủ các thao tác xem trạng thái nhà cung cấp TTS (VieNeu-TTS, Piper, Windows SAPI), chọn giọng đọc mặc định, nghe thử trực tiếp trên trình duyệt và tải mô hình giọng đọc (có xác thực Sudo).
-- **Phát đa phương tiện tối ưu:** API `/api/file` hỗ trợ đầy đủ chuẩn HTTP `Range Requests`, cho phép tua nhanh video 4K/FullHD và nghe trực tuyến audio trên cả Safari di động và Chrome.
-- **Cập nhật thời gian thực:** Kết nối Server-Sent Events (SSE) `/api/events` nhận và hiển thị phản hồi streaming từng chữ của AI và tiến độ công việc trong nền không có độ trễ.
-- **Tải tệp tin:** Khi cần nạp ảnh/video trên trình duyệt (thay vì cửa sổ chọn tệp hệ thống của máy tính), hệ thống cung cấp endpoint upload tạm thời an toàn.
-- **Các thao tác đặc thù máy tính:** Một số hành động can thiệp sâu vào tệp cấu hình hệ điều hành cục bộ (như cài đặt shim cho Antigravity CLI `agy`) được đánh dấu "Chỉ có trên ứng dụng máy tính".
+1. **Phiên đăng nhập an toàn (Cookie HttpOnly & Secure):**
+   - Phiên làm việc được lưu trong cookie trình duyệt với các cờ `HttpOnly`, `SameSite=Strict`. Khi kết nối qua HTTPS LAN, cờ `Secure` tự động được kích hoạt, ngăn chặn hoàn toàn việc rò rỉ phiên.
+2. **Chống dò mật khẩu (Brute-Force Protection):**
+   - Nếu nhập sai mật khẩu liên tiếp 5 lần, hệ thống sẽ tạm khóa đăng nhập trong vòng 60 giây.
+3. **Chế độ Sudo (Sudo Mode 10 phút):**
+   - Đối với các thao tác nhạy cảm (như xác nhận đăng bài YouTube `publish_confirm`, lưu khoá bí mật `secret_set`, cài đặt tiện ích hay hoàn tác dữ liệu), hệ thống sẽ yêu cầu bạn nhập lại mật khẩu chủ sở hữu nếu trong 10 phút gần nhất chưa thực hiện xác thực Sudo.
+4. **Giới hạn dung lượng tải lên và API JSON (Body Limits):**
+   - **Đường dẫn tải tệp (`/api/upload`):** Mặc định cho phép tải tệp tối đa **200 MB** (khớp với giới hạn của Thư viện). Bạn có thể điều chỉnh hạn mức này trong Cài đặt (hạn mức tối đa cho phép là 1024 MB / 1 GB).
+   - **Đường dẫn lệnh JSON (`/api/invoke/*`):** Mặc định giới hạn tối đa **1 MB** (tối đa cho phép 10 MB) để ngăn ngừa các cuộc tấn công gây nghẽn bộ nhớ.
+   - Nếu gửi tệp vượt quá hạn mức, máy chủ sẽ từ chối với mã lỗi `HTTP 413 Payload Too Large`.
+5. **Chống giả mạo yêu cầu (CSRF & Origin Verification):**
+   - Mọi yêu cầu gửi dữ liệu bắt buộc phải kèm tiêu đề bảo vệ `x-studio-csrf: 1`.
+   - Máy chủ kiểm tra chặt chẽ tiêu đề `Origin` và `Host`. Mọi kết nối từ trang web lạ ngoài mạng nội bộ đều bị từ chối ngay lập tức (`HTTP 403 Forbidden`).
+6. **Bảo mật khoá riêng tư (TLS Private Key):**
+   - Tệp khoá riêng của chứng chỉ HTTPS (`web_key.pem`) được lưu cô lập trong thư mục cấu hình ứng dụng (`STUDIO_APP_DIR/tls/`), không bao giờ nằm trong thư mục dự án và không thể bị đọc qua API xem tệp.
 
 ---
 
-## 5. Khoảng trống đã biết & Hướng phát triển
+## 4. Xử lý khi gặp sự cố
 
-- **HTTPS nội bộ:** Hiện tại chế độ LAN hoạt động qua HTTP cục bộ. Tuỳ chọn chứng chỉ SSL tự ký (self-signed HTTPS) cho mạng nội bộ là tính năng dự kiến bổ sung trong tương lai.
-- **Tắt máy tính:** Vì Studio chạy hoàn toàn trên máy tính cá nhân của bạn, khi máy tính chuyển sang chế độ ngủ (Sleep) hoặc tắt nguồn, kết nối web từ điện thoại sẽ tạm thời gián đoạn.
+| Hiện tượng | Nguyên nhân | Cách khắc phục |
+| :--- | :--- | :--- |
+| Điện thoại báo không thể kết nối đến trang web | Điện thoại và máy tính không cùng một mạng Wi-Fi, hoặc tường lửa Windows (Firewall) đang chặn cổng | 1. Kiểm tra cả hai thiết bị đang kết nối cùng một tên mạng Wi-Fi.<br>2. Trên máy tính, kiểm tra Windows Defender Firewall xem có thông báo cho phép Studio truy cập mạng Private hay không. |
+| Trình duyệt điện thoại chặn không cho bấm "Tiếp tục" | Trình duyệt Safari hoặc Chrome bật chế độ bảo mật nâng cao | Nhấp vào "Hiện chi tiết" (Show Details) ở chân trang cảnh báo, sau đó chọn "Truy cập trang web này" (Visit this website). |
+| Báo lỗi tải tệp `HTTP 413 Payload Too Large` | Kích thước video hoặc ảnh vượt quá giới hạn upload đang cài đặt | Vào **Cài đặt › Truy cập Web cá nhân** trên máy tính, tăng mục "Giới hạn dung lượng tải lên" lên mức phù hợp (ví dụ 500 MB) rồi lưu lại. |
+| Bị yêu cầu nhập lại mật khẩu khi bấm thao tác | Hết hạn phiên xác thực quyền quản trị (Sudo 10 phút) | Nhập lại mật khẩu chủ sở hữu vào ô Sudo để tiếp tục thực hiện hành động. |
+| Tắt máy tính thì điện thoại mất kết nối | Studio hoạt động cục bộ trên máy tính cá nhân của bạn | Giữ máy tính luôn bật (không để máy tính chuyển sang chế độ Sleep) trong khi bạn đang làm việc từ điện thoại. |
