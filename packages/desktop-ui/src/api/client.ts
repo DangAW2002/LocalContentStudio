@@ -92,6 +92,7 @@ import type {
   CheckpointCreateRequest,
   CheckpointCreateResult,
   ArtifactSummary,
+  ContentGraphResponse,
   ArtifactRenderRequest,
   ArtifactRenderResult,
   ArtifactCheckRequest,
@@ -544,6 +545,11 @@ export class StudioApiClient {
   /** Command: `artifact_list`. */
   async listArtifacts(project: string): Promise<ArtifactSummary[]> {
     return invoke<ArtifactSummary[]>("artifact_list", { project });
+  }
+
+  /** Command: `graph_get`. */
+  async getGraph(project: string): Promise<ContentGraphResponse> {
+    return invoke<ContentGraphResponse>("graph_get", { project });
   }
 
   /** Command: `artifact_render`. */

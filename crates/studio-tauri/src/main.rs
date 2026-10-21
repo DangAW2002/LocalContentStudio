@@ -204,6 +204,7 @@ fn main() {
             commands::file_write,
             commands::checkpoint_create,
             commands::artifact_list,
+            commands::graph_get,
             commands::artifact_render,
             commands::artifact_check,
             commands::artifact_channel_matrix,

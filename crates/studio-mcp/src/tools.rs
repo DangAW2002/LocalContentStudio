@@ -119,6 +119,25 @@ pub fn definitions() -> Vec<Value> {
             }),
             &["artifact", "channel", "target", "metadata"]
         ),
+        tool(
+            "graph_get",
+            "Lấy đồ thị nội dung (các node artifact, trạng thái mới/lỗi thời/chưa render và các cạnh phụ thuộc) của một project.",
+            json!({
+                "project": s("Slug của project (tùy chọn nếu đang trong ngữ cảnh project)"),
+                "focus": s("ID của artifact trọng tâm cần lấy đồ thị con (tùy chọn)"),
+                "depth": json!({ "type": "integer", "description": "Độ sâu lân cận khi dùng focus (mặc định toàn bộ)" })
+            }),
+            &[]
+        ),
+        tool(
+            "graph_impact",
+            "Phân tích các sản phẩm/artifact phía dưới bị ảnh hưởng nếu một artifact thay đổi, theo thứ tự topo và kèm chi phí ước tính.",
+            json!({
+                "project": s("Slug của project (tùy chọn nếu đang trong ngữ cảnh project)"),
+                "ref": s("ID artifact hoặc tham chiếu đầu vào cần kiểm tra ảnh hưởng (ví dụ: thumb-01 hoặc artifact:script-01)")
+            }),
+            &["ref"]
+        ),
         tool("approve", "Nội bộ: xử lý yêu cầu cấp quyền của engine.", json!({ "tool_name": s("tên tool"), "input": { "type": "object" } }), &["tool_name", "input"]),
     ]
 }
@@ -377,6 +396,8 @@ pub async fn call(
 
             serde_json::to_value(outcome).map_err(|e| e.to_string())?
         }
+        "graph_get" => graph_get(&ws, ctx, args)?,
+        "graph_impact" => graph_impact(&ws, ctx, args)?,
         other => return Err(format!("Không có tool \"{other}\".")),
     };
     Ok(inline_or_file(&ws, out))
@@ -425,6 +446,103 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(p);
         }
     }
+}
+
+fn graph_get(ws: &Workspace, ctx: &TurnContext, args: &Value) -> Result<Value, String> {
+    let project_slug = arg(args, "project")
+        .map(String::from)
+        .or_else(|| ctx.project.clone())
+        .ok_or_else(|| "Cần chỉ định slug của project.".to_string())?;
+
+    let proj = Project::open(ws, &project_slug).map_err(|e| e.to_string())?;
+    let artifacts = studio_artifacts::Artifact::list(&proj).map_err(|e| e.to_string())?;
+    let graph =
+        studio_artifacts::build_project_graph(ws, &proj, &artifacts).map_err(|e| e.to_string())?;
+
+    // Optional focus / depth filtering
+    let focus = arg(args, "focus").map(studio_artifacts::normalize_ref);
+    let depth = args
+        .get("depth")
+        .and_then(Value::as_u64)
+        .unwrap_or(u64::MAX) as usize;
+
+    if let Some(focus_id) = focus {
+        // Collect subgraph around focus_id within depth
+        let mut included: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        included.insert(focus_id.clone());
+
+        for _ in 0..depth {
+            let mut newly_added = Vec::new();
+            for edge in &graph.edges {
+                let from_norm = studio_artifacts::normalize_ref(&edge.from);
+                let to_norm = studio_artifacts::normalize_ref(&edge.to);
+                if included.contains(&from_norm) || included.contains(&edge.from) {
+                    newly_added.push(to_norm.clone());
+                    newly_added.push(edge.to.clone());
+                }
+                if included.contains(&to_norm) || included.contains(&edge.to) {
+                    newly_added.push(from_norm);
+                    newly_added.push(edge.from.clone());
+                }
+            }
+            if newly_added.is_empty() {
+                break;
+            }
+            for item in newly_added {
+                included.insert(item);
+            }
+        }
+
+        let filtered_nodes: Vec<_> = graph
+            .nodes
+            .into_iter()
+            .filter(|n| {
+                included.contains(&n.id)
+                    || included.contains(&studio_artifacts::normalize_ref(&n.id))
+            })
+            .collect();
+
+        let filtered_edges: Vec<_> = graph
+            .edges
+            .into_iter()
+            .filter(|e| {
+                (included.contains(&e.from)
+                    || included.contains(&studio_artifacts::normalize_ref(&e.from)))
+                    && (included.contains(&e.to)
+                        || included.contains(&studio_artifacts::normalize_ref(&e.to)))
+            })
+            .collect();
+
+        Ok(json!({
+            "project": project_slug,
+            "nodes": filtered_nodes,
+            "edges": filtered_edges,
+        }))
+    } else {
+        Ok(json!({
+            "project": project_slug,
+            "nodes": graph.nodes,
+            "edges": graph.edges,
+        }))
+    }
+}
+
+fn graph_impact(ws: &Workspace, ctx: &TurnContext, args: &Value) -> Result<Value, String> {
+    let target_ref = required(args, "ref")?;
+    let project_slug = arg(args, "project")
+        .map(String::from)
+        .or_else(|| ctx.project.clone())
+        .ok_or_else(|| "Cần chỉ định slug của project.".to_string())?;
+
+    let proj = Project::open(ws, &project_slug).map_err(|e| e.to_string())?;
+    let artifacts = studio_artifacts::Artifact::list(&proj).map_err(|e| e.to_string())?;
+    let impact = studio_artifacts::calculate_impact(ws, &proj, &artifacts, target_ref);
+
+    Ok(json!({
+        "project": project_slug,
+        "ref": target_ref,
+        "impact": impact,
+    }))
 }
 
 fn artifact_list(ws: &Workspace, project: Option<&str>) -> Result<Value, String> {
@@ -977,14 +1095,7 @@ pub async fn render_artifact_shared(
     }
 
     // Timeline audio is normalized to the loudness target of the first channel that sets one.
-    let loudness_lufs = BrandSet::load(ws).ok().and_then(|set| {
-        artifact
-            .channels
-            .iter()
-            .find_map(|c| set.get_channel(c).and_then(|ch| ch.loudness_lufs))
-            .map(f64::from)
-    });
-    let options = studio_artifacts::RenderOptions { loudness_lufs };
+    let options = studio_artifacts::render_options_for(ws, &artifact);
     let outcome = studio_artifacts::render_with(ws, &p, &artifact, scheduler, &options)
         .await
         .map_err(|e| format!("Render lỗi: {e}"))?;

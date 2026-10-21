@@ -1580,6 +1580,25 @@ pub fn checkpoint_create(state: State<'_, AppState>, label: Option<String>) -> C
     checkpoint_create_impl(&state, label)
 }
 
+pub fn graph_get_impl(state: &AppState, project: String) -> CmdResult<Value> {
+    let ws = state.workspace()?;
+    let p = Project::open(&ws, &project)?;
+    let artifacts =
+        studio_artifacts::Artifact::list(&p).map_err(|e| CmdError::msg(e.to_string()))?;
+    let graph = studio_artifacts::build_project_graph(&ws, &p, &artifacts)
+        .map_err(|e| CmdError::msg(e.to_string()))?;
+    Ok(json!({
+        "project": project,
+        "nodes": graph.nodes,
+        "edges": graph.edges,
+    }))
+}
+
+#[tauri::command]
+pub fn graph_get(state: State<'_, AppState>, project: String) -> CmdResult<Value> {
+    graph_get_impl(&state, project)
+}
+
 pub fn artifact_list_impl(state: &AppState, project: String) -> CmdResult<Vec<Value>> {
     let ws = state.workspace()?;
     let p = Project::open(&ws, &project)?;
