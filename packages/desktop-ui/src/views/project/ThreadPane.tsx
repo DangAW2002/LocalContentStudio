@@ -343,8 +343,25 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
       })
     );
 
+    const handleRestorePinned = async (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && projectSlug) {
+        try {
+          await studioApi.restorePinnedArtifact(projectSlug, detail.artifactId, detail.checkpointId);
+          setUndoToast(`Đã hoàn tác các file của artifact ${detail.artifactId}`);
+          setTimeout(() => setUndoToast(null), 3000);
+        } catch (err: any) {
+          setUndoToast(err?.message || "Lỗi khi hoàn tác artifact");
+          setTimeout(() => setUndoToast(null), 3000);
+        }
+      }
+    };
+    window.addEventListener("studio:restore-pinned", handleRestorePinned);
     window.addEventListener("studio:undo-last-turn", handleUndoLastTurnEvent);
-    return () => window.removeEventListener("studio:undo-last-turn", handleUndoLastTurnEvent);
+    return () => {
+      window.removeEventListener("studio:restore-pinned", handleRestorePinned);
+      window.removeEventListener("studio:undo-last-turn", handleUndoLastTurnEvent);
+    };
   }, [messages, activeThread?.id]);
 
   const handlePermissionRespond = async (requestId: string, allow: boolean) => {

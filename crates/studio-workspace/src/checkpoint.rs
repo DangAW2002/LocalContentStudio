@@ -122,6 +122,72 @@ impl CheckpointService {
     /// Restore workspace to checkpoint state.
     /// Restores content, deletes files created after the checkpoint that are not in it — except skipped dirs.
     pub fn restore(ws: &Workspace, id: &str) -> Result<()> {
+        Self::restore_filtered(ws, id, |_| true).map(|_| ())
+    }
+
+    /// Restore only the files whose workspace-relative path starts with `prefix` (e.g.
+    /// `projects/p/artifacts/a/`): files under it that were added since are removed, the others
+    /// get their checkpoint content back. Returns how many files were written or removed.
+    pub fn restore_under(ws: &Workspace, id: &str, prefix: &str) -> Result<usize> {
+        let prefix = prefix.replace('\\', "/");
+        Self::restore_filtered(ws, id, |rel| rel.replace('\\', "/").starts_with(&prefix))
+    }
+
+    /// The `prefixes` under which the current files differ from checkpoint `id` (added, removed
+    /// or modified), without creating a checkpoint.
+    pub fn changed_under(ws: &Workspace, id: &str, prefixes: &[String]) -> Result<Vec<String>> {
+        let db = WorkspaceDb::open(ws)?;
+        let mut stmt = db.conn().prepare(
+            "SELECT rel_path, blob_sha256 FROM checkpoint_files WHERE checkpoint_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut expected: HashMap<String, String> = HashMap::new();
+        for r in rows {
+            let (rel, sha) = r?;
+            expected.insert(rel.replace('\\', "/"), sha);
+        }
+        let current = Self::scan_source_files(ws)?;
+        let mut changed = Vec::new();
+        for prefix in prefixes {
+            let prefix = prefix.replace('\\', "/");
+            let under = |rel: &str| rel.starts_with(&prefix);
+            let mut differs = false;
+            let mut seen = 0usize;
+            for (rel, abs) in &current {
+                let rel = rel.replace('\\', "/");
+                if !under(&rel) {
+                    continue;
+                }
+                seen += 1;
+                match expected.get(&rel) {
+                    None => differs = true,
+                    Some(sha) => {
+                        if hash_and_read_file(abs)
+                            .map(|(h, _)| &h != sha)
+                            .unwrap_or(true)
+                        {
+                            differs = true;
+                        }
+                    }
+                }
+                if differs {
+                    break;
+                }
+            }
+            if !differs && expected.keys().filter(|r| under(r)).count() != seen {
+                differs = true; // a file of the checkpoint is gone
+            }
+            if differs {
+                changed.push(prefix);
+            }
+        }
+        Ok(changed)
+    }
+
+    fn restore_filtered(ws: &Workspace, id: &str, keep: impl Fn(&str) -> bool) -> Result<usize> {
+        let mut touched = 0usize;
         let db = WorkspaceDb::open(ws)?;
         let blobs_dir = ws.blobs_dir();
 
@@ -153,7 +219,9 @@ impl CheckpointService {
         let mut expected_files: HashMap<String, (String, u64)> = HashMap::new();
         for r in file_rows {
             let (rel, sha, size) = r?;
-            expected_files.insert(rel, (sha, size));
+            if keep(&rel) {
+                expected_files.insert(rel, (sha, size));
+            }
         }
 
         // Current source files
@@ -161,8 +229,11 @@ impl CheckpointService {
 
         // 1. Delete files created after the checkpoint that are not in it (except skipped dirs)
         for (cur_rel, cur_abs) in &current_files {
-            if !expected_files.contains_key(cur_rel) {
-                let _ = fs::remove_file(cur_abs);
+            if keep(cur_rel)
+                && !expected_files.contains_key(cur_rel)
+                && fs::remove_file(cur_abs).is_ok()
+            {
+                touched += 1;
             }
         }
 
@@ -198,9 +269,10 @@ impl CheckpointService {
                 temp_file.sync_all()?;
             }
             fs::rename(&temp_path, &target_path)?;
+            touched += 1;
         }
 
-        Ok(())
+        Ok(touched)
     }
 
     /// Undo a turn at the workspace level:

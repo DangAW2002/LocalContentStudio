@@ -1,6 +1,7 @@
 pub mod captions_required;
 pub mod color;
 pub mod contrast;
+pub mod declared_inputs;
 pub mod dimensions;
 pub mod duration;
 pub mod logo_presence;
@@ -19,6 +20,7 @@ use std::path::{Path, PathBuf};
 pub use captions_required::CaptionsRequiredChecker;
 pub use color::Rgb;
 pub use contrast::ContrastChecker;
+pub use declared_inputs::DeclaredInputsChecker;
 pub use dimensions::DimensionsChecker;
 pub use duration::DurationChecker;
 pub use logo_presence::LogoPresenceChecker;
@@ -190,6 +192,7 @@ impl Default for CheckerRegistry {
         reg.register(Box::new(TextLimitsChecker::new()));
         reg.register(Box::new(CaptionsRequiredChecker::new()));
         reg.register(Box::new(VoiceWordsChecker::new()));
+        reg.register(Box::new(DeclaredInputsChecker::new()));
         reg
     }
 }

@@ -1012,6 +1012,33 @@ export interface GraphEdge {
   role: GraphEdgeRole;
 }
 
+export interface DownstreamStep {
+  id: string;
+  kind: string;
+  title: string;
+  renderer?: string;
+  paid: boolean;
+  estimatedCostUsd?: number | null;
+  pinned: boolean;
+  skipped: boolean;
+  skipReason?: string;
+}
+
+export interface DownstreamPlan {
+  targetRef: string;
+  steps: DownstreamStep[];
+  freeStepsCount: number;
+  paidStepsCount: number;
+  totalEstimatedCostUsd: number;
+}
+
+export interface DownstreamRunResult {
+  executedIds: string[];
+  remainingPaid: DownstreamStep[];
+  skippedPinned: string[];
+  errors: string[];
+}
+
 export interface ContentGraphResponse {
   project: string;
   nodes: GraphNode[];

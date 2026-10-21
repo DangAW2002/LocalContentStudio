@@ -525,7 +525,50 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
         )}
       </div>
 
-      {/* Per-Turn Footer (Usage / Undo) */}
+              {/* Pinned Artifact Warning Banner */}
+        {msg.pinnedWarning && (
+          <div
+            style={{
+              marginTop: 8,
+              padding: "10px 12px",
+              backgroundColor: "var(--cs-status-warning-bg)",
+              border: "1px solid var(--cs-warning)",
+              borderRadius: "var(--cs-radius-control)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--cs-text-xs)", color: "var(--cs-warning)" }}>
+              <Icon name="shield-alert" size={15} color="var(--cs-warning)" />
+              <span style={{ fontWeight: 600 }}>
+                {`Artifact khoá "${msg.pinnedWarning.artifactId}" đã bị thay đổi file trong lượt này.`}
+              </span>
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={async () => {
+                const proj = window.location.pathname.split("/").pop() || "";
+                try {
+                  await (window as any).__studioApi_restorePinned?.(msg.pinnedWarning!.artifactId, msg.pinnedWarning!.checkpointId);
+                } catch {
+                  // Fallback or trigger via event
+                }
+                window.dispatchEvent(
+                  new CustomEvent("studio:restore-pinned", {
+                    detail: msg.pinnedWarning,
+                  })
+                );
+              }}
+            >
+              Hoàn tác phần này
+            </Button>
+          </div>
+        )}
+
+        {/* Per-Turn Footer (Usage / Undo) */}
       <div
         style={{
           display: "flex",
