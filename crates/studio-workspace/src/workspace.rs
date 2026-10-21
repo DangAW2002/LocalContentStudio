@@ -5,6 +5,33 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+/// Turn stall watchdog configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StallWatchdogConfig {
+    /// Silence limit without open tools (default: 10 minutes = 600s).
+    pub stall_after: std::time::Duration,
+    /// Silence limit with open tools (default: 45 minutes = 2700s).
+    pub stall_after_tool: std::time::Duration,
+    /// Watchdog tick interval (default: 15 seconds).
+    pub tick_interval: std::time::Duration,
+    /// Wall-clock jump threshold indicating sleep/resume (default: 2 minutes = 120s).
+    pub wall_jump_threshold: std::time::Duration,
+    /// Grace period after resume before stalling (default: 90 seconds).
+    pub resume_grace: std::time::Duration,
+}
+
+impl Default for StallWatchdogConfig {
+    fn default() -> Self {
+        Self {
+            stall_after: std::time::Duration::from_secs(10 * 60),
+            stall_after_tool: std::time::Duration::from_secs(45 * 60),
+            tick_interval: std::time::Duration::from_secs(15),
+            wall_jump_threshold: std::time::Duration::from_secs(120),
+            resume_grace: std::time::Duration::from_secs(90),
+        }
+    }
+}
+
 /// Workspace metadata in `studio.yaml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceMeta {
@@ -22,6 +49,54 @@ pub struct WorkspaceMeta {
     /// Daily budget in USD
     #[serde(default, alias = "budget_day_usd")]
     pub daily_budget_usd: Option<f64>,
+    /// Turn stall watchdog timeout without open tools (in seconds, default 600s = 10 min)
+    #[serde(default, alias = "stall_after")]
+    pub stall_after_secs: Option<u64>,
+    /// Turn stall watchdog timeout with open tools (in seconds, default 2700s = 45 min)
+    #[serde(default, alias = "stall_after_tool")]
+    pub stall_after_tool_secs: Option<u64>,
+    /// Turn stall watchdog timeout without open tools in milliseconds (test/override)
+    #[serde(default, alias = "stall_after_millis")]
+    pub stall_after_ms: Option<u64>,
+    /// Turn stall watchdog timeout with open tools in milliseconds (test/override)
+    #[serde(default, alias = "stall_after_tool_millis")]
+    pub stall_after_tool_ms: Option<u64>,
+}
+
+impl WorkspaceMeta {
+    /// Resolves the effective stall watchdog configuration with sane clamps.
+    pub fn stall_watchdog_config(&self) -> StallWatchdogConfig {
+        let mut cfg = StallWatchdogConfig::default();
+        if let Some(ms) = self.stall_after_ms {
+            cfg.stall_after = std::time::Duration::from_millis(ms);
+        } else if let Some(secs) = self.stall_after_secs {
+            cfg.stall_after = std::time::Duration::from_secs(secs.clamp(10, 86400));
+        }
+
+        if let Some(ms) = self.stall_after_tool_ms {
+            cfg.stall_after_tool = std::time::Duration::from_millis(ms);
+        } else if let Some(secs) = self.stall_after_tool_secs {
+            cfg.stall_after_tool = std::time::Duration::from_secs(secs.clamp(30, 86400 * 2));
+        }
+
+        cfg
+    }
+}
+
+impl Default for WorkspaceMeta {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            version: default_ws_version(),
+            default_brand: None,
+            monthly_budget_usd: None,
+            daily_budget_usd: None,
+            stall_after_secs: None,
+            stall_after_tool_secs: None,
+            stall_after_ms: None,
+            stall_after_tool_ms: None,
+        }
+    }
 }
 
 fn default_ws_version() -> u32 {
@@ -172,6 +247,7 @@ impl Workspace {
             default_brand: None,
             monthly_budget_usd: None,
             daily_budget_usd: None,
+            ..Default::default()
         };
 
         let yaml = serde_yaml::to_string(&meta)
@@ -392,5 +468,50 @@ impl Workspace {
             }
         }
         Ok(list)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stall_watchdog_config_defaults() {
+        let meta = WorkspaceMeta::default();
+        let cfg = meta.stall_watchdog_config();
+        assert_eq!(cfg.stall_after, std::time::Duration::from_secs(600));
+        assert_eq!(cfg.stall_after_tool, std::time::Duration::from_secs(2700));
+        assert_eq!(cfg.tick_interval, std::time::Duration::from_secs(15));
+        assert_eq!(cfg.wall_jump_threshold, std::time::Duration::from_secs(120));
+        assert_eq!(cfg.resume_grace, std::time::Duration::from_secs(90));
+    }
+
+    #[test]
+    fn test_stall_watchdog_config_clamping_and_ms_override() {
+        // Clamping seconds
+        let yaml = r#"
+name: Test
+stall_after: 2
+stall_after_tool: 5
+"#;
+        let meta: WorkspaceMeta = serde_yaml::from_str(yaml).unwrap();
+        let cfg = meta.stall_watchdog_config();
+        // Clamped to min 10s and min 30s
+        assert_eq!(cfg.stall_after, std::time::Duration::from_secs(10));
+        assert_eq!(cfg.stall_after_tool, std::time::Duration::from_secs(30));
+
+        // Millisecond overrides take precedence without clamping
+        let yaml_ms = r#"
+name: Test
+stall_after_millis: 150
+stall_after_tool_millis: 350
+"#;
+        let meta_ms: WorkspaceMeta = serde_yaml::from_str(yaml_ms).unwrap();
+        let cfg_ms = meta_ms.stall_watchdog_config();
+        assert_eq!(cfg_ms.stall_after, std::time::Duration::from_millis(150));
+        assert_eq!(
+            cfg_ms.stall_after_tool,
+            std::time::Duration::from_millis(350)
+        );
     }
 }

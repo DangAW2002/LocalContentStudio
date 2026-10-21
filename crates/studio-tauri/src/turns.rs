@@ -7,7 +7,7 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 use studio_engine::{DoneStatus, Engine, Event, FileOp, McpHttp, SessionRef, Turn, TurnRequest};
 use studio_mcp::{EngineKind as McpEngine, TurnContext};
-use studio_workspace::{CheckpointService, Project, Workspace, WorkspaceDb};
+use studio_workspace::{CheckpointService, Project, StallWatchdogConfig, Workspace, WorkspaceDb};
 use tokio::sync::Notify;
 
 use crate::error::{CmdError, CmdResult};
@@ -446,19 +446,115 @@ fn materialize_skills(
     Ok(())
 }
 
-struct TurnTask {
-    state: AppState,
-    ws_root: PathBuf,
-    thread_id: String,
-    turn_id: String,
-    engine: String,
-    model: Option<String>,
-    token: String,
-    plugin_dir: Option<PathBuf>,
-    session_key: String,
+/// Clock abstraction for testable time and sleep/resume jump detection.
+pub trait Clock: Send + Sync {
+    /// Monotonic instant for measuring elapsed durations.
+    fn now(&self) -> std::time::Instant;
+    /// Wall-clock system time for detecting sleep/resume jumps.
+    fn wall_now(&self) -> std::time::SystemTime;
 }
 
-async fn run_turn(t: TurnTask, mut turn: Turn, cancel: Arc<Notify>) {
+/// Production clock using system time.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RealClock;
+
+impl Clock for RealClock {
+    fn now(&self) -> std::time::Instant {
+        std::time::Instant::now()
+    }
+
+    fn wall_now(&self) -> std::time::SystemTime {
+        std::time::SystemTime::now()
+    }
+}
+
+/// Mock clock for unit tests that allows explicit advancing of monotonic and wall time.
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub struct MockClock {
+    base_instant: std::time::Instant,
+    offset: Arc<std::sync::Mutex<std::time::Duration>>,
+    base_wall: std::time::SystemTime,
+    wall_offset: Arc<std::sync::Mutex<std::time::Duration>>,
+}
+
+#[cfg(test)]
+impl MockClock {
+    /// Creates a new mock clock initialized to the current system time.
+    pub fn new() -> Self {
+        Self {
+            base_instant: std::time::Instant::now(),
+            offset: Arc::new(std::sync::Mutex::new(std::time::Duration::ZERO)),
+            base_wall: std::time::SystemTime::now(),
+            wall_offset: Arc::new(std::sync::Mutex::new(std::time::Duration::ZERO)),
+        }
+    }
+
+    /// Advances monotonic time by `d`.
+    pub fn advance(&self, d: std::time::Duration) {
+        if let Ok(mut off) = self.offset.lock() {
+            *off += d;
+        }
+    }
+
+    /// Advances wall-clock time by `d` (simulating sleep/resume wall-clock jump).
+    pub fn advance_wall(&self, d: std::time::Duration) {
+        if let Ok(mut woff) = self.wall_offset.lock() {
+            *woff += d;
+        }
+    }
+}
+
+#[cfg(test)]
+impl Default for MockClock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+impl Clock for MockClock {
+    fn now(&self) -> std::time::Instant {
+        let off = self.offset.lock().map(|g| *g).unwrap_or_default();
+        self.base_instant + off
+    }
+
+    fn wall_now(&self) -> std::time::SystemTime {
+        let off = self.wall_offset.lock().map(|g| *g).unwrap_or_default();
+        self.base_wall + off
+    }
+}
+
+pub struct TurnTask {
+    pub state: AppState,
+    pub ws_root: PathBuf,
+    pub thread_id: String,
+    pub turn_id: String,
+    pub engine: String,
+    pub model: Option<String>,
+    pub token: String,
+    pub plugin_dir: Option<PathBuf>,
+    pub session_key: String,
+}
+
+pub async fn run_turn(t: TurnTask, turn: Turn, cancel: Arc<Notify>) {
+    let ws_meta = Workspace::open(&t.ws_root)
+        .ok()
+        .and_then(|ws| ws.meta().ok());
+    let config = ws_meta
+        .as_ref()
+        .map(|m| m.stall_watchdog_config())
+        .unwrap_or_default();
+    run_turn_inner(t, turn, cancel, config, Arc::new(RealClock)).await;
+}
+
+pub async fn run_turn_inner<C: Clock + 'static>(
+    t: TurnTask,
+    mut turn: Turn,
+    cancel: Arc<Notify>,
+    config: StallWatchdogConfig,
+    clock: Arc<C>,
+) {
     // WorkspaceDb is Send but not Sync: keep it behind a mutex across awaits.
     let db = std::sync::Mutex::new(
         Workspace::open(&t.ws_root)
@@ -481,11 +577,28 @@ async fn run_turn(t: TurnTask, mut turn: Turn, cancel: Arc<Notify>) {
     let mut final_status: Option<&'static str> = None;
     let mut cost: Option<f64> = None;
 
+    let mut open_tool_calls: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut last_event_instant = clock.now();
+    let mut last_wall_tick = clock.wall_now();
+    let mut resume_grace_deadline: Option<std::time::Instant> = None;
+
+    let mut watchdog_interval = tokio::time::interval(config.tick_interval);
+    watchdog_interval.tick().await;
+
     loop {
         tokio::select! {
             ev = turn.next_event() => {
                 let Some(ev) = ev else { break };
+                last_event_instant = clock.now();
+                resume_grace_deadline = None;
+
                 match &ev {
+                    Event::ToolCall { id, .. } => {
+                        open_tool_calls.insert(id.clone());
+                    }
+                    Event::ToolResult { id, .. } => {
+                        open_tool_calls.remove(id);
+                    }
                     Event::Session { id } => with_db(&|d| {
                         if get_setting(d, &t.session_key).ok().flatten().is_none() {
                             let _ = set_setting(d, &t.session_key, id);
@@ -518,6 +631,97 @@ async fn run_turn(t: TurnTask, mut turn: Turn, cancel: Arc<Notify>) {
                 emit(&t.state, &t.thread_id, &t.turn_id, &done);
                 save(&done);
                 break;
+            }
+            _ = watchdog_interval.tick() => {
+                let now = clock.now();
+                let wall_now = clock.wall_now();
+
+                // Detect long wall-clock jump (sleep/resume)
+                let wall_gap = wall_now.duration_since(last_wall_tick).unwrap_or(std::time::Duration::ZERO);
+                last_wall_tick = wall_now;
+
+                if wall_gap > config.wall_jump_threshold && resume_grace_deadline.is_none() {
+                    resume_grace_deadline = Some(now + config.resume_grace);
+                }
+
+                let has_pending_perm = t.state.broker.list_pending(Some(&t.thread_id)).iter().any(|p| {
+                    p.get("turnId").and_then(|v| v.as_str()) == Some(&t.turn_id)
+                });
+
+                let has_running_job = {
+                    let snap = t.state.scheduler.snapshot().await;
+                    snap.iter().any(|j| matches!(j, studio_jobs::JobStatus::Running { .. } | studio_jobs::JobStatus::Queued { .. }))
+                };
+
+                let mut is_stalled = false;
+                let mut stall_limit_used = config.stall_after;
+                let mut after_resume = false;
+
+                // After a sleep/resume, a stream that stays silent is most likely dead. Not while a
+                // tool is running though: a render or install keeps going silently after resume.
+                if let Some(deadline) = resume_grace_deadline {
+                    if now >= deadline
+                        && open_tool_calls.is_empty()
+                        && !has_pending_perm
+                        && !has_running_job
+                    {
+                        is_stalled = true;
+                        after_resume = true;
+                    }
+                }
+
+                if !is_stalled {
+                    let limit = if !open_tool_calls.is_empty() {
+                        config.stall_after_tool
+                    } else {
+                        config.stall_after
+                    };
+                    stall_limit_used = limit;
+
+                    let silence_duration = now.duration_since(last_event_instant);
+                    if silence_duration >= limit {
+                        if open_tool_calls.is_empty() {
+                            if !has_pending_perm && !has_running_job {
+                                is_stalled = true;
+                            }
+                        } else if !has_pending_perm {
+                            is_stalled = true;
+                        }
+                    }
+                }
+
+                if is_stalled {
+                    let _ = turn.cancel().await;
+                    final_status = Some("error");
+                    if !text.is_empty() {
+                        save(&json!({ "type": "Text", "text": text }));
+                    }
+
+                    let duration_str = if stall_limit_used.as_secs() >= 60 {
+                        format!("{} phút", stall_limit_used.as_secs() / 60)
+                    } else if stall_limit_used.as_secs() > 0 {
+                        format!("{} giây", stall_limit_used.as_secs())
+                    } else {
+                        format!("{} ms", stall_limit_used.as_millis())
+                    };
+
+                    let stall_msg = if after_resume {
+                        "Lượt không phản hồi sau khi máy thức dậy (kết nối tới engine đã mất) nên đã dừng. Bấm Thử lại để chạy lại lượt.".to_string()
+                    } else {
+                        format!(
+                            "Lượt không phản hồi trong {duration_str} (có thể do máy ngủ hoặc mất mạng) nên đã dừng. Bấm Thử lại để chạy lại lượt."
+                        )
+                    };
+                    let err_ev = json!({ "type": "Error", "message": stall_msg });
+                    emit(&t.state, &t.thread_id, &t.turn_id, &err_ev);
+                    save(&err_ev);
+
+                    let done = json!({ "type": "Done", "status": "error" });
+                    emit(&t.state, &t.thread_id, &t.turn_id, &done);
+                    save(&done);
+
+                    break;
+                }
             }
         }
     }
@@ -662,5 +866,581 @@ mod tests {
         let claude_ctx = build_context(&ws, None, &[], None, true);
         assert!(claude_ctx.contains("Dùng các tool MCP của server \"studio\""));
         assert!(!claude_ctx.contains("call_mcp_tool"));
+    }
+
+    #[cfg(windows)]
+    fn is_process_running(pid: u32) -> bool {
+        let output = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {}", pid)])
+            .output();
+        if let Ok(out) = output {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            stdout.contains(&pid.to_string())
+        } else {
+            false
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn is_process_running(pid: u32) -> bool {
+        let output = std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output();
+        if let Ok(out) = output {
+            out.status.success()
+        } else {
+            false
+        }
+    }
+
+    async fn setup_test_turn_env(
+        turn_id: &str,
+        thread_id: &str,
+    ) -> (
+        tempfile::TempDir,
+        Workspace,
+        WorkspaceDb,
+        AppState,
+        TurnTask,
+        Arc<Notify>,
+    ) {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(tmp.path().join("ws"), "Test WS").unwrap();
+        let db = WorkspaceDb::open(&ws).unwrap();
+        let state = AppState::new();
+        if let Ok(mut cur) = state.current.lock() {
+            *cur = Some(ws.root().to_path_buf());
+        }
+
+        db.conn()
+            .execute(
+                "INSERT INTO threads (id, title, engine, created_at, updated_at) VALUES (?1, 'Test', 'claude', '2026-01-01', '2026-01-01')",
+                params![thread_id],
+            )
+            .unwrap();
+
+        db.conn()
+            .execute(
+                "INSERT INTO turns (id, thread_id, turn_index, user_prompt, status, created_at) VALUES (?1, ?2, 1, 'Hello', 'running', '2026-01-01')",
+                params![turn_id, thread_id],
+            )
+            .unwrap();
+
+        let cancel = Arc::new(Notify::new());
+        if let Ok(mut turns) = state.turns.lock() {
+            turns.insert(
+                turn_id.to_string(),
+                RunningTurn {
+                    thread_id: thread_id.to_string(),
+                    cancel: cancel.clone(),
+                },
+            );
+        }
+
+        let task = TurnTask {
+            state: state.clone(),
+            ws_root: ws.root().to_path_buf(),
+            thread_id: thread_id.to_string(),
+            turn_id: turn_id.to_string(),
+            engine: "claude".to_string(),
+            model: Some("sonnet".to_string()),
+            token: "test-token".to_string(),
+            plugin_dir: None,
+            session_key: format!("thread.session.{thread_id}"),
+        };
+
+        (tmp, ws, db, state, task, cancel)
+    }
+
+    #[tokio::test]
+    async fn test_stall_silence_without_open_tool() {
+        let (_tmp, _ws, db, state, task, cancel) = setup_test_turn_env("turn-a", "thread-a").await;
+        let (_tx, rx) = tokio::sync::mpsc::channel(10);
+        let turn = Turn::mock(rx, None);
+        let clock = Arc::new(MockClock::new());
+        let config = StallWatchdogConfig {
+            stall_after: std::time::Duration::from_secs(600),
+            stall_after_tool: std::time::Duration::from_secs(2700),
+            tick_interval: std::time::Duration::from_millis(10),
+            wall_jump_threshold: std::time::Duration::from_secs(120),
+            resume_grace: std::time::Duration::from_secs(90),
+        };
+
+        let handle = tokio::spawn(run_turn_inner(task, turn, cancel, config, clock.clone()));
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        // Within limit, not stalled
+        clock.advance(std::time::Duration::from_secs(300));
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        let status: String = db
+            .conn()
+            .query_row("SELECT status FROM turns WHERE id = 'turn-a'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "running");
+
+        // Advance past limit (600s)
+        clock.advance(std::time::Duration::from_secs(350));
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .unwrap();
+
+        // Stalled with error
+        let final_status: String = db
+            .conn()
+            .query_row("SELECT status FROM turns WHERE id = 'turn-a'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(final_status, "error");
+
+        let err_payload: String = db
+            .conn()
+            .query_row(
+                "SELECT payload_json FROM events WHERE turn_id = 'turn-a' AND event_type = 'Error' ORDER BY rowid DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(err_payload.contains("Lượt không phản hồi trong 10 phút (có thể do máy ngủ hoặc mất mạng) nên đã dừng. Bấm Thử lại để chạy lại lượt."));
+
+        let has_done: bool = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM events WHERE turn_id = 'turn-a' AND event_type = 'Done'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+            > 0;
+        assert!(has_done);
+
+        // Turn is removed from state.turns
+        assert!(!state.turns.lock().unwrap().contains_key("turn-a"));
+    }
+
+    #[tokio::test]
+    async fn test_stall_open_tool_silence_below_tool_limit_not_stalled() {
+        let (_tmp, _ws, db, _state, task, cancel) = setup_test_turn_env("turn-b", "thread-b").await;
+        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let turn = Turn::mock(rx, None);
+        let clock = Arc::new(MockClock::new());
+        let config = StallWatchdogConfig {
+            stall_after: std::time::Duration::from_secs(600),
+            stall_after_tool: std::time::Duration::from_secs(2700),
+            tick_interval: std::time::Duration::from_millis(10),
+            wall_jump_threshold: std::time::Duration::from_secs(120),
+            resume_grace: std::time::Duration::from_secs(90),
+        };
+
+        let handle = tokio::spawn(run_turn_inner(task, turn, cancel, config, clock.clone()));
+
+        // Tool call starts
+        tx.send(Event::ToolCall {
+            id: "call-1".to_string(),
+            name: "bash".to_string(),
+            input: json!({"cmd": "sleep 10"}),
+        })
+        .await
+        .unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+        // Advance 1000s (> 600s stall_after, but < 2700s stall_after_tool)
+        clock.advance(std::time::Duration::from_secs(1000));
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+
+        let status: String = db
+            .conn()
+            .query_row("SELECT status FROM turns WHERE id = 'turn-b'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "running");
+
+        // Advance past stall_after_tool (> 2700s)
+        clock.advance(std::time::Duration::from_secs(2000));
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .unwrap();
+
+        let final_status: String = db
+            .conn()
+            .query_row("SELECT status FROM turns WHERE id = 'turn-b'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(final_status, "error");
+
+        let err_payload: String = db
+            .conn()
+            .query_row(
+                "SELECT payload_json FROM events WHERE turn_id = 'turn-b' AND event_type = 'Error' ORDER BY rowid DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(err_payload.contains("45 phút"));
+    }
+
+    #[tokio::test]
+    async fn test_stall_pending_permission_not_stalled() {
+        let (_tmp, _ws, db, state, task, cancel) = setup_test_turn_env("turn-c", "thread-c").await;
+        let (_tx, rx) = tokio::sync::mpsc::channel(10);
+        let turn = Turn::mock(rx, None);
+        let clock = Arc::new(MockClock::new());
+        let config = StallWatchdogConfig {
+            stall_after: std::time::Duration::from_secs(600),
+            stall_after_tool: std::time::Duration::from_secs(2700),
+            tick_interval: std::time::Duration::from_millis(10),
+            wall_jump_threshold: std::time::Duration::from_secs(120),
+            resume_grace: std::time::Duration::from_secs(90),
+        };
+
+        // Insert pending permission
+        state
+            .broker
+            .insert_pending_for_test("req-1", "thread-c", "turn-c");
+
+        let handle = tokio::spawn(run_turn_inner(
+            task,
+            turn,
+            cancel.clone(),
+            config,
+            clock.clone(),
+        ));
+
+        // Advance past stall_after (700s)
+        clock.advance(std::time::Duration::from_secs(700));
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+
+        let status: String = db
+            .conn()
+            .query_row("SELECT status FROM turns WHERE id = 'turn-c'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "running");
+
+        // Now cancel clean
+        cancel.notify_one();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn resume_does_not_stop_a_turn_while_a_tool_runs() {
+        let (_tmp, _ws, db, _state, task, cancel) = setup_test_turn_env("turn-r", "thread-r").await;
+        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let turn = Turn::mock(rx, None);
+        let clock = Arc::new(MockClock::new());
+        let config = StallWatchdogConfig {
+            stall_after: std::time::Duration::from_secs(600),
+            stall_after_tool: std::time::Duration::from_secs(2700),
+            tick_interval: std::time::Duration::from_millis(10),
+            wall_jump_threshold: std::time::Duration::from_secs(120),
+            resume_grace: std::time::Duration::from_secs(90),
+        };
+        let handle = tokio::spawn(run_turn_inner(
+            task,
+            turn,
+            cancel.clone(),
+            config,
+            clock.clone(),
+        ));
+        tx.send(Event::ToolCall {
+            id: "render-1".to_string(),
+            name: "bash".to_string(),
+            input: json!({"cmd": "ffmpeg ..."}),
+        })
+        .await
+        .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+        // Sleep/resume while the tool runs, then well past the grace window.
+        clock.advance_wall(std::time::Duration::from_secs(600));
+        clock.advance(std::time::Duration::from_secs(5));
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        clock.advance(std::time::Duration::from_secs(200));
+        tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+
+        let status: String = db
+            .conn()
+            .query_row("SELECT status FROM turns WHERE id = 'turn-r'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "running");
+
+        cancel.notify_one();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_stall_wall_clock_jump_grace_then_stall() {
+        let (_tmp, _ws, db, _state, task, cancel) = setup_test_turn_env("turn-d", "thread-d").await;
+        let (_tx, rx) = tokio::sync::mpsc::channel(10);
+        let turn = Turn::mock(rx, None);
+        let clock = Arc::new(MockClock::new());
+        let config = StallWatchdogConfig {
+            stall_after: std::time::Duration::from_secs(600),
+            stall_after_tool: std::time::Duration::from_secs(2700),
+            tick_interval: std::time::Duration::from_millis(10),
+            wall_jump_threshold: std::time::Duration::from_secs(120),
+            resume_grace: std::time::Duration::from_secs(90),
+        };
+
+        let handle = tokio::spawn(run_turn_inner(task, turn, cancel, config, clock.clone()));
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        // Machine sleeps and wakes: wall clock jumps by 10 minutes (600s), but monotonic only 5s
+        clock.advance_wall(std::time::Duration::from_secs(600));
+        clock.advance(std::time::Duration::from_secs(5));
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+
+        // Grace period (90s) is now active, turn is still running
+        let status: String = db
+            .conn()
+            .query_row("SELECT status FROM turns WHERE id = 'turn-d'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "running");
+
+        // Advance past grace deadline (e.g. 95s total since jump)
+        clock.advance(std::time::Duration::from_secs(95));
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .unwrap();
+
+        let final_status: String = db
+            .conn()
+            .query_row("SELECT status FROM turns WHERE id = 'turn-d'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(final_status, "error");
+    }
+
+    #[tokio::test]
+    async fn test_stall_events_keep_arriving_never_stalled() {
+        let (_tmp, _ws, db, _state, task, cancel) = setup_test_turn_env("turn-e", "thread-e").await;
+        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let turn = Turn::mock(rx, None);
+        let clock = Arc::new(MockClock::new());
+        let config = StallWatchdogConfig {
+            stall_after: std::time::Duration::from_secs(600),
+            stall_after_tool: std::time::Duration::from_secs(2700),
+            tick_interval: std::time::Duration::from_millis(10),
+            wall_jump_threshold: std::time::Duration::from_secs(120),
+            resume_grace: std::time::Duration::from_secs(90),
+        };
+
+        let handle = tokio::spawn(run_turn_inner(task, turn, cancel, config, clock.clone()));
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        // Send events every 300s (below 600s) for multiple cycles
+        for i in 1..=4 {
+            clock.advance(std::time::Duration::from_secs(300));
+            tx.send(Event::TextDelta(format!("chunk {i}\n")))
+                .await
+                .unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+            let status: String = db
+                .conn()
+                .query_row("SELECT status FROM turns WHERE id = 'turn-e'", [], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(status, "running");
+        }
+
+        // Now finish successfully
+        tx.send(Event::Done {
+            status: DoneStatus::Success,
+            text: None,
+        })
+        .await
+        .unwrap();
+        drop(tx);
+
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+            .await
+            .unwrap();
+
+        let final_status: String = db
+            .conn()
+            .query_row("SELECT status FROM turns WHERE id = 'turn-e'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(final_status, "success");
+    }
+
+    #[tokio::test]
+    async fn test_stall_terminates_child_process_tree() {
+        let (_tmp, _ws, db, _state, task, cancel) = setup_test_turn_env("turn-f", "thread-f").await;
+        let (_tx, rx) = tokio::sync::mpsc::channel(10);
+
+        #[cfg(windows)]
+        let mut child = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", "Start-Sleep -Seconds 60"])
+            .spawn()
+            .expect("spawn powershell child");
+
+        #[cfg(not(windows))]
+        let mut child = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("spawn sleep child");
+
+        let pid = child.id();
+        assert!(is_process_running(pid), "Process must be alive initially");
+
+        let turn = Turn::mock(rx, Some(pid));
+        let clock = Arc::new(MockClock::new());
+        let config = StallWatchdogConfig {
+            stall_after: std::time::Duration::from_secs(600),
+            stall_after_tool: std::time::Duration::from_secs(2700),
+            tick_interval: std::time::Duration::from_millis(10),
+            wall_jump_threshold: std::time::Duration::from_secs(120),
+            resume_grace: std::time::Duration::from_secs(90),
+        };
+
+        let handle = tokio::spawn(run_turn_inner(task, turn, cancel, config, clock.clone()));
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        // Advance clock past stall limit
+        clock.advance(std::time::Duration::from_secs(650));
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), handle)
+            .await
+            .unwrap();
+
+        // Give OS a moment to complete termination
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert!(
+            !is_process_running(pid),
+            "Child process must be killed on stall"
+        );
+
+        let status: String = db
+            .conn()
+            .query_row("SELECT status FROM turns WHERE id = 'turn-f'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(status, "error");
+        let _ = child.wait();
+    }
+
+    #[tokio::test]
+    async fn test_stall_integration_fake_engine_script() {
+        let (tmp, _ws, db, _state, task, cancel) = setup_test_turn_env("turn-g", "thread-g").await;
+
+        // Create a fake engine script that outputs one JSON event line then sleeps
+        #[cfg(windows)]
+        let script_path = tmp.path().join("fake_engine.bat");
+        #[cfg(windows)]
+        std::fs::write(
+            &script_path,
+            "@echo off\r\necho {\"type\":\"text\",\"text\":\"batched text event\"}\r\npowershell -NoProfile -Command \"Start-Sleep -Seconds 60\"\r\n",
+        )
+        .unwrap();
+
+        #[cfg(not(windows))]
+        let script_path = tmp.path().join("fake_engine.sh");
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(
+                &script_path,
+                "#!/bin/sh\necho '{\"type\":\"text\",\"text\":\"batched text event\"}'\nsleep 60\n",
+            )
+            .unwrap();
+            let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script_path, perms).unwrap();
+        }
+
+        // Spawn fake engine process directly using Command
+        let mut cmd = tokio::process::Command::new(&script_path);
+        cmd.stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let mut child = cmd.spawn().expect("spawn fake engine");
+        let pid = child.id().expect("child id");
+        assert!(
+            is_process_running(pid),
+            "Fake engine process must be running"
+        );
+
+        let stdout = child.stdout.take().expect("stdout");
+        let (tx, rx) = tokio::sync::mpsc::channel(16);
+
+        // Read stdout line by line and forward Event::Text
+        tokio::spawn(async move {
+            use tokio::io::AsyncBufReadExt;
+            let mut lines = tokio::io::BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                    if v.get("type").and_then(|t| t.as_str()) == Some("text") {
+                        let text = v
+                            .get("text")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let _ = tx.send(Event::Text(text)).await;
+                    }
+                }
+            }
+        });
+
+        let turn = Turn::mock(rx, Some(pid));
+        // Use RealClock with millisecond limits
+        let clock = Arc::new(RealClock);
+        let config = StallWatchdogConfig {
+            stall_after: std::time::Duration::from_millis(300),
+            stall_after_tool: std::time::Duration::from_millis(1500),
+            tick_interval: std::time::Duration::from_millis(30),
+            wall_jump_threshold: std::time::Duration::from_secs(120),
+            resume_grace: std::time::Duration::from_secs(90),
+        };
+
+        let handle = tokio::spawn(run_turn_inner(task, turn, cancel, config, clock));
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(10), handle)
+            .await
+            .unwrap();
+
+        // Process should be terminated
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert!(
+            !is_process_running(pid),
+            "Fake engine child process must be gone after stall"
+        );
+
+        // Turn must end with error
+        let final_status: String = db
+            .conn()
+            .query_row("SELECT status FROM turns WHERE id = 'turn-g'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(final_status, "error");
+
+        let err_payload: String = db
+            .conn()
+            .query_row(
+                "SELECT payload_json FROM events WHERE turn_id = 'turn-g' AND event_type = 'Error' ORDER BY rowid DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(err_payload.contains("Lượt không phản hồi trong"));
+        assert!(err_payload.contains("Bấm Thử lại để chạy lại lượt."));
+        let _ = child.wait().await;
     }
 }

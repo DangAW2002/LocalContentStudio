@@ -74,6 +74,20 @@ impl UiBroker {
         out.sort_by(|a, b| a["createdAt"].as_str().cmp(&b["createdAt"].as_str()));
         out
     }
+
+    /// Inserts a fake pending permission for unit tests.
+    pub fn insert_pending_for_test(&self, request_id: &str, thread_id: &str, turn_id: &str) {
+        let (tx, _rx) = oneshot::channel();
+        let info = json!({
+            "requestId": request_id,
+            "threadId": thread_id,
+            "turnId": turn_id,
+            "createdAt": chrono::Utc::now().to_rfc3339(),
+        });
+        if let Ok(mut m) = self.pending.lock() {
+            m.insert(request_id.to_string(), Pending { tx, info });
+        }
+    }
 }
 
 impl PermissionBroker for UiBroker {

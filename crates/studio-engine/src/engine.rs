@@ -19,7 +19,7 @@ pub const SUPPORTED_AGY_VERSION: &str = "1.4.0";
 
 /// A turn whose engine prints nothing for this long is treated as hung and killed.
 /// Generous on purpose: long tool runs (renders, installs) can be silent for minutes.
-pub const TURN_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+pub const TURN_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120 * 60);
 
 /// Number of trailing stderr lines kept for error reports.
 const STDERR_TAIL_LINES: usize = 20;
@@ -45,6 +45,21 @@ pub struct Turn {
 }
 
 impl Turn {
+    /// Returns the OS process ID of the running engine, if spawned.
+    pub fn child_pid(&self) -> Option<u32> {
+        self.child_pid
+    }
+
+    /// Creates a mock/fake Turn for testing with a given event receiver and optional child PID.
+    pub fn mock(receiver: mpsc::Receiver<Event>, child_pid: Option<u32>) -> Self {
+        Self {
+            receiver,
+            child_pid,
+            is_cancelled: Arc::new(AtomicBool::new(false)),
+            temp_files: Vec::new(),
+        }
+    }
+
     /// Receives the next normalized event from the running engine.
     /// Returns `None` when the engine process has exited and all events have been yielded.
     pub async fn next_event(&mut self) -> Option<Event> {
