@@ -1,5 +1,6 @@
 import React from "react";
 import { Tabs } from "@studio/design-system";
+import { APP_VERSION } from "../version";
 import { EnginesSection } from "./settings/EnginesSection";
 import { ToolsSection } from "./settings/ToolsSection";
 import { VoicesSection } from "./settings/VoicesSection";
@@ -59,9 +60,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ initialTab = "engine
         }}
       >
         <div>
-          <h1 style={{ margin: "0 0 4px 0", fontSize: "var(--cs-text-lg)", fontWeight: 700 }}>
-            Tools & Cài đặt Hệ thống
-          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--cs-space-2)" }}>
+            <h1 style={{ margin: "0 0 4px 0", fontSize: "var(--cs-text-lg)", fontWeight: 700 }}>
+              Tools & Cài đặt Hệ thống
+            </h1>
+            <span
+              style={{
+                fontSize: "var(--cs-text-xs)",
+                color: "var(--cs-fg-muted)",
+                padding: "1px 6px",
+                borderRadius: "var(--cs-radius-control)",
+                backgroundColor: "var(--cs-bg-subtle)",
+                fontFamily: "var(--cs-font-mono)",
+                marginBottom: 4,
+              }}
+            >
+              v{APP_VERSION}
+            </span>
+          </div>
           <p style={{ margin: 0, fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)" }}>
             Kiểm tra phụ thuộc ngoài, catalog kỹ năng và dung lượng lưu trữ cục bộ.
           </p>
