@@ -36,18 +36,18 @@ Khoá chỉ lưu trong Windows Credential Manager trên máy bạn, không bao g
 
 ## Bước 5 — Nạp vào Studio và kết nối
 
-1. Studio → **Tools & Cài đặt → Khoá API & Endpoint** (sắp có mục riêng **Tài khoản đăng bài**).
-2. Nạp tệp JSON, hoặc điền tay 2 khoá `YOUTUBE_CLIENT_ID` và `YOUTUBE_CLIENT_SECRET`.
+1. Studio → **Tools & Cài đặt (`Ctrl+5`) → Tài khoản đăng bài** (mục **YouTube**).
+2. Nạp tệp JSON tải về từ Google Cloud, hoặc điền tay 2 khoá `YOUTUBE_CLIENT_ID` và `YOUTUBE_CLIENT_SECRET`.
 3. Bấm **Kết nối YouTube**. Trình duyệt mở trang Google:
    - chọn đúng tài khoản sở hữu kênh;
    - màn "Google chưa xác minh ứng dụng này" → **Tiếp tục** (bình thường vì app ở chế độ Testing và do chính bạn tạo);
    - tick các quyền YouTube → **Tiếp tục**.
 4. Trình duyệt báo kết nối thành công → quay lại Studio. Bạn có 5 phút cho bước này; **đừng tắt Studio** khi đang đăng nhập.
-5. Xoá tệp `client_secret_….json` trong Downloads (khoá đã nằm trong Credential Manager).
+5. Xoá tệp `client_secret_….json` trong Downloads (khoá đã nằm an toàn trong Windows Credential Manager).
 
 ## Đăng video
 
-Thành phẩm → **Đăng…** → chọn YouTube, điền tiêu đề/mô tả/thẻ (có bộ đếm ký tự theo kênh), chọn chế độ hiển thị
+Thành phẩm (Outputs) → **Đăng…** → chọn YouTube, điền tiêu đề/mô tả/thẻ (có bộ đếm ký tự theo kênh), chọn chế độ hiển thị
 (mặc định **Riêng tư**) → **Tiếp tục xác nhận** → kiểm lại tệp và quyền riêng tư → **Xác nhận đăng lên YouTube**.
 
 - Agent chỉ được **chuẩn bị bản nháp**; chỉ bạn mới bấm đăng.
