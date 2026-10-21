@@ -222,7 +222,7 @@ fn test_migrations_idempotency_and_backup() {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
     }
 
     // Second open must be idempotent
@@ -234,7 +234,7 @@ fn test_migrations_idempotency_and_backup() {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
     }
 }
 
@@ -277,7 +277,7 @@ fn test_migrations_upgrade_from_v2() {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
 
         // Verify artifact_checks table exists
         let table_exists: i64 = db
@@ -333,6 +333,10 @@ kind: design
 title: Thumbnail Video Demo
 channels: [youtube, facebook]
 source: index.html
+inputs:
+- artifact:script-01
+- ref: artifact:nv-an
+  role: reference
 ";
     fs::write(art_dir.join("artifact.yaml"), art_yaml).unwrap();
     fs::write(
@@ -376,6 +380,28 @@ source: index.html
             )
             .unwrap();
         assert_eq!(asset_count, 1);
+
+        // Edges count
+        let edge_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_edges WHERE project='demo-proj' AND from_id='thumb-01'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(edge_count, 2);
+
+        // Verify edge roles
+        let ref_role: String = db
+            .conn()
+            .query_row(
+                "SELECT role FROM artifact_edges WHERE project='demo-proj' AND from_id='thumb-01' AND to_ref='artifact:nv-an'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ref_role, "reference");
 
         // FTS search
         let fts_count: i64 = db

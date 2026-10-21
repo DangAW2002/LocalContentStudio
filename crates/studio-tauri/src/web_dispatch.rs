@@ -322,6 +322,10 @@ pub async fn dispatch_invoke(
             let res = commands::artifact_list_impl(state, project)?;
             Ok(serde_json::to_value(res)?)
         }
+        "graph_get" => {
+            let project: String = get_arg(&args, "project")?;
+            commands::graph_get_impl(state, project)
+        }
         "artifact_render" => {
             let project: String = get_arg(&args, "project")?;
             let id: String = get_arg(&args, "id").or_else(|_| get_arg(&args, "path"))?;

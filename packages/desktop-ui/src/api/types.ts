@@ -960,3 +960,32 @@ export interface WebConfigureRequest {
   port?: number;
   password?: string;
 }
+
+// ==========================================
+// Content Graph Types (ADR-011)
+// ==========================================
+
+export type GraphNodeStatus = "moi" | "loi_thoi" | "chua_render" | "loi";
+
+export type GraphEdgeRole = "uses" | "reference" | "variant_of";
+
+export interface GraphNode {
+  id: string;
+  kind: string;
+  title: string;
+  status: GraphNodeStatus;
+  pinned: boolean;
+  notes: string[];
+}
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+  role: GraphEdgeRole;
+}
+
+export interface ContentGraphResponse {
+  project: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
