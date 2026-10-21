@@ -1215,3 +1215,305 @@ async fn real_timeline_overlay_does_not_extend_duration_beyond_base_track() {
         "Duration {duration} should match base track (3.0s), not overlay (15.0s)"
     );
 }
+
+#[test]
+fn test_timeline_build_validation_and_rejection() {
+    let (_tmp, ws, _proj) = create_test_env();
+
+    // 1. Missing audio file
+    let params_missing = TimelineBuildParams {
+        project: "test-proj".into(),
+        artifact: "video".into(),
+        segments: vec![SegmentInput {
+            audio: "projects/test-proj/missing.wav".into(),
+            text: "Phân cảnh thử nghiệm".into(),
+            visual: "color:#FF0000".into(),
+        }],
+        lead_s: 0.5,
+        gap_s: 0.4,
+        tail_s: 1.5,
+        transition: "fade".into(),
+        captions: "sentences".into(),
+        overlays: vec![],
+        brand: None,
+        channels: vec!["youtube".into()],
+        width: None,
+        height: None,
+        fps: None,
+        min_duration_s: None,
+    };
+    let err = build_timeline(&ws, params_missing).unwrap_err();
+    assert!(
+        err.contains("Không tìm thấy tệp"),
+        "Expected missing file error, got: {err}"
+    );
+
+    // 2. Path escape (outside workspace)
+    let params_escape = TimelineBuildParams {
+        project: "test-proj".into(),
+        artifact: "video".into(),
+        segments: vec![SegmentInput {
+            audio: "../../outside.wav".into(),
+            text: "Thoát workspace".into(),
+            visual: "color:#FF0000".into(),
+        }],
+        lead_s: 0.5,
+        gap_s: 0.4,
+        tail_s: 1.5,
+        transition: "fade".into(),
+        captions: "sentences".into(),
+        overlays: vec![],
+        brand: None,
+        channels: vec!["youtube".into()],
+        width: None,
+        height: None,
+        fps: None,
+        min_duration_s: None,
+    };
+    let err = build_timeline(&ws, params_escape.clone()).unwrap_err();
+    assert!(
+        err.contains("nằm ngoài workspace") || err.contains("không hợp lệ"),
+        "Expected path escape error, got: {err}"
+    );
+
+    // 3. Artifact id that would leave the artifacts directory
+    let mut bad_id = params_escape.clone();
+    bad_id.artifact = "../../escaped".into();
+    let err = build_timeline(&ws, bad_id).unwrap_err();
+    assert!(err.contains("ID artifact"), "Expected id error, got: {err}");
+    assert!(!_proj.root().join("escaped").exists());
+
+    // 4. An existing artifact of another kind is not overwritten
+    let design_dir = _proj.artifacts_dir().join("thumb");
+    std::fs::create_dir_all(&design_dir).unwrap();
+    let yaml = "id: thumb\nkind: design\ntitle: Thumb\nsource: index.html\n";
+    std::fs::write(design_dir.join("artifact.yaml"), yaml).unwrap();
+    let wav = _proj.root().join("tone.wav");
+    if let Some(bin) = probe_ffmpeg().path {
+        let ok = std::process::Command::new(bin)
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=duration=1",
+                "-loglevel",
+                "error",
+            ])
+            .arg(&wav)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            let mut overwrite = params_escape;
+            overwrite.artifact = "thumb".into();
+            overwrite.segments[0].audio = "projects/test-proj/tone.wav".into();
+            let err = build_timeline(&ws, overwrite).unwrap_err();
+            assert!(err.contains("đã tồn tại với loại"), "got: {err}");
+            assert_eq!(
+                std::fs::read_to_string(design_dir.join("artifact.yaml")).unwrap(),
+                yaml
+            );
+            assert!(!design_dir.join("timeline.json").exists());
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "builds then renders with timeline_build and checks MP4 duration"]
+async fn real_timeline_build_then_render_checks_duration() {
+    let ffmpeg_report = probe_ffmpeg();
+    let ffprobe_report = probe_ffprobe();
+    if !ffmpeg_report.available || !ffprobe_report.available {
+        println!(
+            "SKIP: real_timeline_build_then_render_checks_duration — FFmpeg or FFprobe missing"
+        );
+        return;
+    }
+
+    let (_tmp, ws, proj) = create_test_env();
+    let scheduler = create_test_scheduler();
+    let ffmpeg_bin = ffmpeg_report.path.unwrap();
+
+    // 1. Generate 2 test WAV files: 2.0s and 3.0s
+    let wav1 = proj.root().join("vo1.wav");
+    let wav2 = proj.root().join("vo2.wav");
+
+    let status1 = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=2",
+            "-ar",
+            "22050",
+            "-ac",
+            "1",
+            wav1.to_str().unwrap(),
+        ])
+        .output()
+        .expect("generate wav1");
+    assert!(status1.status.success());
+
+    let status2 = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:duration=3",
+            "-ar",
+            "22050",
+            "-ac",
+            "1",
+            wav2.to_str().unwrap(),
+        ])
+        .output()
+        .expect("generate wav2");
+    assert!(status2.status.success());
+
+    // 2. Generate 1 logo PNG for overlay
+    let logo = proj.root().join("logo.png");
+    let status_logo = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=yellow:s=200x80:d=1:r=30",
+            "-vframes",
+            "1",
+            logo.to_str().unwrap(),
+        ])
+        .output()
+        .expect("generate logo");
+    assert!(status_logo.status.success());
+
+    // 3. Build timeline: 2 segments (lead_s=0.5, gap_s=0.4, tail_s=1.5)
+    // Audio 1: 2.0s, Audio 2: 3.0s
+    // Starts: 0.5, 0.5 + 2.0 + 0.4 = 2.9
+    // End = 2.9 + 3.0 + 1.5 = 7.4s
+    let params = TimelineBuildParams {
+        project: "test-proj".into(),
+        artifact: "video".into(),
+        segments: vec![
+            SegmentInput {
+                audio: "projects/test-proj/vo1.wav".into(),
+                text: "Xin chào các bạn đã đến với kênh.".into(),
+                visual: "color:#1E88E5".into(),
+            },
+            SegmentInput {
+                audio: "projects/test-proj/vo2.wav".into(),
+                text: "Hôm nay chúng ta cùng tìm hiểu cách làm video hoàn toàn tự động nhé.".into(),
+                visual: "color:#43A047".into(),
+            },
+        ],
+        lead_s: 0.5,
+        gap_s: 0.4,
+        tail_s: 1.5,
+        transition: "fade".into(),
+        captions: "sentences".into(),
+        overlays: vec![OverlayInput {
+            source: "projects/test-proj/logo.png".into(),
+            x: Some(40),
+            y: Some(40),
+            width: Some(200),
+            height: None,
+            opacity: Some(0.85),
+            start: None,
+            duration: None,
+        }],
+        brand: None,
+        channels: vec!["youtube".into()],
+        width: Some(1280),
+        height: Some(720),
+        fps: Some(30.0),
+        min_duration_s: None,
+    };
+
+    let build_res = build_timeline(&ws, params).expect("build timeline failed");
+    assert_eq!(build_res.artifact, "video");
+    assert_eq!(build_res.duration_s, 7.4);
+    assert_eq!(build_res.segments.len(), 2);
+    assert!(build_res.captions_count >= 2);
+
+    // 4. Verify artifact.yaml and timeline.json were written
+    let artifact = Artifact::load(&proj, "video").expect("load created artifact");
+    assert_eq!(artifact.kind, "timeline");
+    assert_eq!(artifact.source, "timeline.json");
+
+    let tl_json_path = proj.artifacts_dir().join("video").join("timeline.json");
+    assert!(tl_json_path.exists());
+
+    // Verify determinism: re-running produces byte-identical output
+    let first_bytes = std::fs::read(&tl_json_path).unwrap();
+    let _ = build_timeline(
+        &ws,
+        TimelineBuildParams {
+            project: "test-proj".into(),
+            artifact: "video".into(),
+            segments: vec![
+                SegmentInput {
+                    audio: "projects/test-proj/vo1.wav".into(),
+                    text: "Xin chào các bạn đã đến với kênh.".into(),
+                    visual: "color:#1E88E5".into(),
+                },
+                SegmentInput {
+                    audio: "projects/test-proj/vo2.wav".into(),
+                    text: "Hôm nay chúng ta cùng tìm hiểu cách làm video hoàn toàn tự động nhé."
+                        .into(),
+                    visual: "color:#43A047".into(),
+                },
+            ],
+            lead_s: 0.5,
+            gap_s: 0.4,
+            tail_s: 1.5,
+            transition: "fade".into(),
+            captions: "sentences".into(),
+            overlays: vec![OverlayInput {
+                source: "projects/test-proj/logo.png".into(),
+                x: Some(40),
+                y: Some(40),
+                width: Some(200),
+                height: None,
+                opacity: Some(0.85),
+                start: None,
+                duration: None,
+            }],
+            brand: None,
+            channels: vec!["youtube".into()],
+            width: Some(1280),
+            height: Some(720),
+            fps: Some(30.0),
+            min_duration_s: None,
+        },
+    )
+    .unwrap();
+    let second_bytes = std::fs::read(&tl_json_path).unwrap();
+    assert_eq!(
+        first_bytes, second_bytes,
+        "timeline.json must be byte-identical on repeated runs"
+    );
+
+    // 5. Render with render_with
+    let options = RenderOptions {
+        loudness_lufs: None,
+    };
+    let outcome = render_with(&ws, &proj, &artifact, &scheduler, &options)
+        .await
+        .expect("render timeline");
+    assert_eq!(outcome.outputs.len(), 1);
+    let mp4_file = &outcome.outputs[0];
+    assert!(mp4_file.exists());
+
+    // 6. Validate output MP4 duration
+    let meta = validate_video(mp4_file, None, Some(7.0)).expect("validate output video");
+    assert!(
+        (meta.duration_seconds - 7.4).abs() < 0.25,
+        "Rendered MP4 duration ({}) should match timeline total duration (7.4s)",
+        meta.duration_seconds
+    );
+    assert_eq!(meta.width, 1280);
+    assert_eq!(meta.height, 720);
+}

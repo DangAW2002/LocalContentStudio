@@ -20,6 +20,7 @@ tokio = { workspace = true }
 
 studio-workspace = { path = "../studio-workspace" }
 studio-jobs = { path = "../studio-jobs" }
+studio-brand = { path = "../studio-brand" }
 
 [dev-dependencies]
 tempfile = { workspace = true }

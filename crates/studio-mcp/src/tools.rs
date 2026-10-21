@@ -42,6 +42,57 @@ pub fn definitions() -> Vec<Value> {
         tool("capability_run", "Chạy một capability qua provider đã chọn (hoặc mặc định, có dự phòng).", json!({ "capability": s("vd tts.synthesize@1"), "provider": s("id tool, tùy chọn"), "input": { "type": "object" } }), &["capability", "input"]),
         tool("check_run", "Kiểm artifact theo Brand và kênh (hãy render trước rồi kiểm tra — render first, then check).", json!({ "artifact_dir": s("thư mục artifact tương đối"), "brand": s("slug brand"), "channels": { "type": "array", "items": { "type": "string" } }, "renders": { "type": "array", "items": { "type": "string" } } }), &["artifact_dir", "brand", "channels"]),
         tool(
+            "timeline_build",
+            "Dựng timeline video tự động từ kịch bản, âm thanh TTS và hình ảnh b-roll. Tạo artifact.yaml và timeline.json với căn thời gian chuẩn xác, chia phụ đề theo câu, hỗ trợ lớp phủ (logo) và chuyển cảnh.",
+            json!({
+                "project": s("Slug của project (vd ca-phe-phin)"),
+                "artifact": s("ID của artifact timeline cần tạo/ghi đè (vd video)"),
+                "segments": json!({
+                    "type": "array",
+                    "description": "Danh sách các phân cảnh: audio (đường dẫn WAV/MP3), text (lời thoại kịch bản), visual (đường dẫn ảnh/video hoặc 'color:#RRGGBB')",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "audio": s("Đường dẫn tệp âm thanh tương đối trong workspace"),
+                            "text": s("Lời thoại kịch bản của phân cảnh để tạo phụ đề"),
+                            "visual": s("Đường dẫn ảnh/video tương đối trong workspace, hoặc mã màu 'color:#RRGGBB'")
+                        },
+                        "required": ["audio", "text", "visual"]
+                    }
+                }),
+                "lead_s": json!({ "type": "number", "description": "Thời gian đệm đầu video (mặc định 0.5 giây)" }),
+                "gap_s": json!({ "type": "number", "description": "Khoảng cách giữa các phân cảnh âm thanh (mặc định 0.4 giây)" }),
+                "tail_s": json!({ "type": "number", "description": "Thời gian đệm đuôi video (mặc định 1.5 giây)" }),
+                "transition": json!({ "type": "string", "enum": ["fade", "none"], "description": "Hiệu ứng chuyển cảnh giữa các clip hình ảnh (mặc định 'fade' 0.5s)" }),
+                "captions": json!({ "type": "string", "enum": ["sentences", "none"], "description": "Chế độ tạo phụ đề: 'sentences' (mặc định) hoặc 'none'" }),
+                "overlays": json!({
+                    "type": "array",
+                    "description": "Các lớp phủ (vd logo PNG): source, x, y, width, height, opacity, start?, duration?",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source": s("Đường dẫn tệp lớp phủ PNG/ảnh tương đối trong workspace"),
+                            "x": json!({ "type": "integer", "description": "Tọa độ X tính từ góc trên-trái (px)" }),
+                            "y": json!({ "type": "integer", "description": "Tọa độ Y tính từ góc trên-trái (px)" }),
+                            "width": json!({ "type": "integer", "description": "Chiều rộng co giãn (px)" }),
+                            "height": json!({ "type": "integer", "description": "Chiều cao co giãn (px)" }),
+                            "opacity": json!({ "type": "number", "description": "Độ mờ từ 0.0 đến 1.0" }),
+                            "start": json!({ "type": "number", "description": "Thời điểm bắt đầu xuất hiện (giây, mặc định 0)" }),
+                            "duration": json!({ "type": "number", "description": "Thời lượng xuất hiện (giây, mặc định toàn bộ video)" })
+                        },
+                        "required": ["source"]
+                    }
+                }),
+                "brand": s("Slug của brand (tùy chọn)"),
+                "channels": json!({ "type": "array", "items": { "type": "string" }, "description": "Danh sách kênh đích (vd ['youtube'])" }),
+                "width": json!({ "type": "integer", "description": "Chiều rộng khung hình (mặc định lấy theo kênh, hoặc 1920)" }),
+                "height": json!({ "type": "integer", "description": "Chiều cao khung hình (mặc định lấy theo kênh, hoặc 1080)" }),
+                "fps": json!({ "type": "number", "description": "Tốc độ khung hình (mặc định lấy theo kênh, hoặc 30.0)" }),
+                "min_duration_s": json!({ "type": "number", "description": "Thời lượng tối thiểu của video (kéo dài phần đệm đuôi nếu chưa đạt)" })
+            }),
+            &["project", "artifact", "segments"]
+        ),
+        tool(
             "publish_prepare",
             "Chuẩn bị bản nháp đăng tải (YouTube, Facebook, TikTok, Instagram, Export). Kiểm tra giới hạn kênh và bản render mới nhất, tạo bản nháp chờ người dùng xác nhận trên desktop.",
             json!({
@@ -294,6 +345,9 @@ pub async fn call(
             render_artifact_shared(&ws, &state.scheduler, &proj, &id, format_raw).await?
         }
         "check_run" => check_run(&ws, args)?,
+        "timeline_build" => {
+            studio_artifacts::timeline_build::build_timeline_tool(&ws, args).await?
+        }
         "publish_prepare" => {
             let artifact_raw = required(args, "artifact")?;
             let project_raw = arg(args, "project");

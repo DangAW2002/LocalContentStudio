@@ -86,10 +86,16 @@ const CATALOG: &str = include_str!("../../../catalog/catalog.yaml");
 
 /// Shipped contents of defaults that changed later (path, sha256 without CR bytes). A file from an
 /// install that predates the manifest and still matches one of these was never edited by the user.
-const LEGACY_SHIPPED: &[(&str, &str)] = &[(
-    "channels/youtube.yaml",
-    "fea796d96bdc29797967054bd3672d1b88a2a45b37bdbef6558fbbfe8d78b32f",
-)];
+const LEGACY_SHIPPED: &[(&str, &str)] = &[
+    (
+        "channels/youtube.yaml",
+        "fea796d96bdc29797967054bd3672d1b88a2a45b37bdbef6558fbbfe8d78b32f",
+    ),
+    (
+        "playbooks/thumbnail.md",
+        "64602f642ab04c8602d566635c17a955523cc93e0d3b8a8a586105b993f15dc2",
+    ),
+];
 
 /// Records which default contents were installed, so unedited files can follow later releases.
 const MANIFEST: &str = ".studio-defaults.json";
