@@ -4496,7 +4496,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "studio-artifacts"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "hex",
@@ -4517,7 +4517,7 @@ dependencies = [
 
 [[package]]
 name = "studio-brand"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hex",
  "image",
@@ -4535,7 +4535,7 @@ dependencies = [
 
 [[package]]
 name = "studio-catalog"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "deunicode",
  "serde",
@@ -4548,7 +4548,7 @@ dependencies = [
 
 [[package]]
 name = "studio-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4562,7 +4562,7 @@ dependencies = [
 
 [[package]]
 name = "studio-engine"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4574,7 +4574,7 @@ dependencies = [
 
 [[package]]
 name = "studio-jobs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4587,7 +4587,7 @@ dependencies = [
 
 [[package]]
 name = "studio-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "chrono",
@@ -4615,7 +4615,7 @@ dependencies = [
 
 [[package]]
 name = "studio-tauri"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "hex",
@@ -4648,7 +4648,7 @@ dependencies = [
 
 [[package]]
 name = "studio-tools"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -4675,7 +4675,7 @@ dependencies = [
 
 [[package]]
 name = "studio-web"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "argon2",
  "axum",
@@ -4710,7 +4710,7 @@ dependencies = [
 
 [[package]]
 name = "studio-workspace"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "hex",

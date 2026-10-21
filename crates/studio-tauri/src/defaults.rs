@@ -233,4 +233,38 @@ mod tests {
         // Not a known shipped version → treated as a user edit and kept.
         assert_eq!(std::fs::read_to_string(&yt).unwrap(), legacy);
     }
+
+    #[test]
+    fn test_install_defaults_over_0_1_0_shared_dir_preserves_user_edits() {
+        let tmp = tempfile::tempdir().unwrap();
+        let shared = tmp.path().join("shared");
+        let catalog = tmp.path().join("catalog/catalog.yaml");
+        let sources = tmp.path().join("catalog/sources");
+
+        let legacy_youtube_0_1_0 = "id: \"youtube\"\nplatform: \"youtube\"\ntitle: \"YouTube Video Chuẩn\"\nformats:\n  - name: \"standard\"\n    width: 1920\n    height: 1080\n    aspect: \"16:9\"\n    fps: 30.0\n    safe_zone:\n      top: 0.05\n      bottom: 0.05\n      left: 0.05\n      right: 0.05\ntext:\n  title_max: 100\n  description_max: 5000\n  hashtags_max: 15\ncaptions_required: false\nloudness_lufs: -14.0\nfile:\n  containers: [\"mp4\", \"mov\"]\n  max_size_mb: 128000\nnotes: \"Chuẩn video ngang 16:9 cho YouTube dài.\"\n";
+        assert_eq!(
+            content_hash(legacy_youtube_0_1_0.as_bytes()),
+            LEGACY_SHIPPED[0].1
+        );
+
+        let yt_path = shared.join("channels/youtube.yaml");
+        std::fs::create_dir_all(yt_path.parent().unwrap()).unwrap();
+        std::fs::write(&yt_path, legacy_youtube_0_1_0).unwrap();
+
+        let voice_path = shared.join("brands/example/voice.md");
+        std::fs::create_dir_all(voice_path.parent().unwrap()).unwrap();
+        let user_custom_voice =
+            "# Giong doc rieng cua toi — da chinh sua\nPhong cach than thien, am ap.\n";
+        std::fs::write(&voice_path, user_custom_voice).unwrap();
+
+        install(&shared, &catalog, &sources).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&yt_path).unwrap(), youtube());
+        assert_eq!(
+            std::fs::read_to_string(&voice_path).unwrap(),
+            user_custom_voice
+        );
+        assert!(shared.join("playbooks/youtube-video.md").exists());
+        assert!(shared.join(MANIFEST).exists());
+    }
 }
