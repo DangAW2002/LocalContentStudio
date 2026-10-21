@@ -53,6 +53,54 @@ pub async fn render(
     .await
 }
 
+/// Render options that follow from the workspace: the loudness target of the first channel of the
+/// artifact that sets one (timeline audio is normalized to it).
+pub fn render_options_for(workspace: &Workspace, artifact: &Artifact) -> RenderOptions {
+    let loudness_lufs = studio_brand::BrandSet::load(workspace)
+        .ok()
+        .and_then(|set| {
+            artifact
+                .channels
+                .iter()
+                .find_map(|c| set.get_channel(c).and_then(|ch| ch.loudness_lufs))
+                .map(f64::from)
+        });
+    RenderOptions { loudness_lufs }
+}
+
+/// Renderer used for `artifact`: its own `renderer`, else the kind's default.
+pub fn effective_renderer(artifact: &Artifact) -> String {
+    artifact
+        .renderer
+        .clone()
+        .or_else(|| KindRegistry::get(&artifact.kind).and_then(|k| k.renderer))
+        .unwrap_or_else(|| "default".into())
+}
+
+/// Render cache key: the input hash plus the options that change the output. Anything that
+/// compares against stored renders (cache lookup, staleness) must use this.
+pub fn render_cache_key(
+    workspace: &Workspace,
+    project: &Project,
+    artifact: &Artifact,
+    options: &RenderOptions,
+) -> Result<String> {
+    let brand_version = artifact.brand.as_deref().unwrap_or("default@1");
+    let renderer_id = effective_renderer(artifact);
+    let mut full_hash =
+        compute_input_hash(workspace, project, artifact, brand_version, &renderer_id)?;
+    // The channel loudness target changes the timeline output, so it is part of the cache key.
+    if renderer_id == "render.timeline_ffmpeg@1" {
+        if let Some(lufs) = options.loudness_lufs {
+            use sha2::{Digest, Sha256};
+            full_hash = hex::encode(Sha256::digest(
+                format!("{full_hash}|loudness={lufs}").as_bytes(),
+            ));
+        }
+    }
+    Ok(full_hash)
+}
+
 /// Orchestrate rendering an artifact:
 /// 1. Resolve brand version and renderer version.
 /// 2. Compute deterministic input hash.
@@ -68,13 +116,7 @@ pub async fn render_with(
     scheduler: &Scheduler,
     options: &RenderOptions,
 ) -> Result<RenderOutcome> {
-    let brand_version = artifact.brand.as_deref().unwrap_or("default@1");
-    let renderer_id = artifact
-        .renderer
-        .clone()
-        // artifact.yaml may omit `renderer`: fall back to the kind's default renderer.
-        .or_else(|| KindRegistry::get(&artifact.kind).and_then(|k| k.renderer))
-        .unwrap_or_else(|| "default".into());
+    let renderer_id = effective_renderer(artifact);
 
     // 1. Prepare brand.css if it's a design artifact and brand.css is missing
     if artifact.kind == "design" {
@@ -85,17 +127,7 @@ pub async fn render_with(
     }
 
     // 2. Compute input hash
-    let mut full_hash =
-        compute_input_hash(workspace, project, artifact, brand_version, &renderer_id)?;
-    // The channel loudness target changes the timeline output, so it is part of the cache key.
-    if renderer_id == "render.timeline_ffmpeg@1" {
-        if let Some(lufs) = options.loudness_lufs {
-            use sha2::{Digest, Sha256};
-            full_hash = hex::encode(Sha256::digest(
-                format!("{full_hash}|loudness={lufs}").as_bytes(),
-            ));
-        }
-    }
+    let full_hash = render_cache_key(workspace, project, artifact, options)?;
     let short_hash = hash12(&full_hash);
 
     // 3. Check render cache

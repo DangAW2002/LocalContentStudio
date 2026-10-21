@@ -5,6 +5,7 @@
 pub mod artifact;
 pub mod cache;
 pub mod error;
+pub mod graph;
 pub mod kind;
 pub mod probe;
 pub mod render;
@@ -14,14 +15,22 @@ pub mod timeline;
 pub mod timeline_build;
 pub mod validate;
 
-pub use artifact::Artifact;
+pub use artifact::{Artifact, ArtifactInput, InputRole};
 pub use cache::{
-    compute_input_hash, hash12, lookup_render_cache, record_render_outputs, RenderRecord,
+    compute_input_hash, hash12, latest_render_on_disk, lookup_render_cache, record_render_outputs,
+    RenderRecord,
 };
 pub use error::{ArtifactError, Result};
+pub use graph::{
+    build_project_graph, calculate_impact, detect_cycle, normalize_ref, topo_sort, ContentGraph,
+    GraphEdge, GraphNode, ImpactNode, NodeStatus,
+};
 pub use kind::{KindRegistry, KindSpec};
 pub use probe::{probe_chromium, probe_ffmpeg, probe_ffprobe, probe_node_npx, ProbeReport};
-pub use render::{render, render_with, timeline_schema_hint, RenderOptions, RenderOutcome};
+pub use render::{
+    effective_renderer, render, render_cache_key, render_options_for, render_with,
+    timeline_schema_hint, RenderOptions, RenderOutcome,
+};
 pub use renderer::{
     build_html_render_job, build_hyperframes_render_job, build_proxy_job,
     build_timeline_ffmpeg_args, build_timeline_render_job, detect_artboard_size,

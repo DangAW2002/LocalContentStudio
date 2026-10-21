@@ -722,6 +722,111 @@ async fn test_stale_runtime_d_entries_cleaned_up() {
 }
 
 #[tokio::test]
+async fn test_mcp_graph_get_and_impact() {
+    let ws_tmp = tempdir().unwrap();
+    let ws = Workspace::create(ws_tmp.path(), "MCP Graph WS").unwrap();
+    let proj = studio_workspace::Project::create(&ws, "test-mcp-proj", "Test MCP Proj").unwrap();
+
+    // Create 3 artifacts: script -> timeline -> thumb
+    let _script =
+        studio_artifacts::Artifact::create(&proj, "script", "text", "Script", None, vec![], None)
+            .unwrap();
+    let mut timeline = studio_artifacts::Artifact::create(
+        &proj,
+        "timeline",
+        "timeline",
+        "Timeline",
+        None,
+        vec![],
+        None,
+    )
+    .unwrap();
+    timeline.inputs = vec![studio_artifacts::ArtifactInput::new(
+        "artifact:script",
+        studio_artifacts::InputRole::Uses,
+    )];
+    timeline.save(&proj).unwrap();
+
+    let mut thumb = studio_artifacts::Artifact::create(
+        &proj,
+        "thumb",
+        "design",
+        "Thumbnail",
+        None,
+        vec![],
+        None,
+    )
+    .unwrap();
+    thumb.inputs = vec![studio_artifacts::ArtifactInput::new(
+        "artifact:timeline",
+        studio_artifacts::InputRole::VariantOf,
+    )];
+    thumb.save(&proj).unwrap();
+
+    let state = state();
+    let token = state.tokens.issue(ctx(ws.root(), EngineKind::Claude));
+    let srv = server::start(state.clone(), 0).await.unwrap();
+    let port = srv.addr.port();
+
+    // 1. Call graph_get
+    let (status, body) = post(
+        port,
+        Some(&token),
+        None,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "graph_get",
+                "arguments": {
+                    "project": "test-mcp-proj"
+                }
+            }
+        }),
+    )
+    .await;
+
+    assert_eq!(status, 200);
+    let content = body["result"]["content"][0]["text"].as_str().unwrap();
+    let graph_val: Value = serde_json::from_str(content).unwrap();
+    assert_eq!(graph_val["project"], "test-mcp-proj");
+    let nodes = graph_val["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 3);
+    let edges = graph_val["edges"].as_array().unwrap();
+    assert_eq!(edges.len(), 2);
+
+    // 2. Call graph_impact on script
+    let (status2, body2) = post(
+        port,
+        Some(&token),
+        None,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "graph_impact",
+                "arguments": {
+                    "project": "test-mcp-proj",
+                    "ref": "script"
+                }
+            }
+        }),
+    )
+    .await;
+
+    assert_eq!(status2, 200);
+    let content2 = body2["result"]["content"][0]["text"].as_str().unwrap();
+    let impact_val: Value = serde_json::from_str(content2).unwrap();
+    let impact = impact_val["impact"].as_array().unwrap();
+    // Downstream of script: timeline and thumb (in topo order)
+    assert_eq!(impact.len(), 2);
+    assert_eq!(impact[0]["id"], "timeline");
+    assert_eq!(impact[1]["id"], "thumb");
+}
+
+#[tokio::test]
 async fn test_mcp_timeline_build_with_generated_wavs() {
     let ffmpeg_report = studio_artifacts::probe_ffmpeg();
     let ffprobe_report = studio_artifacts::probe_ffprobe();

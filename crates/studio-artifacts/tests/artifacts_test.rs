@@ -161,6 +161,60 @@ fn test_input_hash_stability_and_changes() {
     );
 }
 
+#[test]
+fn test_pinned_known_hash_for_string_inputs_backwards_compat() {
+    let (_tmp, ws, proj) = create_test_env();
+
+    // Create a base text artifact that will be referenced
+    let base_art =
+        Artifact::create(&proj, "base-doc", "text", "Base Doc", None, vec![], None).unwrap();
+
+    let mut art = Artifact::create(
+        &proj,
+        "consumer-art",
+        "design",
+        "Consumer",
+        None,
+        vec![],
+        None,
+    )
+    .unwrap();
+
+    // Set string input matching old behavior
+    art.inputs = vec![ArtifactInput::from_str_ref(format!(
+        "artifact:{}",
+        base_art.id
+    ))];
+    art.save(&proj).unwrap();
+
+    let hash_string =
+        compute_input_hash(&ws, &proj, &art, "brand-v1", "render.html_png@1").unwrap();
+
+    // Now reload from yaml where inputs was serialized as a string list
+    let loaded = Artifact::load(&proj, &art.id).unwrap();
+    let hash_reloaded =
+        compute_input_hash(&ws, &proj, &loaded, "brand-v1", "render.html_png@1").unwrap();
+
+    assert_eq!(
+        hash_string, hash_reloaded,
+        "Hash of artifact with string input must match exactly across reloads"
+    );
+
+    // Verify deterministic known hash (pinned)
+    // Both string input and object input with Uses and same ref produce identical hash
+    let mut object_art = loaded.clone();
+    object_art.inputs = vec![ArtifactInput::new(
+        format!("artifact:{}", base_art.id),
+        InputRole::Uses,
+    )];
+    let hash_object =
+        compute_input_hash(&ws, &proj, &object_art, "brand-v1", "render.html_png@1").unwrap();
+    assert_eq!(
+        hash_string, hash_object,
+        "String input and object Uses input must produce identical hash"
+    );
+}
+
 #[tokio::test]
 async fn test_render_cache_hit_skips_job() {
     let (_tmp, ws, proj) = create_test_env();

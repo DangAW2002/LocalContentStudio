@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use studio_workspace::Project;
@@ -6,6 +7,134 @@ use studio_workspace::Project;
 use crate::error::{ArtifactError, Result};
 use crate::kind::KindRegistry;
 use crate::starter::*;
+
+/// Edge role in the content graph.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum InputRole {
+    /// Direct dependency (affects staleness, propagates downstream).
+    #[default]
+    Uses,
+    /// Reference for consistency (character, style, voice). Does not propagate staleness.
+    Reference,
+    /// Variant of another artifact (e.g. 9:16 cut, different language). Propagates staleness.
+    VariantOf,
+}
+
+impl InputRole {
+    /// String representation matching YAML/SQLite.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Uses => "uses",
+            Self::Reference => "reference",
+            Self::VariantOf => "variant_of",
+        }
+    }
+
+    /// Whether staleness propagates downstream along this role.
+    pub fn propagates_staleness(&self) -> bool {
+        match self {
+            Self::Uses | Self::VariantOf => true,
+            Self::Reference => false,
+        }
+    }
+}
+
+impl fmt::Display for InputRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// An entry in `artifact.inputs`.
+/// Can be deserialized from either a plain string (role = `uses`) or `{ ref: "...", role: "..." }`.
+/// Re-serializes back to plain string if created from string or role is uses with `was_string == true`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactInput {
+    /// Reference string, e.g. "artifact:script-01" or "asset:lib/abc123" or a path.
+    pub reference: String,
+    /// Role in the dependency graph.
+    pub role: InputRole,
+    /// Internal flag to preserve verbatim string representation on serialization.
+    pub was_string: bool,
+}
+
+impl ArtifactInput {
+    /// Create a new input reference with a specific role.
+    pub fn new(reference: impl Into<String>, role: InputRole) -> Self {
+        Self {
+            reference: reference.into(),
+            role,
+            was_string: false,
+        }
+    }
+
+    /// Create a new input reference with default `uses` role (as a plain string).
+    pub fn from_str_ref(reference: impl Into<String>) -> Self {
+        Self {
+            reference: reference.into(),
+            role: InputRole::Uses,
+            was_string: true,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct ObjectInputHelper {
+    #[serde(rename = "ref")]
+    reference: String,
+    #[serde(default)]
+    role: InputRole,
+}
+
+impl Serialize for ArtifactInput {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if self.was_string && self.role == InputRole::Uses {
+            serializer.serialize_str(&self.reference)
+        } else {
+            let helper = ObjectInputHelper {
+                reference: self.reference.clone(),
+                role: self.role,
+            };
+            helper.serialize(serializer)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactInput {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum StringOrObject {
+            String(String),
+            Object {
+                #[serde(rename = "ref")]
+                reference: String,
+                #[serde(default)]
+                role: Option<InputRole>,
+            },
+        }
+
+        match StringOrObject::deserialize(deserializer)? {
+            StringOrObject::String(s) => Ok(ArtifactInput {
+                reference: s,
+                role: InputRole::Uses,
+                was_string: true,
+            }),
+            StringOrObject::Object { reference, role } => Ok(ArtifactInput {
+                reference,
+                role: role.unwrap_or(InputRole::Uses),
+                was_string: false,
+            }),
+        }
+    }
+}
 
 /// Artifact model matching `artifact.yaml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -27,9 +156,9 @@ pub struct Artifact {
     /// Renderer tool id, e.g. "render.html_png@1".
     #[serde(default)]
     pub renderer: Option<String>,
-    /// Input references: asset paths or artifact ids (e.g. "asset:lib/abc123", "artifact:script-01").
+    /// Input references: asset paths or artifact ids (e.g. "asset:lib/abc123", "artifact:script-01") or objects with role.
     #[serde(default)]
-    pub inputs: Vec<String>,
+    pub inputs: Vec<ArtifactInput>,
     /// Additional parameters or configuration.
     #[serde(default)]
     pub params: serde_json::Value,
@@ -39,6 +168,12 @@ pub struct Artifact {
     /// Artboard height in pixels (same as `params.height`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub height: Option<u32>,
+    /// Pinned flag: user locked, agent must not rewrite or regenerate.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
+    /// User notes attached to this artifact.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 impl Artifact {
@@ -113,6 +248,8 @@ impl Artifact {
             params: params.unwrap_or(serde_json::Value::Object(serde_json::Map::new())),
             width: None,
             height: None,
+            pinned: false,
+            notes: Vec::new(),
         };
 
         let yaml = serde_yaml::to_string(&artifact)?;
@@ -186,8 +323,8 @@ impl Artifact {
 }
 
 #[cfg(test)]
-mod size_tests {
-    use super::Artifact;
+mod tests {
+    use super::*;
 
     #[test]
     fn top_level_size_is_read_and_not_written_when_absent() {
@@ -211,5 +348,66 @@ source: index.html
         )
         .unwrap();
         assert!(!serde_yaml::to_string(&b).unwrap().contains("width"));
+    }
+
+    #[test]
+    fn backwards_compat_string_inputs_round_trip() {
+        let original_yaml = "id: test-01
+kind: design
+title: Test Title
+brand: null
+channels: []
+source: index.html
+renderer: null
+inputs:
+- artifact:script-01
+- asset:lib/bg.png
+params: null
+";
+        let art: Artifact = serde_yaml::from_str(original_yaml).unwrap();
+        assert_eq!(art.inputs.len(), 2);
+        assert_eq!(art.inputs[0].reference, "artifact:script-01");
+        assert_eq!(art.inputs[0].role, InputRole::Uses);
+        assert!(art.inputs[0].was_string);
+        assert_eq!(art.inputs[1].reference, "asset:lib/bg.png");
+        assert_eq!(art.inputs[1].role, InputRole::Uses);
+
+        let reserialized = serde_yaml::to_string(&art).unwrap();
+        assert_eq!(reserialized.trim(), original_yaml.trim());
+    }
+
+    #[test]
+    fn mixed_inputs_deserialize_and_serialize() {
+        let yaml_str = "id: test-02
+kind: timeline
+title: Episode 1
+source: timeline.json
+inputs:
+- artifact:script-01
+- ref: artifact:nv-an
+  role: reference
+- ref: artifact:ep01-thumb
+  role: variant_of
+pinned: true
+notes:
+- Giữ nguyên câu mở đầu
+";
+        let art: Artifact = serde_yaml::from_str(yaml_str).unwrap();
+        assert!(art.pinned);
+        assert_eq!(art.notes, vec!["Giữ nguyên câu mở đầu".to_string()]);
+        assert_eq!(art.inputs.len(), 3);
+        assert_eq!(art.inputs[0].reference, "artifact:script-01");
+        assert_eq!(art.inputs[0].role, InputRole::Uses);
+        assert_eq!(art.inputs[1].reference, "artifact:nv-an");
+        assert_eq!(art.inputs[1].role, InputRole::Reference);
+        assert_eq!(art.inputs[2].reference, "artifact:ep01-thumb");
+        assert_eq!(art.inputs[2].role, InputRole::VariantOf);
+
+        let out = serde_yaml::to_string(&art).unwrap();
+        assert!(out.contains("- artifact:script-01"));
+        assert!(out.contains("ref: artifact:nv-an"));
+        assert!(out.contains("role: reference"));
+        assert!(out.contains("pinned: true"));
+        assert!(out.contains("Giữ nguyên câu mở đầu"));
     }
 }

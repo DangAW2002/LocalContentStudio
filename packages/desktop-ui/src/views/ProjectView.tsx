@@ -3,6 +3,7 @@ import { PaneBoundary } from "../components/PaneBoundary";
 import { ThreadPane } from "./project/ThreadPane";
 import { StagePane } from "./project/StagePane";
 import { OutputsPane } from "./project/OutputsPane";
+import { GraphPane } from "./project/graph/GraphPane";
 import { Tabs, Button, Select, ErrorState } from "@studio/design-system";
 import { studioApi } from "../api/client";
 import { Icon } from "../components/Icon";
@@ -82,7 +83,8 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
   }, []);
   const panesRef = React.useRef<HTMLDivElement>(null);
   const dragStartRef = React.useRef<ProjectLayout>(layout);
-  const [narrowTab, setNarrowTab] = React.useState<"thread" | "stage" | "outputs">("thread");
+  const [centerTab, setCenterTab] = React.useState<"stage" | "graph">("stage");
+  const [narrowTab, setNarrowTab] = React.useState<"thread" | "stage" | "graph" | "outputs">("thread");
   const [isNarrow, setIsNarrow] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -437,27 +439,38 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
         </div>
 
         {!isNarrow && (
-          <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-            <button
-              type="button"
-              className="cs-icon-btn"
-              aria-pressed={layout.thread.visible}
-              aria-label={(layout.thread.visible ? "Ẩn" : "Hiện") + " khung hội thoại (Ctrl+B)"}
-              title={(layout.thread.visible ? "Ẩn" : "Hiện") + " khung hội thoại (Ctrl+B)"}
-              onClick={() => togglePane("thread")}
-            >
-              <Icon name="panel-left" size={16} />
-            </button>
-            <button
-              type="button"
-              className="cs-icon-btn"
-              aria-pressed={layout.outputs.visible}
-              aria-label={(layout.outputs.visible ? "Ẩn" : "Hiện") + " khung Outputs (Ctrl+Alt+B)"}
-              title={(layout.outputs.visible ? "Ẩn" : "Hiện") + " khung Outputs (Ctrl+Alt+B)"}
-              onClick={() => togglePane("outputs")}
-            >
-              <Icon name="panel-right" size={16} />
-            </button>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--cs-space-3)" }}>
+            <Tabs
+              items={[
+                { id: "stage", label: "Stage" },
+                { id: "graph", label: "Sơ đồ" },
+              ]}
+              activeId={centerTab}
+              onChange={(id) => setCenterTab(id as any)}
+              size="sm"
+            />
+            <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+              <button
+                type="button"
+                className="cs-icon-btn"
+                aria-pressed={layout.thread.visible}
+                aria-label={(layout.thread.visible ? "Ẩn" : "Hiện") + " khung hội thoại (Ctrl+B)"}
+                title={(layout.thread.visible ? "Ẩn" : "Hiện") + " khung hội thoại (Ctrl+B)"}
+                onClick={() => togglePane("thread")}
+              >
+                <Icon name="panel-left" size={16} />
+              </button>
+              <button
+                type="button"
+                className="cs-icon-btn"
+                aria-pressed={layout.outputs.visible}
+                aria-label={(layout.outputs.visible ? "Ẩn" : "Hiện") + " khung Outputs (Ctrl+Alt+B)"}
+                title={(layout.outputs.visible ? "Ẩn" : "Hiện") + " khung Outputs (Ctrl+Alt+B)"}
+                onClick={() => togglePane("outputs")}
+              >
+                <Icon name="panel-right" size={16} />
+              </button>
+            </div>
           </div>
         )}
 
@@ -467,6 +480,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
             items={[
               { id: "thread", label: "Thread" },
               { id: "stage", label: "Stage" },
+              { id: "graph", label: "Sơ đồ" },
               { id: "outputs", label: "Outputs" },
             ]}
             activeId={narrowTab}
@@ -522,6 +536,25 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
                 />
               </PaneBoundary>
             )}
+            {narrowTab === "graph" && (
+              <PaneBoundary name="Sơ đồ">
+                <GraphPane
+                  projectSlug={currentSlug}
+                  onSendToAgent={(refs) => {
+                    const mentionString = refs.map((r) => `@${r}`).join(" ") + " ";
+                    handleAskAi(mentionString);
+                    setNarrowTab("thread");
+                  }}
+                  onOpenArtifact={(artId) => {
+                    const art = artifacts.find((a) => a.id === artId);
+                    if (art) {
+                      setSelectedFilePath(art.source);
+                      setNarrowTab("stage");
+                    }
+                  }}
+                />
+              </PaneBoundary>
+            )}
             {narrowTab === "outputs" && (
               <PaneBoundary name="Outputs">
                 <OutputsPane
@@ -567,20 +600,39 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
 
             <Sash {...sashHandlers("thread", "Đổi độ rộng khung hội thoại")} />
 
-            {/* Stage Center Pane */}
+            {/* Stage / Graph Center Pane */}
             <div style={{ flex: 1, height: "100%", minWidth: CENTER_MIN, overflow: "hidden" }}>
-              <PaneBoundary name="Stage">
-                <StagePane
-                  projectSlug={currentSlug}
-                  selectedFilePath={selectedFilePath}
-                  onClearSelection={() => setSelectedFilePath(null)}
-                  onAskAi={handleAskAi}
-                  onSelectFile={setSelectedFilePath}
-                  reloadNonce={stageReloadNonce}
-                  artifacts={artifacts}
-                  onRefreshArtifacts={refreshArtifacts}
-                />
-              </PaneBoundary>
+              {centerTab === "stage" ? (
+                <PaneBoundary name="Stage">
+                  <StagePane
+                    projectSlug={currentSlug}
+                    selectedFilePath={selectedFilePath}
+                    onClearSelection={() => setSelectedFilePath(null)}
+                    onAskAi={handleAskAi}
+                    onSelectFile={setSelectedFilePath}
+                    reloadNonce={stageReloadNonce}
+                    artifacts={artifacts}
+                    onRefreshArtifacts={refreshArtifacts}
+                  />
+                </PaneBoundary>
+              ) : (
+                <PaneBoundary name="Sơ đồ">
+                  <GraphPane
+                    projectSlug={currentSlug}
+                    onSendToAgent={(refs) => {
+                      const mentionString = refs.map((r) => `@${r}`).join(" ") + " ";
+                      handleAskAi(mentionString);
+                    }}
+                    onOpenArtifact={(artId) => {
+                      const art = artifacts.find((a) => a.id === artId);
+                      if (art) {
+                        setSelectedFilePath(art.source);
+                        setCenterTab("stage");
+                      }
+                    }}
+                  />
+                </PaneBoundary>
+              )}
             </div>
 
             <Sash {...sashHandlers("outputs", "Đổi độ rộng khung Outputs")} />

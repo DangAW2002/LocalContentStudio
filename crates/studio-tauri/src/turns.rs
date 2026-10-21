@@ -146,6 +146,62 @@ fn build_context(
             p.slug(),
             p.slug()
         ));
+
+        // Content graph summary (ADR-011 §5 / Task G1 §5)
+        if let Ok(artifacts) = studio_artifacts::Artifact::list(p) {
+            if let Ok(graph) = studio_artifacts::build_project_graph(ws, p, &artifacts) {
+                let pinned_ids: Vec<&str> = graph
+                    .nodes
+                    .iter()
+                    .filter(|n| n.pinned)
+                    .map(|n| n.id.as_str())
+                    .collect();
+                let stale_count = graph
+                    .nodes
+                    .iter()
+                    .filter(|n| n.status == studio_artifacts::NodeStatus::LoiThoi)
+                    .count();
+                let mut user_notes: Vec<String> = Vec::new();
+                for node in &graph.nodes {
+                    for n in &node.notes {
+                        let truncated = if n.chars().count() > 120 {
+                            format!("{}…", n.chars().take(120).collect::<String>().trim_end())
+                        } else {
+                            n.clone()
+                        };
+                        user_notes.push(format!("{}: \"{}\"", node.id, truncated));
+                        if user_notes.len() >= 5 {
+                            break;
+                        }
+                    }
+                    if user_notes.len() >= 5 {
+                        break;
+                    }
+                }
+
+                let mut parts: Vec<String> = Vec::new();
+                if !pinned_ids.is_empty() {
+                    parts.push(format!("Đã khóa: {}", pinned_ids.join(", ")));
+                }
+                if stale_count > 0 {
+                    parts.push(format!("{stale_count} artifact lỗi thời"));
+                }
+                if !user_notes.is_empty() {
+                    parts.push(format!("Ghi chú: {}", user_notes.join("; ")));
+                }
+
+                if !parts.is_empty() {
+                    let mut summary = format!("Sơ đồ nội dung: {}.", parts.join(" | "));
+                    if summary.chars().count() > 400 {
+                        summary = format!(
+                            "{}…",
+                            summary.chars().take(399).collect::<String>().trim_end()
+                        );
+                    }
+                    lines.push(summary);
+                }
+            }
+        }
     }
     if let Ok(set) = studio_brand::BrandSet::load(ws) {
         let join = |v: Vec<&String>| v.into_iter().cloned().collect::<Vec<_>>().join(", ");
@@ -662,5 +718,26 @@ mod tests {
         let claude_ctx = build_context(&ws, None, &[], None, true);
         assert!(claude_ctx.contains("Dùng các tool MCP của server \"studio\""));
         assert!(!claude_ctx.contains("call_mcp_tool"));
+    }
+
+    #[test]
+    fn test_build_context_with_graph_summary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(tmp.path().join("ws"), "Test Workspace").unwrap();
+        let proj = Project::create(&ws, "demo-proj", "Demo Project").unwrap();
+
+        // Create an artifact with pinned and notes
+        let mut art =
+            studio_artifacts::Artifact::create(&proj, "hero", "design", "Hero", None, vec![], None)
+                .unwrap();
+        art.pinned = true;
+        art.notes = vec!["Giữ nguyên font chữ và màu logo".to_string()];
+        art.save(&proj).unwrap();
+
+        let ctx = build_context(&ws, Some(&proj), &[], None, false);
+        assert!(ctx.contains("Sơ đồ nội dung:"));
+        assert!(ctx.contains("Đã khóa: hero"));
+        assert!(ctx.contains("hero: \"Giữ nguyên font chữ và màu logo\""));
+        assert!(ctx.len() < 4000);
     }
 }

@@ -150,6 +150,24 @@ impl WorkspaceDb {
             Self::apply_v4(conn)?;
         }
 
+        if current < 5 {
+            // Backup before applying v5 if database file already exists and has tables
+            if db_path.exists() {
+                let table_count: i64 = conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name != 'schema_migrations'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
+                if table_count > 0 {
+                    Self::perform_backup(conn, backup_dir, "v5")?;
+                }
+            }
+
+            Self::apply_v5(conn)?;
+        }
+
         Ok(())
     }
 
@@ -457,6 +475,35 @@ impl WorkspaceDb {
         let now = chrono::Utc::now().to_rfc3339();
         tx.execute(
             "INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (4, 'v4-assets-source-project', ?1)
+             ON CONFLICT(version) DO NOTHING",
+            [&now],
+        )?;
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn apply_v5(conn: &mut Connection) -> Result<()> {
+        let tx = conn.transaction()?;
+
+        tx.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS artifact_edges (
+                project TEXT NOT NULL,
+                from_id TEXT NOT NULL,
+                to_ref TEXT NOT NULL,
+                role TEXT NOT NULL,
+                PRIMARY KEY (project, from_id, to_ref, role)
+            );
+            CREATE INDEX IF NOT EXISTS idx_edges_project ON artifact_edges(project);
+            CREATE INDEX IF NOT EXISTS idx_edges_from ON artifact_edges(project, from_id);
+            CREATE INDEX IF NOT EXISTS idx_edges_to ON artifact_edges(project, to_ref);
+            ",
+        )?;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        tx.execute(
+            "INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (5, 'v5-artifact-edges', ?1)
              ON CONFLICT(version) DO NOTHING",
             [&now],
         )?;

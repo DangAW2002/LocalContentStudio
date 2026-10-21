@@ -123,6 +123,25 @@ export async function runSmoke(options = {}) {
         await assertCleanState(`Dự án (${theme}-${vp.name})`);
         await client.shot(path.join(shotsDir, `project-${theme}-${vp.name}.png`));
 
+        // Center pane tab: Sơ đồ (Graph)
+        console.log("      [Project] Chuyển tab trung tâm: Sơ đồ");
+        await client.eval(`(() => {
+          const tabs = [...document.querySelectorAll('[role=tab]')];
+          const graphTab = tabs.find(t => (t.textContent || '').trim().includes('Sơ đồ'));
+          if (graphTab) graphTab.click();
+        })()`);
+        await new Promise((r) => setTimeout(r, 600));
+        await assertCleanState(`Project tab Sơ đồ (${theme}-${vp.name})`);
+        await client.shot(path.join(shotsDir, `project-graph-${theme}-${vp.name}.png`));
+
+        // Switch back to Stage for subsequent checks
+        await client.eval(`(() => {
+          const tabs = [...document.querySelectorAll('[role=tab]')];
+          const stageTab = tabs.find(t => (t.textContent || '').trim().includes('Stage'));
+          if (stageTab) stageTab.click();
+        })()`);
+        await new Promise((r) => setTimeout(r, 200));
+
         // 3 tabs of Outputs pane: artifacts, checkpoints, modules
         for (const outTab of OUTPUTS_TABS) {
           console.log(`      [Outputs] Chuyển tab: ${outTab}`);
