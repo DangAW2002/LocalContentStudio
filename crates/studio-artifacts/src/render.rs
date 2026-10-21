@@ -53,6 +53,54 @@ pub async fn render(
     .await
 }
 
+/// Render options that follow from the workspace: the loudness target of the first channel of the
+/// artifact that sets one (timeline audio is normalized to it).
+pub fn render_options_for(workspace: &Workspace, artifact: &Artifact) -> RenderOptions {
+    let loudness_lufs = studio_brand::BrandSet::load(workspace)
+        .ok()
+        .and_then(|set| {
+            artifact
+                .channels
+                .iter()
+                .find_map(|c| set.get_channel(c).and_then(|ch| ch.loudness_lufs))
+                .map(f64::from)
+        });
+    RenderOptions { loudness_lufs }
+}
+
+/// Renderer used for `artifact`: its own `renderer`, else the kind's default.
+pub fn effective_renderer(artifact: &Artifact) -> String {
+    artifact
+        .renderer
+        .clone()
+        .or_else(|| KindRegistry::get(&artifact.kind).and_then(|k| k.renderer))
+        .unwrap_or_else(|| "default".into())
+}
+
+/// Render cache key: the input hash plus the options that change the output. Anything that
+/// compares against stored renders (cache lookup, staleness) must use this.
+pub fn render_cache_key(
+    workspace: &Workspace,
+    project: &Project,
+    artifact: &Artifact,
+    options: &RenderOptions,
+) -> Result<String> {
+    let brand_version = artifact.brand.as_deref().unwrap_or("default@1");
+    let renderer_id = effective_renderer(artifact);
+    let mut full_hash =
+        compute_input_hash(workspace, project, artifact, brand_version, &renderer_id)?;
+    // The channel loudness target changes the timeline output, so it is part of the cache key.
+    if renderer_id == "render.timeline_ffmpeg@1" {
+        if let Some(lufs) = options.loudness_lufs {
+            use sha2::{Digest, Sha256};
+            full_hash = hex::encode(Sha256::digest(
+                format!("{full_hash}|loudness={lufs}").as_bytes(),
+            ));
+        }
+    }
+    Ok(full_hash)
+}
+
 /// Orchestrate rendering an artifact:
 /// 1. Resolve brand version and renderer version.
 /// 2. Compute deterministic input hash.
@@ -68,13 +116,7 @@ pub async fn render_with(
     scheduler: &Scheduler,
     options: &RenderOptions,
 ) -> Result<RenderOutcome> {
-    let brand_version = artifact.brand.as_deref().unwrap_or("default@1");
-    let renderer_id = artifact
-        .renderer
-        .clone()
-        // artifact.yaml may omit `renderer`: fall back to the kind's default renderer.
-        .or_else(|| KindRegistry::get(&artifact.kind).and_then(|k| k.renderer))
-        .unwrap_or_else(|| "default".into());
+    let renderer_id = effective_renderer(artifact);
 
     // 1. Prepare brand.css if it's a design artifact and brand.css is missing
     if artifact.kind == "design" {
@@ -85,17 +127,7 @@ pub async fn render_with(
     }
 
     // 2. Compute input hash
-    let mut full_hash =
-        compute_input_hash(workspace, project, artifact, brand_version, &renderer_id)?;
-    // The channel loudness target changes the timeline output, so it is part of the cache key.
-    if renderer_id == "render.timeline_ffmpeg@1" {
-        if let Some(lufs) = options.loudness_lufs {
-            use sha2::{Digest, Sha256};
-            full_hash = hex::encode(Sha256::digest(
-                format!("{full_hash}|loudness={lufs}").as_bytes(),
-            ));
-        }
-    }
+    let full_hash = render_cache_key(workspace, project, artifact, options)?;
     let short_hash = hash12(&full_hash);
 
     // 3. Check render cache
@@ -332,16 +364,37 @@ fn artboard_size(artifact: &Artifact, project: &Project) -> Option<(u32, u32)> {
 
 /// Explains a `timeline.json` parse error together with the expected shape, so an agent can fix
 /// the file in one go instead of guessing field by field.
-pub(crate) fn timeline_schema_hint(err: &serde_json::Error) -> String {
+pub fn timeline_schema_hint(err: &serde_json::Error) -> String {
+    let err_str = err.to_string();
+    let detail = if err_str.contains("unknown field")
+        && (err_str.contains("font")
+            || err_str.contains("box")
+            || err_str.contains("margin_bottom")
+            || err_str.contains("max_width_ratio")
+            || err_str.contains("outline")
+            || err_str.contains("color"))
+    {
+        format!(
+            "{err_str}. Trường trong style không hợp lệ; các trường được phép gồm: {}",
+            crate::timeline::CaptionStyle::ALLOWED_FIELDS.join(", ")
+        )
+    } else {
+        err_str
+    };
     format!(
-        "timeline.json không hợp lệ (dòng {}, cột {}): {err}. Cấu trúc đúng: \
+        "timeline.json không hợp lệ (dòng {}, cột {}): {detail}. Cấu trúc đúng: \
          {{\"width\":1920,\"height\":1080,\"fps\":30,\"tracks\":[{{\"id\":\"video\",\"kind\":\"video\",\
          \"clips\":[{{\"id\":\"c1\",\"source\":\"<đường dẫn tương đối từ thư mục artifact, hoặc color:#RRGGBB, \
          hoặc chữ phụ đề>\",\"start\":0,\"duration\":5,\"in_point\":0,\"transition\":\"none\"|\"fade\"}}]}},\
          {{\"id\":\"overlay\",\"kind\":\"video\",\"clips\":[{{\"id\":\"logo\",\"source\":\"assets/logo.png\",\
-         \"start\":0,\"duration\":5,\"x\":50,\"y\":50,\"width\":200,\"opacity\":0.9}}]}}]}}. \
-         Mỗi track và mỗi clip bắt buộc có \"id\"; mỗi clip bắt buộc có \"source\" và \"duration\". \
-         Track video đầu tiên là chuỗi gốc (base), các track video tiếp theo là lớp phủ (overlay). Không dùng file .svg trực tiếp trong timeline (cần render sang PNG trước).",
+         \"start\":0,\"duration\":5,\"x\":50,\"y\":50,\"width\":200,\"opacity\":0.9}}]}},\
+         {{\"id\":\"captions\",\"kind\":\"captions\",\"style\":{{\"font\":\"segoeui\",\"font_size\":48,\"color\":\"#ffffff\",\
+         \"outline\":0,\"box\":true,\"box_color\":\"black@0.6\",\"margin_bottom\":86,\"max_width_ratio\":0.8}},\
+         \"clips\":[{{\"id\":\"cap1\",\"text\":\"Lời phụ đề mẫu\",\"start\":0.5,\"duration\":3.0}}]}}]}}. \
+         Mỗi track và mỗi clip bắt buộc có \"id\"; mỗi clip bắt buộc có \"source\" (hoặc \"text\") và \"duration\". \
+         Track video đầu tiên là chuỗi gốc (base), các track video tiếp theo là lớp phủ (overlay). \
+         Track captions hỗ trợ trường \"style\" tùy chọn (font, font_size, color, outline, box, box_color, margin_bottom, max_width_ratio). \
+         Không dùng file .svg trực tiếp trong timeline (cần render sang PNG trước).",
         err.line(),
         err.column()
     )
@@ -358,6 +411,19 @@ mod timeline_hint_tests {
         let msg = super::timeline_schema_hint(&err);
         assert!(msg.contains("source"), "{msg}");
         assert!(msg.contains("bắt buộc"), "{msg}");
+    }
+
+    #[test]
+    fn hint_rejects_unknown_style_field_with_vietnamese_message() {
+        let err = serde_json::from_str::<crate::timeline::TimelineDoc>(
+            r#"{"tracks":[{"id":"c","kind":"captions","style":{"invalid_prop":123},"clips":[]}]}"#,
+        )
+        .unwrap_err();
+        let msg = super::timeline_schema_hint(&err);
+        assert!(msg.contains("Trường trong style không hợp lệ"), "{msg}");
+        assert!(msg.contains("font"), "{msg}");
+        assert!(msg.contains("margin_bottom"), "{msg}");
+        assert!(msg.contains("max_width_ratio"), "{msg}");
     }
 }
 

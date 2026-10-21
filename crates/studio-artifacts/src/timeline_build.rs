@@ -13,7 +13,7 @@ use studio_workspace::{Project, Workspace};
 
 use crate::artifact::Artifact;
 use crate::probe::probe_ffprobe;
-use crate::timeline::{Clip, TimelineDoc, Track, TrackKind, Transition};
+use crate::timeline::{CaptionStyle, Clip, TimelineDoc, Track, TrackKind, Transition};
 
 const MAX_LINE_CHARS: usize = 42;
 const MAX_CARD_CHARS: usize = 84;
@@ -102,6 +102,9 @@ pub struct TimelineBuildParams {
     /// Minimum total duration in seconds (pads tail if video is shorter).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_duration_s: Option<f64>,
+    /// Optional caption style override for burned-in captions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caption_style: Option<CaptionStyle>,
 }
 
 fn default_lead_s() -> f64 {
@@ -767,6 +770,7 @@ pub fn build_timeline(
         id: "video".into(),
         kind: TrackKind::Video,
         clips: layout.video_clips,
+        style: None,
     }];
 
     if !layout.overlay_clips.is_empty() {
@@ -774,6 +778,7 @@ pub fn build_timeline(
             id: "overlays".into(),
             kind: TrackKind::Video,
             clips: layout.overlay_clips,
+            style: None,
         });
     }
 
@@ -781,6 +786,7 @@ pub fn build_timeline(
         id: "audio".into(),
         kind: TrackKind::Audio,
         clips: layout.audio_clips,
+        style: None,
     });
 
     if !caption_clips.is_empty() {
@@ -788,6 +794,7 @@ pub fn build_timeline(
             id: "captions".into(),
             kind: TrackKind::Captions,
             clips: caption_clips,
+            style: params.caption_style.clone(),
         });
     }
 
@@ -852,7 +859,10 @@ pub fn build_timeline(
         channels,
         source: "timeline.json".into(),
         renderer: Some("render.timeline_ffmpeg@1".into()),
-        inputs: collected_inputs,
+        inputs: collected_inputs
+            .into_iter()
+            .map(crate::artifact::ArtifactInput::from_str_ref)
+            .collect(),
         params: serde_json::json!({
             "width": width,
             "height": height,
@@ -860,6 +870,12 @@ pub fn build_timeline(
         }),
         width: Some(width),
         height: Some(height),
+        // Rebuilding keeps the user's lock and notes on the artifact.
+        pinned: existing_art.as_ref().is_some_and(|a| a.pinned),
+        notes: existing_art
+            .as_ref()
+            .map(|a| a.notes.clone())
+            .unwrap_or_default(),
     };
     artifact
         .save(&project)
@@ -983,6 +999,7 @@ mod tests {
             height: Some(1080),
             fps: Some(30.0),
             min_duration_s: Some(10.0),
+            caption_style: None,
         };
 
         let durations = vec![3.2, 4.5];

@@ -146,6 +146,62 @@ fn build_context(
             p.slug(),
             p.slug()
         ));
+
+        // Content graph summary (ADR-011 §5 / Task G1 §5)
+        if let Ok(artifacts) = studio_artifacts::Artifact::list(p) {
+            if let Ok(graph) = studio_artifacts::build_project_graph(ws, p, &artifacts) {
+                let pinned_ids: Vec<&str> = graph
+                    .nodes
+                    .iter()
+                    .filter(|n| n.pinned)
+                    .map(|n| n.id.as_str())
+                    .collect();
+                let stale_count = graph
+                    .nodes
+                    .iter()
+                    .filter(|n| n.status == studio_artifacts::NodeStatus::LoiThoi)
+                    .count();
+                let mut user_notes: Vec<String> = Vec::new();
+                for node in &graph.nodes {
+                    for n in &node.notes {
+                        let truncated = if n.chars().count() > 120 {
+                            format!("{}…", n.chars().take(120).collect::<String>().trim_end())
+                        } else {
+                            n.clone()
+                        };
+                        user_notes.push(format!("{}: \"{}\"", node.id, truncated));
+                        if user_notes.len() >= 5 {
+                            break;
+                        }
+                    }
+                    if user_notes.len() >= 5 {
+                        break;
+                    }
+                }
+
+                let mut parts: Vec<String> = Vec::new();
+                if !pinned_ids.is_empty() {
+                    parts.push(format!("Đã khóa: {}", pinned_ids.join(", ")));
+                }
+                if stale_count > 0 {
+                    parts.push(format!("{stale_count} artifact lỗi thời"));
+                }
+                if !user_notes.is_empty() {
+                    parts.push(format!("Ghi chú: {}", user_notes.join("; ")));
+                }
+
+                if !parts.is_empty() {
+                    let mut summary = format!("Sơ đồ nội dung: {}.", parts.join(" | "));
+                    if summary.chars().count() > 400 {
+                        summary = format!(
+                            "{}…",
+                            summary.chars().take(399).collect::<String>().trim_end()
+                        );
+                    }
+                    lines.push(summary);
+                }
+            }
+        }
     }
     if let Ok(set) = studio_brand::BrandSet::load(ws) {
         let join = |v: Vec<&String>| v.into_iter().cloned().collect::<Vec<_>>().join(", ");
@@ -764,6 +820,33 @@ pub async fn run_turn_inner<C: Clock + 'static>(
                 |r| r.get(0),
             )
             .unwrap_or(0.0);
+
+        // Post-turn lock check (ADR-011 §5 / Task G2 §4)
+        if let Ok(ws) = t.state.workspace() {
+            if let Ok(cps) = studio_workspace::CheckpointService::list(&ws) {
+                if let Some(pre_cp) = cps
+                    .into_iter()
+                    .find(|c| c.turn_id.as_deref() == Some(&t.turn_id))
+                {
+                    if let Ok(modified_pinned) =
+                        studio_artifacts::check_pinned_modifications_after_turn(&ws, &pre_cp.id)
+                    {
+                        for art_id in modified_pinned {
+                            let warn_ev = json!({
+                                "type": "Text",
+                                "text": format!("Cảnh báo: Agent đã sửa tệp thuộc artifact khoá '{}' trong lượt này.", art_id),
+                                "pinnedArtifactWarning": {
+                                    "artifactId": art_id,
+                                    "checkpointId": pre_cp.id
+                                }
+                            });
+                            let _ = persist(db, &t.turn_id, &warn_ev);
+                            emit(&t.state, &t.thread_id, &t.turn_id, &warn_ev);
+                        }
+                    }
+                }
+            }
+        }
 
         if cap_cost > 0.0 {
             let existing_usage: Option<(String, Value)> = db
@@ -1442,5 +1525,26 @@ mod tests {
         assert!(err_payload.contains("Lượt không phản hồi trong"));
         assert!(err_payload.contains("Bấm Thử lại để chạy lại lượt."));
         let _ = child.wait().await;
+    }
+
+    #[test]
+    fn test_build_context_with_graph_summary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = Workspace::create(tmp.path().join("ws"), "Test Workspace").unwrap();
+        let proj = Project::create(&ws, "demo-proj", "Demo Project").unwrap();
+
+        // Create an artifact with pinned and notes
+        let mut art =
+            studio_artifacts::Artifact::create(&proj, "hero", "design", "Hero", None, vec![], None)
+                .unwrap();
+        art.pinned = true;
+        art.notes = vec!["Giữ nguyên font chữ và màu logo".to_string()];
+        art.save(&proj).unwrap();
+
+        let ctx = build_context(&ws, Some(&proj), &[], None, false);
+        assert!(ctx.contains("Sơ đồ nội dung:"));
+        assert!(ctx.contains("Đã khóa: hero"));
+        assert!(ctx.contains("hero: \"Giữ nguyên font chữ và màu logo\""));
+        assert!(ctx.len() < 4000);
     }
 }

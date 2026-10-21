@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@studio/design-system": "workspace:*",
+    "@xyflow/react": "^12.12.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "shiki": "4.1.0"

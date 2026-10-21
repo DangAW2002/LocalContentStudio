@@ -77,10 +77,31 @@ function seedWorkspaceAndAppDb({ appDir, wsDir }) {
     `slug: demo\ntitle: "Dự án mẫu E2E"\ncreated_at: "${now}"\nkit: null\nmodules: []\n`
   );
 
-  // sample artifact
+  // sample artifacts (3 linked artifacts: script-01 -> voice-01 -> thumb-01)
+  mkdirSync(path.join(wsDir, "projects/demo/artifacts/script-01"), { recursive: true });
+  mkdirSync(path.join(wsDir, "projects/demo/artifacts/voice-01"), { recursive: true });
+
+  writeFileSync(
+    path.join(wsDir, "projects/demo/artifacts/script-01/artifact.yaml"),
+    `id: script-01\nkind: design\ntitle: "Kịch bản E2E"\nbrand: demo\nchannels:\n  - youtube\nsource: script.txt\n`
+  );
+  writeFileSync(
+    path.join(wsDir, "projects/demo/artifacts/script-01/script.txt"),
+    `Đây là nội dung kịch bản video ngắn E2E.`
+  );
+
+  writeFileSync(
+    path.join(wsDir, "projects/demo/artifacts/voice-01/artifact.yaml"),
+    `id: voice-01\nkind: design\ntitle: "Giọng đọc E2E"\nbrand: demo\nchannels:\n  - youtube\nsource: voice.txt\ninputs:\n  - artifact:script-01\n`
+  );
+  writeFileSync(
+    path.join(wsDir, "projects/demo/artifacts/voice-01/voice.txt"),
+    `Nội dung giọng đọc được tạo từ kịch bản.`
+  );
+
   writeFileSync(
     path.join(wsDir, "projects/demo/artifacts/thumb-01/artifact.yaml"),
-    `id: thumb-01\nkind: design\ntitle: "Thumbnail E2E"\nbrand: demo\nchannels:\n  - youtube\nsource: index.html\n`
+    `id: thumb-01\nkind: design\ntitle: "Thumbnail E2E"\nbrand: demo\nchannels:\n  - youtube\nsource: index.html\ninputs:\n  - ref: artifact:script-01\n    role: reference\n  - ref: artifact:voice-01\n    role: uses\n`
   );
   writeFileSync(
     path.join(wsDir, "projects/demo/artifacts/thumb-01/index.html"),

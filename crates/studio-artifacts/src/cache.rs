@@ -57,10 +57,15 @@ pub fn compute_input_hash(
     }
 
     // 2. Resolved input asset hashes
+    // Note: only direct inputs (role `uses` and `variant_of`) affect the rendered output hash.
+    // Inputs with role `reference` are for character/style consistency checking (ADR-011 §1) and do not invalidate render hash.
     let mut input_hashes: BTreeMap<String, String> = BTreeMap::new();
-    for input_ref in &artifact.inputs {
-        let resolved_hash = resolve_input_hash(workspace, project, input_ref)?;
-        input_hashes.insert(input_ref.clone(), resolved_hash);
+    for input_entry in &artifact.inputs {
+        if input_entry.role.propagates_staleness() {
+            let input_ref = &input_entry.reference;
+            let resolved_hash = resolve_input_hash(workspace, project, input_ref)?;
+            input_hashes.insert(input_ref.clone(), resolved_hash);
+        }
     }
 
     hasher.update(b"INPUTS:\n");
@@ -234,6 +239,53 @@ pub struct RenderRecord {
     pub format: String,
     pub size_bytes: i64,
     pub created_at: String,
+}
+
+/// Get the latest render record on disk for an artifact of `project`, if any.
+/// Returns `Ok(Some((hash, outputs)))` or `Ok(None)` if never rendered.
+///
+/// The `renders` table has no project column; outputs live under
+/// `projects/<slug>/renders/<artifact>/`, which tells same-named artifacts of other projects apart.
+pub fn latest_render_on_disk(
+    workspace: &Workspace,
+    project: &Project,
+    artifact_id: &str,
+) -> Result<Option<(String, Vec<PathBuf>)>> {
+    let db = studio_workspace::WorkspaceDb::open(workspace)?;
+    let prefix = format!("projects/{}/renders/{}/", project.slug(), artifact_id);
+    let mut stmt = db.conn().prepare(
+        "SELECT hash, output_path FROM renders
+         WHERE artifact_id = ?1 AND substr(output_path, 1, length(?2)) = ?2
+         ORDER BY created_at DESC",
+    )?;
+
+    let rows: std::result::Result<Vec<(String, String)>, _> = stmt
+        .query_map(rusqlite::params![artifact_id, prefix], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect();
+
+    let rows = rows?;
+    if rows.is_empty() {
+        return Ok(None);
+    }
+
+    let latest_hash = rows[0].0.clone();
+    let mut existing_files = Vec::new();
+    for (h, p_str) in rows {
+        if h == latest_hash {
+            let p = workspace.root().join(&p_str);
+            if p.exists() {
+                existing_files.push(p);
+            }
+        }
+    }
+
+    if existing_files.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some((latest_hash, existing_files)))
+    }
 }
 
 /// Query the WorkspaceDb for cached renders for a given artifact and hash.

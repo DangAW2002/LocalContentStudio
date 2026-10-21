@@ -222,7 +222,7 @@ fn test_migrations_idempotency_and_backup() {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
     }
 
     // Second open must be idempotent
@@ -234,7 +234,7 @@ fn test_migrations_idempotency_and_backup() {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
     }
 }
 
@@ -277,7 +277,7 @@ fn test_migrations_upgrade_from_v2() {
                 r.get(0)
             })
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
 
         // Verify artifact_checks table exists
         let table_exists: i64 = db
@@ -333,6 +333,10 @@ kind: design
 title: Thumbnail Video Demo
 channels: [youtube, facebook]
 source: index.html
+inputs:
+- artifact:script-01
+- ref: artifact:nv-an
+  role: reference
 ";
     fs::write(art_dir.join("artifact.yaml"), art_yaml).unwrap();
     fs::write(
@@ -376,6 +380,28 @@ source: index.html
             )
             .unwrap();
         assert_eq!(asset_count, 1);
+
+        // Edges count
+        let edge_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM artifact_edges WHERE project='demo-proj' AND from_id='thumb-01'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(edge_count, 2);
+
+        // Verify edge roles
+        let ref_role: String = db
+            .conn()
+            .query_row(
+                "SELECT role FROM artifact_edges WHERE project='demo-proj' AND from_id='thumb-01' AND to_ref='artifact:nv-an'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ref_role, "reference");
 
         // FTS search
         let fts_count: i64 = db
@@ -676,4 +702,48 @@ fn test_turn_undo_workspace_level_semantics() {
         "Error message must be in Vietnamese explaining turn was already undone. Got: {}",
         err_msg
     );
+}
+
+#[test]
+fn restore_under_and_changed_under_touch_only_the_given_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ws = Workspace::create(tmp.path(), "WS").unwrap();
+    let a = ws.root().join("projects/p/artifacts/a_1");
+    let b = ws.root().join("projects/p/artifacts/aX1"); // `_` must not act as a wildcard
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(&b).unwrap();
+    std::fs::write(a.join("index.html"), "A v1").unwrap();
+    std::fs::write(b.join("index.html"), "B v1").unwrap();
+    let cp = CheckpointService::create(&ws, "trước", None).unwrap();
+    let count_before = CheckpointService::list(&ws).unwrap().len();
+
+    std::fs::write(a.join("index.html"), "A v2").unwrap();
+    std::fs::write(a.join("extra.css"), "new").unwrap();
+    std::fs::write(b.join("index.html"), "B v2").unwrap();
+
+    let prefixes = vec![
+        "projects/p/artifacts/a_1/".to_string(),
+        "projects/p/artifacts/none/".to_string(),
+    ];
+    let changed = CheckpointService::changed_under(&ws, &cp, &prefixes).unwrap();
+    assert_eq!(changed, vec!["projects/p/artifacts/a_1/".to_string()]);
+    assert_eq!(
+        CheckpointService::list(&ws).unwrap().len(),
+        count_before,
+        "no checkpoint created"
+    );
+
+    CheckpointService::restore_under(&ws, &cp, "projects/p/artifacts/a_1/").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(a.join("index.html")).unwrap(),
+        "A v1"
+    );
+    assert!(!a.join("extra.css").exists());
+    assert_eq!(
+        std::fs::read_to_string(b.join("index.html")).unwrap(),
+        "B v2"
+    );
+    assert!(CheckpointService::changed_under(&ws, &cp, &prefixes)
+        .unwrap()
+        .is_empty());
 }

@@ -9,6 +9,43 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver};
 use walkdir::WalkDir;
 
+/// Artifact edge input reference in `artifact.yaml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ArtifactYamlInput {
+    /// String input reference: "artifact:foo" or "asset:bar" or path
+    Str(String),
+    /// Object input reference: { ref: "...", role: "..." }
+    Obj {
+        #[serde(rename = "ref")]
+        reference: String,
+        #[serde(default = "default_role")]
+        role: String,
+    },
+}
+
+fn default_role() -> String {
+    "uses".to_string()
+}
+
+impl ArtifactYamlInput {
+    /// Return the reference target string.
+    pub fn reference(&self) -> &str {
+        match self {
+            Self::Str(s) => s.as_str(),
+            Self::Obj { reference, .. } => reference.as_str(),
+        }
+    }
+
+    /// Return the role string (uses, reference, variant_of).
+    pub fn role(&self) -> &str {
+        match self {
+            Self::Str(_) => "uses",
+            Self::Obj { role, .. } => role.as_str(),
+        }
+    }
+}
+
 /// Artifact metadata from `artifact.yaml`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactYaml {
@@ -31,7 +68,7 @@ pub struct ArtifactYaml {
     pub renderer: Option<String>,
     /// Inputs list
     #[serde(default)]
-    pub inputs: Vec<String>,
+    pub inputs: Vec<ArtifactYamlInput>,
 }
 
 /// Asset sidecar metadata from `.meta.yaml`.
@@ -84,6 +121,7 @@ impl Indexer {
 
         // Clear existing indexes
         tx.execute("DELETE FROM artifacts_index", [])?;
+        tx.execute("DELETE FROM artifact_edges", [])?;
         tx.execute("DELETE FROM assets_index", [])?;
         tx.execute("DELETE FROM search_fts", [])?;
 
@@ -152,6 +190,20 @@ impl Indexer {
                                     "INSERT INTO search_fts (target_type, target_id, title, content) VALUES ('artifact', ?1, ?2, ?3)",
                                     params![art.id, art.title, source_content],
                                 )?;
+
+                                // Index artifact edges
+                                for inp in &art.inputs {
+                                    tx.execute(
+                                        "INSERT OR REPLACE INTO artifact_edges (project, from_id, to_ref, role)
+                                         VALUES (?1, ?2, ?3, ?4)",
+                                        params![
+                                            project_slug,
+                                            art.id,
+                                            inp.reference(),
+                                            inp.role(),
+                                        ],
+                                    )?;
+                                }
                             }
                         }
                     }

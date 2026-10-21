@@ -37,6 +37,7 @@ export interface ThreadMessage {
   turnId?: string;
   isStreaming?: boolean;
   errorMessage?: string;
+  pinnedWarning?: { artifactId: string; checkpointId: string };
   model?: string;
 }
 
@@ -124,9 +125,11 @@ export function applyTurnEvent(prev: ThreadMessage[], payload: EngineTurnEvent, 
     case "TextDelta":
       next = { ...msg, text: msg.text + event.text };
       break;
-    case "Text":
-      next = { ...msg, text: event.text };
+    case "Text": {
+      const pinnedWarning = (event as any).pinnedArtifactWarning;
+      next = { ...msg, text: event.text, ...(pinnedWarning ? { pinnedWarning } : {}) };
       break;
+    }
     case "Thinking":
       next = {
         ...msg,

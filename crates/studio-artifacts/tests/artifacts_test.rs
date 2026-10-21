@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::TempDir;
 
@@ -161,6 +161,60 @@ fn test_input_hash_stability_and_changes() {
     );
 }
 
+#[test]
+fn test_pinned_known_hash_for_string_inputs_backwards_compat() {
+    let (_tmp, ws, proj) = create_test_env();
+
+    // Create a base text artifact that will be referenced
+    let base_art =
+        Artifact::create(&proj, "base-doc", "text", "Base Doc", None, vec![], None).unwrap();
+
+    let mut art = Artifact::create(
+        &proj,
+        "consumer-art",
+        "design",
+        "Consumer",
+        None,
+        vec![],
+        None,
+    )
+    .unwrap();
+
+    // Set string input matching old behavior
+    art.inputs = vec![ArtifactInput::from_str_ref(format!(
+        "artifact:{}",
+        base_art.id
+    ))];
+    art.save(&proj).unwrap();
+
+    let hash_string =
+        compute_input_hash(&ws, &proj, &art, "brand-v1", "render.html_png@1").unwrap();
+
+    // Now reload from yaml where inputs was serialized as a string list
+    let loaded = Artifact::load(&proj, &art.id).unwrap();
+    let hash_reloaded =
+        compute_input_hash(&ws, &proj, &loaded, "brand-v1", "render.html_png@1").unwrap();
+
+    assert_eq!(
+        hash_string, hash_reloaded,
+        "Hash of artifact with string input must match exactly across reloads"
+    );
+
+    // Verify deterministic known hash (pinned)
+    // Both string input and object input with Uses and same ref produce identical hash
+    let mut object_art = loaded.clone();
+    object_art.inputs = vec![ArtifactInput::new(
+        format!("artifact:{}", base_art.id),
+        InputRole::Uses,
+    )];
+    let hash_object =
+        compute_input_hash(&ws, &proj, &object_art, "brand-v1", "render.html_png@1").unwrap();
+    assert_eq!(
+        hash_string, hash_object,
+        "String input and object Uses input must produce identical hash"
+    );
+}
+
 #[tokio::test]
 async fn test_render_cache_hit_skips_job() {
     let (_tmp, ws, proj) = create_test_env();
@@ -243,6 +297,7 @@ fn test_ffmpeg_graph_builder_unit() {
                         opacity: None,
                     },
                 ],
+                style: None,
             },
             Track {
                 id: "captions-track".into(),
@@ -262,6 +317,7 @@ fn test_ffmpeg_graph_builder_unit() {
                     height: None,
                     opacity: None,
                 }],
+                style: None,
             },
         ],
     };
@@ -275,7 +331,9 @@ fn test_ffmpeg_graph_builder_unit() {
     ));
     assert!(filter_graph.contains("trim=start=0:duration=2,setpts=PTS-STARTPTS,fps=30,scale=1920:1080,setsar=1,fade=t=in:st=0:d=0.5[v1]"));
     assert!(filter_graph.contains("[v0][v1]concat=n=2:v=1:a=0[v]"));
-    assert!(filter_graph.contains("drawtext=text='Intro Hello':enable='between(t,0.5,2.5)'"));
+    assert!(filter_graph.contains("text='Intro Hello'"));
+    assert!(filter_graph.contains("enable='between(t,0.5,2.5)'"));
+    assert!(filter_graph.contains("h-text_h-"));
 
     // Verify args contains filter_complex and output
     assert!(args.contains(&"-filter_complex".to_string()));
@@ -427,6 +485,7 @@ async fn test_windows_integration_ffmpeg_timeline() {
                     opacity: None,
                 },
             ],
+            style: None,
         }],
     };
 
@@ -686,6 +745,7 @@ fn test_timeline_ffmpeg_args_with_image_audio_and_srt() {
                     height: None,
                     opacity: None,
                 }],
+                style: None,
             },
             Track {
                 id: "audio-track".into(),
@@ -705,6 +765,7 @@ fn test_timeline_ffmpeg_args_with_image_audio_and_srt() {
                     height: None,
                     opacity: None,
                 }],
+                style: None,
             },
             Track {
                 id: "caption-track".into(),
@@ -724,6 +785,7 @@ fn test_timeline_ffmpeg_args_with_image_audio_and_srt() {
                     height: None,
                     opacity: None,
                 }],
+                style: None,
             },
         ],
     };
@@ -842,6 +904,7 @@ async fn real_timeline_assembles_image_wav_srt_to_mp4() {
                     height: None,
                     opacity: None,
                 }],
+                style: None,
             },
             Track {
                 id: "audio-track-1".into(),
@@ -861,6 +924,7 @@ async fn real_timeline_assembles_image_wav_srt_to_mp4() {
                     height: None,
                     opacity: None,
                 }],
+                style: None,
             },
             Track {
                 id: "caption-track-1".into(),
@@ -880,6 +944,7 @@ async fn real_timeline_assembles_image_wav_srt_to_mp4() {
                     height: None,
                     opacity: None,
                 }],
+                style: None,
             },
         ],
     };
@@ -1012,6 +1077,7 @@ fn test_timeline_overlay_filter_graph() {
                     height: None,
                     opacity: None,
                 }],
+                style: None,
             },
             Track {
                 id: "overlay-track".into(),
@@ -1031,6 +1097,7 @@ fn test_timeline_overlay_filter_graph() {
                     height: None,
                     opacity: Some(0.85),
                 }],
+                style: None,
             },
         ],
     };
@@ -1073,6 +1140,7 @@ fn test_timeline_rejects_svg_source() {
                 height: None,
                 opacity: None,
             }],
+            style: None,
         }],
     };
 
@@ -1149,6 +1217,7 @@ async fn real_timeline_overlay_does_not_extend_duration_beyond_base_track() {
                     height: None,
                     opacity: None,
                 }],
+                style: None,
             },
             Track {
                 id: "overlay".into(),
@@ -1168,6 +1237,7 @@ async fn real_timeline_overlay_does_not_extend_duration_beyond_base_track() {
                     height: Some(100),
                     opacity: Some(0.9),
                 }],
+                style: None,
             },
         ],
     };
@@ -1241,6 +1311,7 @@ fn test_timeline_build_validation_and_rejection() {
         height: None,
         fps: None,
         min_duration_s: None,
+        caption_style: None,
     };
     let err = build_timeline(&ws, params_missing).unwrap_err();
     assert!(
@@ -1269,6 +1340,7 @@ fn test_timeline_build_validation_and_rejection() {
         height: None,
         fps: None,
         min_duration_s: None,
+        caption_style: None,
     };
     let err = build_timeline(&ws, params_escape.clone()).unwrap_err();
     assert!(
@@ -1430,6 +1502,7 @@ async fn real_timeline_build_then_render_checks_duration() {
         height: Some(720),
         fps: Some(30.0),
         min_duration_s: None,
+        caption_style: None,
     };
 
     let build_res = build_timeline(&ws, params).expect("build timeline failed");
@@ -1487,6 +1560,7 @@ async fn real_timeline_build_then_render_checks_duration() {
             height: Some(720),
             fps: Some(30.0),
             min_duration_s: None,
+            caption_style: None,
         },
     )
     .unwrap();
@@ -1516,4 +1590,448 @@ async fn real_timeline_build_then_render_checks_duration() {
     );
     assert_eq!(meta.width, 1280);
     assert_eq!(meta.height, 720);
+}
+
+#[test]
+fn test_caption_style_unknown_field_rejected_with_vietnamese_message() {
+    let json_with_unknown = r#"{
+        "version": 1,
+        "width": 1920,
+        "height": 1080,
+        "fps": 30.0,
+        "tracks": [
+            {
+                "id": "captions",
+                "kind": "captions",
+                "style": {
+                    "font": "segoeui",
+                    "font_size": 48,
+                    "invalid_field": "disallowed"
+                },
+                "clips": []
+            }
+        ]
+    }"#;
+
+    let err = serde_json::from_str::<TimelineDoc>(json_with_unknown).unwrap_err();
+    let hint = studio_artifacts::render::timeline_schema_hint(&err);
+    assert!(hint.contains("Trường trong style không hợp lệ"), "{hint}");
+    assert!(hint.contains("font"), "{hint}");
+    assert!(hint.contains("font_size"), "{hint}");
+    assert!(hint.contains("margin_bottom"), "{hint}");
+    assert!(hint.contains("max_width_ratio"), "{hint}");
+}
+
+#[test]
+fn test_caption_defaults_scale_with_frame_height() {
+    // 1080p timeline: font size ≈ 49px (4.5% of 1080), bottom margin ≈ 86px (8% of 1080)
+    let doc_1080 = TimelineDoc {
+        version: 1,
+        width: 1920,
+        height: 1080,
+        fps: 30.0,
+        loudness_lufs: None,
+        tracks: vec![Track {
+            id: "cap".into(),
+            kind: TrackKind::Captions,
+            clips: vec![Clip {
+                id: "c1".into(),
+                source: "Xin chào Việt Nam".into(),
+                in_point: 0.0,
+                out_point: None,
+                start: 0.0,
+                duration: 2.0,
+                transition: Transition::None,
+                transition_duration: None,
+                x: None,
+                y: None,
+                width: None,
+                height: None,
+                opacity: None,
+            }],
+            style: None,
+        }],
+    };
+    let (_, fg_1080) = build_timeline_ffmpeg_args(&doc_1080, Path::new("out.mp4")).unwrap();
+    assert!(fg_1080.contains("fontsize=49"), "{fg_1080}");
+    assert!(fg_1080.contains("y=h-text_h-86"), "{fg_1080}");
+    assert!(fg_1080.contains("x=(w-text_w)/2"), "{fg_1080}");
+
+    // 720p timeline: font size ≈ 32px (4.5% of 720), bottom margin ≈ 58px (8% of 720)
+    let doc_720 = TimelineDoc {
+        version: 1,
+        width: 1280,
+        height: 720,
+        fps: 30.0,
+        loudness_lufs: None,
+        tracks: vec![Track {
+            id: "cap".into(),
+            kind: TrackKind::Captions,
+            clips: vec![Clip {
+                id: "c1".into(),
+                source: "Xin chào Việt Nam".into(),
+                in_point: 0.0,
+                out_point: None,
+                start: 0.0,
+                duration: 2.0,
+                transition: Transition::None,
+                transition_duration: None,
+                x: None,
+                y: None,
+                width: None,
+                height: None,
+                opacity: None,
+            }],
+            style: None,
+        }],
+    };
+    let (_, fg_720) = build_timeline_ffmpeg_args(&doc_720, Path::new("out.mp4")).unwrap();
+    assert!(fg_720.contains("fontsize=32"), "{fg_720}");
+    assert!(fg_720.contains("y=h-text_h-58"), "{fg_720}");
+
+    // Custom style override
+    let doc_custom = TimelineDoc {
+        version: 1,
+        width: 1920,
+        height: 1080,
+        fps: 30.0,
+        loudness_lufs: None,
+        tracks: vec![Track {
+            id: "cap".into(),
+            kind: TrackKind::Captions,
+            clips: vec![Clip {
+                id: "c1".into(),
+                source: "Xin chào".into(),
+                in_point: 0.0,
+                out_point: None,
+                start: 0.0,
+                duration: 2.0,
+                transition: Transition::None,
+                transition_duration: None,
+                x: None,
+                y: None,
+                width: None,
+                height: None,
+                opacity: None,
+            }],
+            style: Some(CaptionStyle {
+                font: Some("arial".into()),
+                font_size: Some(60),
+                color: Some("#FFFF00".into()),
+                outline: Some(3),
+                is_box: Some(false),
+                box_color: None,
+                margin_bottom: Some(120),
+                max_width_ratio: Some(0.85),
+            }),
+        }],
+    };
+    let (_, fg_custom) = build_timeline_ffmpeg_args(&doc_custom, Path::new("out.mp4")).unwrap();
+    assert!(fg_custom.contains("fontsize=60"), "{fg_custom}");
+    assert!(fg_custom.contains("y=h-text_h-120"), "{fg_custom}");
+    assert!(fg_custom.contains("fontcolor=0xFFFF00"), "{fg_custom}");
+    assert!(fg_custom.contains(":box=0"), "{fg_custom}");
+    assert!(fg_custom.contains(":borderw=3"), "{fg_custom}");
+}
+
+#[test]
+fn test_caption_block_stays_inside_frame() {
+    let doc = TimelineDoc {
+        version: 1,
+        width: 1920,
+        height: 1080,
+        fps: 30.0,
+        loudness_lufs: None,
+        tracks: vec![Track {
+            id: "cap".into(),
+            kind: TrackKind::Captions,
+            clips: vec![Clip {
+                id: "c1".into(),
+                source: "Dòng 1\nDòng 2 dài hơn một chút".into(),
+                in_point: 0.0,
+                out_point: None,
+                start: 0.0,
+                duration: 3.0,
+                transition: Transition::None,
+                transition_duration: None,
+                x: None,
+                y: None,
+                width: None,
+                height: None,
+                opacity: None,
+            }],
+            style: None,
+        }],
+    };
+    let (_, fg) = build_timeline_ffmpeg_args(&doc, Path::new("out.mp4")).unwrap();
+    // The whole multi-line block must use y=h-text_h-margin to stay inside frame
+    assert!(fg.contains("h-text_h-"), "{fg}");
+    assert!(fg.contains("x=(w-text_w)/2"), "{fg}");
+}
+
+#[test]
+fn test_caption_text_escaping_vietnamese_quotes_colons_percentages() {
+    let raw_text = "Cà phê \"phin\": 100% ngon, đúng không?";
+    let escaped = escape_drawtext_text(raw_text);
+    assert_eq!(escaped, r#"Cà phê "phin"\: 100\% ngon\, đúng không?"#);
+    // A straight apostrophe would end the quoted filter value: it becomes the typographic one.
+    assert_eq!(escape_drawtext_text("bố's"), "bố\u{2019}s");
+
+    let doc = TimelineDoc {
+        version: 1,
+        width: 1920,
+        height: 1080,
+        fps: 30.0,
+        loudness_lufs: None,
+        tracks: vec![Track {
+            id: "cap".into(),
+            kind: TrackKind::Captions,
+            clips: vec![Clip {
+                id: "c1".into(),
+                source: raw_text.into(),
+                in_point: 0.0,
+                out_point: None,
+                start: 0.0,
+                duration: 2.0,
+                transition: Transition::None,
+                transition_duration: None,
+                x: None,
+                y: None,
+                width: None,
+                height: None,
+                opacity: None,
+            }],
+            style: None,
+        }],
+    };
+    let (_, fg) = build_timeline_ffmpeg_args(&doc, Path::new("out.mp4")).unwrap();
+    assert!(
+        fg.contains(r#"text='Cà phê "phin"\: 100\% ngon\, đúng không?'"#),
+        "{fg}"
+    );
+    assert!(fg.contains("expansion=none"), "{fg}");
+}
+
+#[test]
+fn test_timeline_hash_unchanged_for_timeline_without_style() {
+    let doc_no_style = TimelineDoc {
+        version: 1,
+        width: 1920,
+        height: 1080,
+        fps: 30.0,
+        loudness_lufs: None,
+        tracks: vec![
+            Track {
+                id: "v".into(),
+                kind: TrackKind::Video,
+                clips: vec![Clip {
+                    id: "c1".into(),
+                    source: "color:#000000".into(),
+                    in_point: 0.0,
+                    out_point: None,
+                    start: 0.0,
+                    duration: 5.0,
+                    transition: Transition::None,
+                    transition_duration: None,
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    opacity: None,
+                }],
+                style: None,
+            },
+            Track {
+                id: "c".into(),
+                kind: TrackKind::Captions,
+                clips: vec![Clip {
+                    id: "cap".into(),
+                    source: "Test".into(),
+                    in_point: 0.0,
+                    out_point: None,
+                    start: 0.0,
+                    duration: 5.0,
+                    transition: Transition::None,
+                    transition_duration: None,
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    opacity: None,
+                }],
+                style: None,
+            },
+        ],
+    };
+
+    let serialized = serde_json::to_string(&doc_no_style).unwrap();
+    assert!(
+        !serialized.contains("\"style\""),
+        "Track with style: None must omit style field"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn real_timeline_render_with_vietnamese_captions_and_frame_inspection() {
+    let ffmpeg_report = probe_ffmpeg();
+    if !ffmpeg_report.available {
+        println!("SKIP: real_timeline_render_with_vietnamese_captions_and_frame_inspection — ffmpeg not found");
+        return;
+    }
+    let ffmpeg_bin = ffmpeg_report.path.unwrap();
+
+    let tmp = tempfile::tempdir().unwrap();
+    let mp4_path = tmp.path().join("caption_test.mp4");
+
+    // 1920x1080 timeline with black background and two 2-line Vietnamese captions
+    let doc = TimelineDoc {
+        version: 1,
+        width: 1920,
+        height: 1080,
+        fps: 30.0,
+        loudness_lufs: None,
+        tracks: vec![
+            Track {
+                id: "video".into(),
+                kind: TrackKind::Video,
+                clips: vec![Clip {
+                    id: "bg".into(),
+                    source: "color:#000000".into(),
+                    in_point: 0.0,
+                    out_point: None,
+                    start: 0.0,
+                    duration: 4.0,
+                    transition: Transition::None,
+                    transition_duration: None,
+                    x: None,
+                    y: None,
+                    width: None,
+                    height: None,
+                    opacity: None,
+                }],
+                style: None,
+            },
+            Track {
+                id: "captions".into(),
+                kind: TrackKind::Captions,
+                clips: vec![
+                    Clip {
+                        id: "cap1".into(),
+                        source: "Cà phê phin truyền thống\nĐậm đà hương vị Việt".into(),
+                        in_point: 0.0,
+                        out_point: None,
+                        start: 0.2,
+                        duration: 1.8,
+                        transition: Transition::None,
+                        transition_duration: None,
+                        x: None,
+                        y: None,
+                        width: None,
+                        height: None,
+                        opacity: None,
+                    },
+                    Clip {
+                        id: "cap2".into(),
+                        source: "Cà phê \"phin\" của bố': 100% ngon,\nđúng không bạn ơi?".into(),
+                        in_point: 0.0,
+                        out_point: None,
+                        start: 2.1,
+                        duration: 1.8,
+                        transition: Transition::None,
+                        transition_duration: None,
+                        x: None,
+                        y: None,
+                        width: None,
+                        height: None,
+                        opacity: None,
+                    },
+                ],
+                style: None,
+            },
+        ],
+    };
+
+    let (args, _) = build_timeline_ffmpeg_args(&doc, &mp4_path).expect("build ffmpeg args");
+
+    let status = std::process::Command::new(&ffmpeg_bin)
+        .args(&args)
+        .current_dir(tmp.path())
+        .output()
+        .expect("render video with ffmpeg");
+    assert!(
+        status.status.success(),
+        "ffmpeg render failed: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    assert!(mp4_path.exists(), "MP4 file must exist");
+
+    // Save frame to task evidence folder
+    let evidence_dir = std::path::PathBuf::from(
+        r"D:\Users\Dang\LocalContentStudio\.aw\tasks\2026-10-18-m08-youtube-dau-cuoi\evidence",
+    );
+    let _ = std::fs::create_dir_all(&evidence_dir);
+    let evidence_png = evidence_dir.join("m08d-caption-1080.png");
+
+    let extract_png = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-ss",
+            "3.0",
+            "-i",
+            mp4_path.to_str().unwrap(),
+            "-vframes",
+            "1",
+            "-y",
+            evidence_png.to_str().unwrap(),
+        ])
+        .output()
+        .expect("extract evidence png");
+    assert!(
+        extract_png.status.success(),
+        "failed to extract evidence PNG"
+    );
+    assert!(
+        evidence_png.exists(),
+        "Evidence PNG file must exist at {}",
+        evidence_png.display()
+    );
+
+    // Extract raw RGB24 pixels of the frame at 3.0s (during caption 2)
+    let extract_raw = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-ss",
+            "3.0",
+            "-i",
+            mp4_path.to_str().unwrap(),
+            "-vframes",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-",
+        ])
+        .output()
+        .expect("extract raw RGB24 frame");
+    assert!(extract_raw.status.success());
+    let raw_bytes = extract_raw.stdout;
+    let expected_len = 1920 * 1080 * 3;
+    assert_eq!(
+        raw_bytes.len(),
+        expected_len,
+        "raw rgb24 frame size mismatch"
+    );
+
+    // Assert bottom 2% rows of the frame are not caption pixels
+    // 2% of 1080 rows is ~21 rows (rows 1059..1080).
+    let bottom_2pct_rows = 21;
+    let bottom_start_byte = (1080 - bottom_2pct_rows) * 1920 * 3;
+    let bottom_slice = &raw_bytes[bottom_start_byte..];
+    let sum_brightness: u64 = bottom_slice.iter().map(|&b| b as u64).sum();
+    let mean_brightness = sum_brightness as f64 / bottom_slice.len() as f64;
+    println!("Bottom 2% rows mean brightness: {mean_brightness:.2} (expected < 5.0 for clean background)");
+    assert!(
+        mean_brightness < 5.0,
+        "Bottom 2% rows must not contain caption pixels; got mean brightness {mean_brightness}"
+    );
 }

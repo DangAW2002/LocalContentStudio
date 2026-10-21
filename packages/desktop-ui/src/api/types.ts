@@ -988,3 +988,59 @@ export interface WebConfigureRequest {
   uploadLimitMb?: number;
   jsonLimitMb?: number;
 }
+
+// ==========================================
+// Content Graph Types (ADR-011)
+// ==========================================
+
+export type GraphNodeStatus = "moi" | "loi_thoi" | "chua_render" | "loi";
+
+export type GraphEdgeRole = "uses" | "reference" | "variant_of";
+
+export interface GraphNode {
+  id: string;
+  kind: string;
+  title: string;
+  status: GraphNodeStatus;
+  pinned: boolean;
+  notes: string[];
+}
+
+export interface GraphEdge {
+  from: string;
+  to: string;
+  role: GraphEdgeRole;
+}
+
+export interface DownstreamStep {
+  id: string;
+  kind: string;
+  title: string;
+  renderer?: string;
+  paid: boolean;
+  estimatedCostUsd?: number | null;
+  pinned: boolean;
+  skipped: boolean;
+  skipReason?: string;
+}
+
+export interface DownstreamPlan {
+  targetRef: string;
+  steps: DownstreamStep[];
+  freeStepsCount: number;
+  paidStepsCount: number;
+  totalEstimatedCostUsd: number;
+}
+
+export interface DownstreamRunResult {
+  executedIds: string[];
+  remainingPaid: DownstreamStep[];
+  skippedPinned: string[];
+  errors: string[];
+}
+
+export interface ContentGraphResponse {
+  project: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}

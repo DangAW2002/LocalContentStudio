@@ -337,6 +337,72 @@ pub async fn dispatch_invoke(
             let res = commands::artifact_list_impl(state, project)?;
             Ok(serde_json::to_value(res)?)
         }
+        "graph_get" => {
+            let project: String = get_arg(&args, "project")?;
+            commands::graph_get_impl(state, project)
+        }
+        "graph_link" => {
+            let project: String = get_arg(&args, "project")?;
+            let from_id: String =
+                get_arg(&args, "fromId").or_else(|_| get_arg(&args, "from_id"))?;
+            let to_ref: String = get_arg(&args, "toRef").or_else(|_| get_arg(&args, "to_ref"))?;
+            let role: Option<String> = get_opt_arg(&args, "role");
+            commands::graph_link_impl(state, project, from_id, to_ref, role)?;
+            Ok(serde_json::json!({ "status": "ok" }))
+        }
+        "graph_unlink" => {
+            let project: String = get_arg(&args, "project")?;
+            let from_id: String =
+                get_arg(&args, "fromId").or_else(|_| get_arg(&args, "from_id"))?;
+            let to_ref: String = get_arg(&args, "toRef").or_else(|_| get_arg(&args, "to_ref"))?;
+            commands::graph_unlink_impl(state, project, from_id, to_ref)?;
+            Ok(serde_json::json!({ "status": "ok" }))
+        }
+        "graph_set_pinned" => {
+            let project: String = get_arg(&args, "project")?;
+            let id: String = get_arg(&args, "id")?;
+            let pinned: bool = get_arg(&args, "pinned")?;
+            commands::graph_set_pinned_impl(state, project, id, pinned)?;
+            Ok(serde_json::json!({ "status": "ok" }))
+        }
+        "graph_set_notes" => {
+            let project: String = get_arg(&args, "project")?;
+            let id: String = get_arg(&args, "id")?;
+            let notes: Vec<String> = get_arg(&args, "notes")?;
+            commands::graph_set_notes_impl(state, project, id, notes)?;
+            Ok(serde_json::json!({ "status": "ok" }))
+        }
+        "graph_create_variant" => {
+            let project: String = get_arg(&args, "project")?;
+            let source_id: String =
+                get_arg(&args, "sourceId").or_else(|_| get_arg(&args, "source_id"))?;
+            let new_id: String = get_arg(&args, "newId").or_else(|_| get_arg(&args, "new_id"))?;
+            let title: Option<String> = get_opt_arg(&args, "title");
+            commands::graph_create_variant_impl(state, project, source_id, new_id, title)
+        }
+        "graph_update_downstream_plan" => {
+            let project: String = get_arg(&args, "project")?;
+            let target_ref: String =
+                get_arg(&args, "targetRef").or_else(|_| get_arg(&args, "target_ref"))?;
+            commands::graph_update_downstream_plan_impl(state, project, target_ref)
+        }
+        "graph_update_downstream_run" => {
+            let project: String = get_arg(&args, "project")?;
+            let target_ref: String =
+                get_arg(&args, "targetRef").or_else(|_| get_arg(&args, "target_ref"))?;
+            let run_paid: Option<bool> =
+                get_opt_arg(&args, "runPaid").or_else(|| get_opt_arg(&args, "run_paid"));
+            commands::graph_update_downstream_run_impl(state, project, target_ref, run_paid).await
+        }
+        "restore_pinned_artifact" => {
+            let project: String = get_arg(&args, "project")?;
+            let artifact_id: String =
+                get_arg(&args, "artifactId").or_else(|_| get_arg(&args, "artifact_id"))?;
+            let checkpoint_id: String =
+                get_arg(&args, "checkpointId").or_else(|_| get_arg(&args, "checkpoint_id"))?;
+            commands::restore_pinned_artifact_impl(state, project, artifact_id, checkpoint_id)?;
+            Ok(serde_json::json!({ "status": "ok" }))
+        }
         "artifact_render" => {
             let project: String = get_arg(&args, "project")?;
             let id: String = get_arg(&args, "id").or_else(|_| get_arg(&args, "path"))?;
