@@ -30,8 +30,8 @@ Bản phát hành lớn thứ hai của Local Content Studio tập trung vào đ
 - **Truy cập nhanh mọi thao tác**: Nhấn tổ hợp phím `Ctrl+K` để mở bảng điều khiển tìm kiếm mờ (fuzzy search) hỗ trợ gõ tiếng Việt có dấu và không dấu.
 - **Tiền tố điều hướng tiện lợi**:
   - `>`: Tìm và thực thi nhanh các lệnh hệ thống.
-  - `@`: Chuyển nhanh giữa các cuộc trò chuyện (threads).
-  - `#`: Mở trực tiếp các tệp tin trong dự án.
+  - `@`: Mở trực tiếp các tệp tin trong dự án.
+  - `#`: Chuyển nhanh giữa các cuộc trò chuyện (threads).
   - `?`: Tra cứu danh sách phím tắt hữu ích.
 - **Ghi nhớ lệnh gần đây (MRU)**: Tự động đưa 10 lệnh bạn thường dùng lên đầu danh sách.
 - **Thanh trạng thái tương tác**: Nhấp trực tiếp vào các chỉ số trên thanh trạng thái (Status Bar) để mở nhanh bảng kiểm tra engine Claude/agy, dung lượng ổ đĩa hay danh sách tác vụ.
