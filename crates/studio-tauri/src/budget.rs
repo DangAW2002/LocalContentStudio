@@ -248,6 +248,7 @@ mod tests {
             default_brand: None,
             monthly_budget_usd: Some(10.0),
             daily_budget_usd: Some(1.0),
+            ..Default::default()
         };
         std::fs::write(&studio_yaml_path, serde_yaml::to_string(&meta).unwrap()).unwrap();
 
