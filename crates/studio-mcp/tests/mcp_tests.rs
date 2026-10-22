@@ -486,6 +486,89 @@ async fn test_capability_relocation_and_indexing() {
 }
 
 #[tokio::test]
+async fn test_capability_image_resize_sidecar_and_orig_preservation() {
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("a"), "A").unwrap();
+    let proj = ws.create_project("my-project", "My Project").unwrap();
+
+    let st = state();
+    let mut turn_ctx = ctx(ws.root(), EngineKind::Claude);
+    turn_ctx.project = Some(proj.slug().to_string());
+    turn_ctx.turn_id = "turn-ai-resize".into();
+
+    let token = st.tokens.issue(turn_ctx.clone());
+    let srv = server::start(st.clone(), 0).await.unwrap();
+    let port = srv.addr.port();
+
+    let turn_dir = ws
+        .root()
+        .join(".studio")
+        .join("cache")
+        .join("turns")
+        .join("turn-ai-resize");
+    std::fs::create_dir_all(&turn_dir).unwrap();
+
+    let temp_asset = turn_dir.join("banner.png");
+    let temp_orig = turn_dir.join("banner.orig.png");
+    std::fs::write(&temp_asset, b"RESIZED_PNG_BYTES").unwrap();
+    std::fs::write(&temp_orig, b"ORIGINAL_PNG_BYTES").unwrap();
+
+    let rel_source = ".studio/cache/turns/turn-ai-resize/banner.png".to_string();
+
+    let call_body = call(
+        "capability_run",
+        json!({
+            "capability": "echo@1",
+            "provider": "echo",
+            "input": {
+                "prompt": "generate a wide banner",
+                "files": [rel_source],
+                "requested_size": "1280x720",
+                "native_size": "1792x1024",
+                "resized": true,
+                "provider_metadata": {
+                    "provider": "test.ai",
+                    "model": "model-v1",
+                    "estimated_cost_usd": 0.04
+                }
+            }
+        }),
+    );
+
+    let (status, resp) = post(port, Some(&token), None, call_body).await;
+    assert_eq!(status, 200, "Response: {:?}", resp);
+
+    let (text, is_err) = text_of(&resp);
+    assert!(!is_err, "Error in capability_run: {}", text);
+
+    let out_json: Value = serde_json::from_str(&text).unwrap();
+    let result_obj = &out_json["result"];
+    let files = result_obj["files"].as_array().unwrap();
+    let rel_file = files[0].as_str().unwrap();
+
+    let abs_file = ws.scoped_path(rel_file).unwrap();
+    assert!(abs_file.exists());
+
+    // Check .orig.png was also relocated alongside the final file
+    let orig_dest = abs_file.with_file_name("banner.orig.png");
+    assert!(
+        orig_dest.exists(),
+        "banner.orig.png must exist at relocated destination"
+    );
+    assert_eq!(std::fs::read(&orig_dest).unwrap(), b"ORIGINAL_PNG_BYTES");
+
+    // Check .meta.yaml sidecar contains requested_size, native_size, resized
+    let sidecar_p = abs_file.with_extension("png.meta.yaml");
+    assert!(sidecar_p.exists(), "sidecar .meta.yaml must exist");
+    let sidecar_yaml = std::fs::read_to_string(&sidecar_p).unwrap();
+    let sidecar_meta: studio_workspace::AssetSidecarMeta =
+        serde_yaml::from_str(&sidecar_yaml).unwrap();
+    assert_eq!(sidecar_meta.requested_size.as_deref(), Some("1280x720"));
+    assert_eq!(sidecar_meta.native_size.as_deref(), Some("1792x1024"));
+    assert_eq!(sidecar_meta.resized, Some(true));
+}
+
+#[tokio::test]
 async fn artifact_render_validation_and_scope_refusal() {
     let tmp = tempdir().unwrap();
     let ws = Workspace::create(tmp.path().join("a"), "A").unwrap();

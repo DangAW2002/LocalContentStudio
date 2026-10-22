@@ -110,6 +110,15 @@ pub struct AssetSidecarMeta {
     /// Consistency reference profile used
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference: Option<String>,
+    /// Requested size (e.g. 1280x720)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_size: Option<String>,
+    /// Native size from provider (e.g. 1792x1024)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_size: Option<String>,
+    /// Whether image was resized to requested size
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resized: Option<bool>,
     /// Catch-all for extra fields to preserve unknown fields on round-trip
     #[serde(flatten)]
     pub extra: std::collections::BTreeMap<String, serde_yaml::Value>,

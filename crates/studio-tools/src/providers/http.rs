@@ -177,7 +177,7 @@ where
     }
 }
 
-fn parse_retry_after(header: &HeaderValue) -> Option<Duration> {
+pub(crate) fn parse_retry_after(header: &HeaderValue) -> Option<Duration> {
     if let Ok(s) = header.to_str() {
         if let Ok(secs) = s.parse::<u64>() {
             return Some(Duration::from_secs(secs.min(30)));
@@ -186,7 +186,7 @@ fn parse_retry_after(header: &HeaderValue) -> Option<Duration> {
     None
 }
 
-fn parse_api_error(body: &str) -> Option<String> {
+pub(crate) fn parse_api_error(body: &str) -> Option<String> {
     let val: serde_json::Value = serde_json::from_str(body).ok()?;
     if let Some(msg) = val
         .get("error")
