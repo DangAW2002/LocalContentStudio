@@ -1151,7 +1151,20 @@ mod tests {
         .await
         .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            let count: i64 = db
+                .conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM events WHERE turn_id = 'turn-b'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if count > 0 {
+                break;
+            }
+        }
 
         // Advance 1000s (> 600s stall_after, but < 2700s stall_after_tool)
         clock.advance(std::time::Duration::from_secs(1000));

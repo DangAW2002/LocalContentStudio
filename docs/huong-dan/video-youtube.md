@@ -59,28 +59,28 @@ Bộ dựng FFmpeg của Studio sử dụng bộ lọc `drawtext` với cơ ch�
 ```yaml
 caption_style:
   font: "Segoe UI"           # Phông chữ hệ thống Windows
-  font_size: 48              # Cỡ chữ (pixel), mặc định ~4.5% chiều cao video
+  font_size: 49              # Cỡ chữ (pixel), mặc định ~4.5% chiều cao video (round(h * 0.045))
   color: "#FFFFFF"           # Màu chữ (mã hex hoặc tên màu, mặc định "white")
-  outline: 2                 # Độ dày viền chữ đen (pixel), mặc định 0
+  outline: 2                 # Độ dày viền chữ đen (pixel), mặc định 0 (không viền)
   box: true                  # Hiển thị hộp nền chữ (mặc định true)
   box_color: "black@0.6"     # Màu và độ mờ hộp nền (mặc định black@0.6)
-  margin_bottom: 86          # Khoảng cách mép dưới (pixel), mặc định ~8% chiều cao
-  max_width_ratio: 0.85      # Tỉ lệ chiều rộng tối đa so với khung hình (0.0 – 1.0)
+  margin_bottom: 86          # Khoảng cách mép dưới (pixel), mặc định ~8% chiều cao video (round(h * 0.08))
+  max_width_ratio: 0.85      # Tỉ lệ chiều rộng tối đa so với khung hình (tùy chọn, 0.0 – 1.0)
 ```
 
 | Trường | Kiểu | Mặc định | Ý nghĩa & Quy tắc FFmpeg |
 | :--- | :--- | :--- | :--- |
-| `font` | Chuỗi | Phông hệ thống | Tên phông chữ được Studio tự động tìm nạp trong thư mục Windows Fonts (`C:\Windows\Fonts`), ví dụ `"Segoe UI"`, `"Arial"`, `"Roboto"`. |
-| `font_size` | Số nguyên | Co giãn theo video | Cỡ chữ tính theo pixel. Nếu bỏ trống, hệ thống tự động co giãn bằng ~4.5% chiều cao video (với video 1080p tương đương 48px). |
-| `color` | Chuỗi | `"white"` | Màu sắc của chữ, chấp nhận mã màu hex dạng `"#RRGGBB"` (ví dụ `"#FFD700"` cho màu vàng kim) hoặc tên màu chuẩn của FFmpeg. |
-| `outline` | Số nguyên | `0` (không viền) | Độ dày đường viền đen bao quanh chữ (`:borderw={w}:bordercolor=black`). Thiết lập giá trị từ `2` đến `4` giúp chữ nổi bật và dễ đọc trên mọi cảnh nền phức tạp. |
-| `box` | Boolean | `true` | Bật (`true`) hoặc tắt (`false`) hộp khối màu nền phía sau chữ phụ đề. |
-| `box_color` | Chuỗi | `"black@0.6"` | Màu sắc và độ trong suốt của hộp nền, hỗ trợ định dạng `color@opacity` (ví dụ `black@0.6`) hoặc mã hex 8 ký tự `"#RRGGBBAA"`. Độ đệm hộp (`boxborderw`) tự động tính theo cỡ chữ `max(font_size / 5, 8)`. |
-| `margin_bottom` | Số nguyên | Co giãn theo video | Khoảng cách từ mép dưới khung hình video đến mép dưới của dòng phụ đề (`y = h - text_h - margin_bottom`). Mặc định khoảng 8% chiều cao video, đảm bảo phụ đề nằm trọn trong Vùng an toàn (Safe Zone), không bị thanh thời lượng YouTube che khuất. |
-| `max_width_ratio` | Số thực | `0.85` | Tỉ lệ chiều rộng giới hạn cho khối phụ đề so với độ rộng video (từ `0.0` đến `1.0`). Tránh phụ đề trải dài sát mép trái và mép phải. |
+| `font` | Chuỗi | Phông hệ thống | Tên phông chữ tìm trong thư mục Windows Fonts (`C:\Windows\Fonts`), ví dụ `"Segoe UI"`, `"Arial"`. |
+| `font_size` | Số nguyên | Co giãn theo video | Cỡ chữ tính theo pixel. Mặc định `round(height * 0.045)` (49px với video 1080p). |
+| `color` | Chuỗi | `"white"` | Màu chữ, nhận mã hex `"#RRGGBB"` hoặc tên màu FFmpeg. |
+| `outline` | Số nguyên | `0` | Độ dày đường viền đen bao quanh chữ (`:borderw={w}:bordercolor=black`). |
+| `box` | Boolean | `true` | Bật (`true`) hoặc tắt (`false`) hộp khối màu nền phía sau chữ. |
+| `box_color` | Chuỗi | `"black@0.6"` | Màu sắc và độ trong suốt hộp nền, nhận `color@opacity` hoặc `"#RRGGBBAA"`. Độ đệm hộp (`boxborderw`) tính theo `max(font_size / 5, 8)`. |
+| `margin_bottom` | Số nguyên | Co giãn theo video | Khoảng cách từ mép dưới khung hình đến mép dưới dòng phụ đề (`y = h - text_h - margin_bottom`). Mặc định `round(height * 0.08)` (86px với 1080p). |
+| `max_width_ratio` | Số thực | Không đặt | Tỉ lệ giới hạn chiều rộng khối phụ đề so với khung hình (0.0 – 1.0). |
 
 > [!NOTE]
-> Hệ thống áp dụng quy tắc nghiêm ngặt `@serde(deny_unknown_fields)` đối với `caption_style`: nếu nhập thừa trường không xác định, hệ thống sẽ từ chối và báo lỗi rõ ràng bằng tiếng Việt để bảo đảm tệp cấu hình luôn hợp lệ.
+> Hệ thống áp dụng `#[serde(deny_unknown_fields)]` cho `caption_style`: nếu nhập trường không thuộc danh mục hỗ trợ, hệ thống từ chối và báo lỗi bằng tiếng Việt để bảo đảm tệp cấu hình hợp lệ.
 
 ---
 
@@ -92,20 +92,20 @@ caption_style:
 - **Lớp phủ logo (Overlay track):** Logo của Brand được đặt ở track overlay video (thường ở góc trên bên phải màn hình), căn chỉnh toạ độ X/Y, kích thước và độ mờ (opacity) phù hợp.
   > [!NOTE]
   > Bộ dựng FFmpeg không hỗ trợ trực tiếp tệp vector `.svg` trong timeline video. Agent sẽ tự động chuyển logo SVG sang tệp PNG trước khi chèn vào lớp phủ.
-- **Tạo ảnh bìa (Thumbnail):** Agent tạo một thiết kế thumbnail chuẩn độ phân giải **1280×720** (tỉ lệ 16:9), phối hợp màu sắc nổi bật, chữ tiêu đề cuốn hút và logo thương hiệu rõ nét.
+- **Tạo ảnh bìa (Thumbnail):** Agent tạo một thiết kế thumbnail độ phân giải **1280×720** (tỉ lệ 16:9), gồm hình ảnh minh họa, tiêu đề và logo thương hiệu.
 
 ### Bước 7: Kiểm tra tiêu chuẩn kênh & Chuẩn bị đăng
-1. Ấn phẩm video MP4 và ảnh Thumbnail được chuyển qua **Ma trận Kênh** trong bảng Outputs để kiểm tra:
+1. Ấn phẩm video MP4 và ảnh Thumbnail được kiểm tra qua **Ma trận Kênh** trong bảng Outputs:
    - Độ phân giải: 1920×1080 (Full HD) cho video ngang, 1280×720 cho thumbnail.
    - Bảng màu nhận diện, độ tương phản chữ, sự hiện diện của logo và phụ đề.
-2. Khi mọi tiêu chí đạt dấu tích xanh **`✓`**, agent gọi lệnh tạo bản nháp xuất bản (`publish_prepare`).
-3. Tệp video, thumbnail và siêu dữ liệu (tiêu đề, mô tả, từ khoá thẻ tags, hashtags) được đóng gói sẵn sàng.
+2. Khi các tiêu chí đạt dấu tích **`✓`**, agent gọi lệnh tạo bản nháp xuất bản (`publish_prepare`).
+3. Tệp video, thumbnail và siêu dữ liệu (tiêu đề, mô tả, thẻ tags, hashtags) được đóng gói sẵn sàng.
 
 ---
 
 ## Xác nhận xuất bản an toàn (Mặc định Riêng tư)
 
-Studio luôn tuân thủ nguyên tắc **an toàn tuyệt đối: AI không bao giờ được tự ý bấm đăng công khai**:
+AI không tự ý đăng công khai: người dùng kiểm tra và xác nhận trước khi gửi video lên kênh:
 
 1. Khi bản nháp đã sẵn sàng, bạn mở bảng **Outputs** (`Ctrl+Alt+B`) → Bấm nút **Đăng…**
 2. Cửa sổ xuất bản hiển thị thông tin chi tiết:

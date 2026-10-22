@@ -505,7 +505,7 @@ export const GraphFlow: React.FC<GraphFlowProps> = ({
           elementsSelectable={true}
           fitView
           // Never shrink below a readable size: wider graphs are panned instead.
-          fitViewOptions={{ padding: 0.1, maxZoom: 1.2, minZoom: 0.85 }}
+          fitViewOptions={{ padding: 0.15, maxZoom: 1.0, minZoom: 0.2 }}
           minZoom={0.2}
           maxZoom={1.5}
           colorMode={colorMode}
