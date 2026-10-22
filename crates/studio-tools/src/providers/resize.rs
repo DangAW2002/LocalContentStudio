@@ -233,14 +233,18 @@ pub async fn post_process_image_output(
         }
 
         if let (Some(rw), Some(rh)) = (req_w, req_h) {
-            match fit_image_file(
-                &resolved_path,
-                rw,
-                rh,
-                fit,
-                keep_original,
-                request_wants_png,
-            ) {
+            // FFmpeg/ffprobe are blocking processes; keep them off the async runtime.
+            let path = resolved_path.clone();
+            let fit_mode = fit.to_string();
+            let fitted = tokio::task::spawn_blocking(move || {
+                fit_image_file(&path, rw, rh, &fit_mode, keep_original, request_wants_png)
+            })
+            .await
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool_id: "image.resize".into(),
+                reason: format!("Tác vụ co giãn ảnh bị dừng: {e}"),
+            })?;
+            match fitted {
                 Ok(outcome) => {
                     if outcome.resized {
                         any_resized = true;

@@ -713,3 +713,73 @@ async fn test_real_check_live_gateway() {
         ev2_len
     );
 }
+
+#[tokio::test]
+async fn test_openai_images_edits_auth_error_does_not_fall_back() {
+    let tmp = tempdir().unwrap();
+    let ws = Workspace::create(tmp.path().join("ws"), "ws").unwrap();
+
+    let ref_path = ws.root().join("profile.png");
+    generate_color_image(&ref_path, 256, 256, "cyan");
+
+    let gen_attempts = Arc::new(AtomicUsize::new(0));
+    let g_cnt = Arc::clone(&gen_attempts);
+
+    let server = MockServer::new(move |_method, path, _body| {
+        if path == "/images/edits" {
+            (
+                401,
+                vec![("Content-Type", "application/json".into())],
+                br#"{"error":{"message":"Incorrect API key provided"}}"#.to_vec(),
+            )
+        } else {
+            g_cnt.fetch_add(1, Ordering::SeqCst);
+            (500, vec![], b"should not be called".to_vec())
+        }
+    })
+    .await;
+
+    let secret_store = MemoryStore::new();
+    secret_store
+        .set(
+            ws.org().name(),
+            Some(ws.name()),
+            "OPENAI_API_KEY",
+            "bad-key",
+        )
+        .unwrap();
+
+    let reg = Registry::load(&ws);
+    let scheduler = test_scheduler();
+    let ctx = ToolRunContext {
+        workspace: &ws,
+        turn_id: Some("turn-edits-401".into()),
+        budget: Some(1.0),
+        approved: false,
+        scheduler: &scheduler,
+        secret_store: &secret_store,
+        endpoints: std::collections::HashMap::from([(
+            "openai.images".into(),
+            server.base_url.clone(),
+        )]),
+        pricing: std::collections::HashMap::new(),
+    };
+
+    let input = serde_json::json!({
+        "prompt": "Draw character with reference",
+        "width": 1280,
+        "height": 720,
+        "reference_images": ["profile.png"]
+    });
+
+    let run_res = run_tool(&reg, "openai.images", input, &ctx).await;
+    assert!(
+        !matches!(run_res, Ok(ToolRun::Success { .. })),
+        "401 from /images/edits must fail, got {run_res:?}"
+    );
+    assert_eq!(
+        gen_attempts.load(Ordering::SeqCst),
+        0,
+        "Must not silently fall back to /images/generations on auth errors"
+    );
+}

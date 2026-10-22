@@ -388,10 +388,23 @@ async fn send_edits_request(
                     return Ok(EditsResult::Success(resp));
                 }
 
-                // If 4xx (and not 429 rate limit), return ClientError for fallback
-                if status.is_client_error() && status != StatusCode::TOO_MANY_REQUESTS {
+                // Fall back only when the gateway lacks /images/edits. Auth, moderation or
+                // bad-input errors must surface: a silent fallback still costs money but
+                // drops the reference images.
+                if (status.is_client_error() && status != StatusCode::TOO_MANY_REQUESTS)
+                    || status == StatusCode::NOT_IMPLEMENTED
+                {
                     let err_text = resp.text().await.unwrap_or_default();
-                    return Ok(EditsResult::ClientError(status, err_text));
+                    if edits_unsupported(status, &err_text) {
+                        return Ok(EditsResult::ClientError(status, err_text));
+                    }
+                    let error_msg = parse_api_error(&err_text).unwrap_or_else(|| {
+                        format!("Yêu cầu HTTP thất bại với mã {}: {}", status, err_text)
+                    });
+                    return Err(ToolError::ExecutionFailed {
+                        tool_id: "openai.images".into(),
+                        reason: error_msg,
+                    });
                 }
 
                 if (status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error())
@@ -432,6 +445,33 @@ async fn send_edits_request(
             }
         }
     }
+}
+
+/// Whether an error from `/images/edits` means the gateway does not offer the endpoint,
+/// as opposed to a real request error (bad key, moderation, invalid input).
+fn edits_unsupported(status: StatusCode, body: &str) -> bool {
+    if matches!(
+        status,
+        StatusCode::NOT_FOUND
+            | StatusCode::METHOD_NOT_ALLOWED
+            | StatusCode::UNSUPPORTED_MEDIA_TYPE
+            | StatusCode::NOT_IMPLEMENTED
+    ) {
+        return true;
+    }
+    if status != StatusCode::BAD_REQUEST {
+        return false;
+    }
+    let lower = body.to_lowercase();
+    [
+        "not supported",
+        "unsupported",
+        "unknown endpoint",
+        "invalid url",
+        "no route",
+    ]
+    .iter()
+    .any(|k| lower.contains(k))
 }
 
 fn select_openai_size(width: u64, height: u64) -> &'static str {
