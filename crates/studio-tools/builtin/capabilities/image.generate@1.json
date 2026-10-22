@@ -45,6 +45,15 @@
       "model": {
         "type": "string",
         "description": "Model của provider (tuỳ chọn; mặc định theo provider, ví dụ gpt-image-1 hoặc model của gateway)"
+      },
+      "fit": {
+        "type": "string",
+        "enum": ["cover", "contain", "none"],
+        "description": "Chế độ co giãn ảnh khớp kích thước yêu cầu: cover (mặc định: phóng và crop tâm), contain (thu vừa khung và đệm lề), none (giữ nguyên kích thước gốc của provider)"
+      },
+      "keep_original": {
+        "type": "boolean",
+        "description": "Giữ lại ảnh gốc từ provider với hậu tố .orig.<ext> khi có co giãn ảnh (mặc định false)"
       }
     },
     "required": [
@@ -62,6 +71,18 @@
           "type": "string"
         },
         "description": "Danh sách đường dẫn tương đối trong workspace tới các tệp ảnh đã tạo"
+      },
+      "requested_size": {
+        "type": "string",
+        "description": "Kích thước yêu cầu (vd 1280x720)"
+      },
+      "native_size": {
+        "type": "string",
+        "description": "Kích thước gốc từ provider (vd 1792x1024)"
+      },
+      "resized": {
+        "type": "boolean",
+        "description": "Đánh dấu ảnh đã được co giãn khớp kích thước yêu cầu hay chưa"
       },
       "provider_metadata": {
         "type": "object",

@@ -7,6 +7,7 @@ pub mod inspect;
 pub mod openai;
 pub mod openai_videos;
 pub mod piper;
+pub mod resize;
 pub mod veo;
 pub mod vieneu;
 
@@ -31,10 +32,18 @@ pub async fn run_builtin(
         "tts.vieneu" => vieneu::run_vieneu(ws, out_dir, input).await,
         "tts.piper" => piper::run_piper(ws, out_dir, input).await,
         "google.imagen" => {
-            imagen::run_google_imagen(ws, out_dir, input, api_key, base_override, pricing).await
+            let mut res =
+                imagen::run_google_imagen(ws, out_dir, input, api_key, base_override, pricing)
+                    .await?;
+            resize::post_process_image_output(ws, out_dir, input, &mut res).await?;
+            Ok(res)
         }
         "openai.images" => {
-            openai::run_openai_images(ws, out_dir, input, api_key, base_override, pricing).await
+            let mut res =
+                openai::run_openai_images(ws, out_dir, input, api_key, base_override, pricing)
+                    .await?;
+            resize::post_process_image_output(ws, out_dir, input, &mut res).await?;
+            Ok(res)
         }
         "openai.videos" => {
             openai_videos::run_openai_videos(ws, out_dir, input, api_key, base_override, pricing)

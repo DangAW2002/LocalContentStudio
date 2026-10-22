@@ -1,6 +1,6 @@
 id: openai.images
 kind: generator
-description: "Tạo hình ảnh qua OpenAI Images API (gpt-image-1 / DALL-E)"
+description: "Tạo hình ảnh qua OpenAI Images API (gpt-image-1 / DALL-E, hỗ trợ ảnh tham chiếu qua /images/edits)"
 provides:
   - "image.generate@1"
 run:

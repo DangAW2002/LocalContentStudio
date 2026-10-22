@@ -1027,10 +1027,15 @@ async fn capability_run(
     for provider in &providers {
         let mut provider_warnings = warnings.clone();
         if provider == "openai.images" {
-            if let Some(arr) = input.get("reference_images").and_then(Value::as_array) {
-                if !arr.is_empty() {
-                    provider_warnings.push("Provider 'openai.images' không hỗ trợ ảnh tham chiếu (reference_images) — ảnh tham chiếu sẽ không được sử dụng.".to_string());
-                }
+            if input.get("seed").is_some()
+                && !provider_warnings
+                    .iter()
+                    .any(|w| w.contains("không hỗ trợ seed"))
+            {
+                provider_warnings.push(
+                    "Provider 'openai.images' không hỗ trợ seed — tham số seed sẽ bị bỏ qua."
+                        .to_string(),
+                );
             }
         } else if provider == "openai.videos"
             && (input.get("reference_image").is_some() || input.get("reference_images").is_some())
@@ -1050,12 +1055,22 @@ async fn capability_run(
                     resolved_reference_id.as_deref(),
                 );
                 annotate_audio_duration(ws, &mut output);
-                if !provider_warnings.is_empty() {
-                    output["warnings"] = json!(provider_warnings);
+                let mut combined_warnings = provider_warnings.clone();
+                if let Some(arr) = output.get("warnings").and_then(Value::as_array) {
+                    for w in arr {
+                        if let Some(ws) = w.as_str() {
+                            if !combined_warnings.iter().any(|existing| existing == ws) {
+                                combined_warnings.push(ws.to_string());
+                            }
+                        }
+                    }
+                }
+                if !combined_warnings.is_empty() {
+                    output["warnings"] = json!(combined_warnings);
                 }
                 let mut ret = json!({ "provider": provider, "result": output });
-                if !provider_warnings.is_empty() {
-                    ret["warnings"] = json!(provider_warnings);
+                if !combined_warnings.is_empty() {
+                    ret["warnings"] = json!(combined_warnings);
                 }
                 return Ok(ret);
             }
@@ -1105,6 +1120,15 @@ fn relocate_and_index_generated_files(
         .get("provider_metadata")
         .and_then(|m| m.get("estimated_cost_usd"))
         .and_then(Value::as_f64);
+    let requested_size = output
+        .get("requested_size")
+        .and_then(Value::as_str)
+        .map(String::from);
+    let native_size = output
+        .get("native_size")
+        .and_then(Value::as_str)
+        .map(String::from);
+    let resized = output.get("resized").and_then(Value::as_bool);
 
     let mut path_map = std::collections::HashMap::new();
 
@@ -1142,7 +1166,7 @@ fn relocate_and_index_generated_files(
                                 format!("{file_stem}-{uid}.{file_ext}")
                             }
                         } else {
-                            filename
+                            filename.clone()
                         };
 
                         let dest_path = target_dir.join(&dest_filename);
@@ -1156,6 +1180,27 @@ fn relocate_and_index_generated_files(
                             let new_rel = rel(ws, &dest_path);
                             path_map.insert(f_str.to_string(), new_rel.clone());
 
+                            // If an original file backup exists (<file_stem>.orig.<file_ext>), move it as well
+                            let orig_src =
+                                src_path.with_file_name(format!("{file_stem}.orig.{file_ext}"));
+                            if orig_src.is_file() {
+                                let dest_stem = Path::new(&dest_filename)
+                                    .file_stem()
+                                    .and_then(|s| s.to_str())
+                                    .unwrap_or(file_stem);
+                                let dest_orig_filename = if file_ext.is_empty() {
+                                    format!("{dest_stem}.orig")
+                                } else {
+                                    format!("{dest_stem}.orig.{file_ext}")
+                                };
+                                let dest_orig_path = target_dir.join(dest_orig_filename);
+                                let _ = std::fs::rename(&orig_src, &dest_orig_path).or_else(|_| {
+                                    std::fs::copy(&orig_src, &dest_orig_path)
+                                        .map(|_| ())
+                                        .and_then(|_| std::fs::remove_file(&orig_src))
+                                });
+                            }
+
                             // Record in assets_index & create .meta.yaml sidecar
                             let sidecar = studio_workspace::AssetSidecarMeta {
                                 title: Some(dest_filename.clone()),
@@ -1167,6 +1212,9 @@ fn relocate_and_index_generated_files(
                                 cost_usd: cost,
                                 turn_id: Some(ctx.turn_id.clone()),
                                 reference: reference_id.map(String::from),
+                                requested_size: requested_size.clone(),
+                                native_size: native_size.clone(),
+                                resized,
                                 ..Default::default()
                             };
 

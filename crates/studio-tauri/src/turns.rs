@@ -999,6 +999,27 @@ mod tests {
         }
     }
 
+    /// Waits until the turn loop has stored an event of `event_type`. Advancing the mock
+    /// clock before the loop has seen the event moves "last activity" forward and makes
+    /// the stall assertions flaky.
+    async fn wait_for_event(db: &WorkspaceDb, turn_id: &str, event_type: &str) {
+        for _ in 0..500 {
+            let n: i64 = db
+                .conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM events WHERE turn_id = ?1 AND event_type = ?2",
+                    params![turn_id, event_type],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            if n > 0 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("turn {turn_id} never stored a {event_type} event");
+    }
+
     async fn setup_test_turn_env(
         turn_id: &str,
         thread_id: &str,
@@ -1151,7 +1172,7 @@ mod tests {
         .await
         .unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        wait_for_event(&db, "turn-b", "ToolCall").await;
 
         // Advance 1000s (> 600s stall_after, but < 2700s stall_after_tool)
         clock.advance(std::time::Duration::from_secs(1000));
@@ -1263,7 +1284,7 @@ mod tests {
         })
         .await
         .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        wait_for_event(&db, "turn-r", "ToolCall").await;
 
         // Sleep/resume while the tool runs, then well past the grace window.
         clock.advance_wall(std::time::Duration::from_secs(600));
@@ -1289,7 +1310,7 @@ mod tests {
     #[tokio::test]
     async fn test_stall_wall_clock_jump_grace_then_stall() {
         let (_tmp, _ws, db, _state, task, cancel) = setup_test_turn_env("turn-d", "thread-d").await;
-        let (_tx, rx) = tokio::sync::mpsc::channel(10);
+        let (tx, rx) = tokio::sync::mpsc::channel(10);
         let turn = Turn::mock(rx, None);
         let clock = Arc::new(MockClock::new());
         let config = StallWatchdogConfig {
@@ -1301,7 +1322,15 @@ mod tests {
         };
 
         let handle = tokio::spawn(run_turn_inner(task, turn, cancel, config, clock.clone()));
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        // The loop must have read its starting wall time before the jump below.
+        tx.send(Event::ToolResult {
+            id: "warmup".to_string(),
+            output_preview: String::new(),
+            is_error: false,
+        })
+        .await
+        .unwrap();
+        wait_for_event(&db, "turn-d", "ToolResult").await;
 
         // Machine sleeps and wakes: wall clock jumps by 10 minutes (600s), but monotonic only 5s
         clock.advance_wall(std::time::Duration::from_secs(600));
