@@ -38,12 +38,51 @@ flowchart TD
 - Với mỗi phân cảnh, agent tìm kiếm trong Thư viện tài nguyên có sẵn hoặc gọi công cụ tạo ảnh AI (qua Gateway kết nối OpenAI Images / Flux).
 - Nếu không sử dụng ảnh AI, agent có thể tự thiết kế các thẻ cảnh (artboards) bằng HTML/CSS theo đúng font chữ và mã màu của Brand, sau đó render thành ảnh PNG sắc nét.
 
-### Bước 4: Dựng dòng thời gian video (Timeline)
-- Agent tạo tệp cấu hình `timeline.json` kết nối các luồng dữ liệu:
-  - **Track video chính (Base track):** Nối tiếp các cảnh hình ảnh khớp hoàn toàn với thời lượng lời đọc, có hiệu ứng chuyển cảnh mượt mà.
-  - **Track âm thanh (Audio track):** Đặt các đoạn thoại tiếng Việt liên tục không bị ngắt quãng.
-  - **Track phụ đề (Subtitles):** Tự động bẻ câu thông minh (tối đa 2 dòng, khoảng 42 ký tự/dòng) để người xem dễ theo dõi trên mọi thiết bị.
-- Agent dựng timeline bằng công cụ `timeline_build` của Studio: tự đo thời lượng từng đoạn giọng đọc, xếp ảnh/clip nền nối tiếp, chia phụ đề theo câu và đặt logo lên lớp phủ — bạn không phải duyệt lệnh nào cho bước này.
+### Bước 4: Dựng dòng thời gian video (Timeline) với `timeline_build`
+- Studio tích hợp sẵn công cụ tự động dựng timeline `timeline_build`:
+  - **Tự động đo thời lượng âm thanh:** Sử dụng `ffprobe` đo thời lượng chính xác của từng tệp âm thanh giọng đọc `.wav`.
+  - **Xếp đặt track video chính (Base track):** Các tư liệu hình ảnh hoặc clip B-roll được kéo giãn hoặc cắt cúp nối tiếp nhau khớp từng mili-giây với từng câu thoại.
+  - **Phân tách phụ đề thông minh (Caption track):** Tự động phân chia câu thoại theo dấu câu và độ dài (tối đa 2 dòng, mỗi dòng khoảng 42 ký tự, tổng tối đa 84 ký tự mỗi thẻ phụ đề), tính toán tỷ trọng hiển thị theo độ dài ký tự của từng cụm từ.
+  - **Lớp phủ thương hiệu (Overlay track):** Đặt logo thương hiệu lên góc video với toạ độ và tỷ lệ kích thước chính xác.
+  - **Ghi cấu hình hoàn chỉnh:** Tự động tạo tệp `timeline.json` và `artifact.yaml` kèm đầy đủ danh sách `inputs` sẵn sàng kết xuất video MP4.
+
+---
+
+## Tùy biến kiểu dáng phụ đề (`caption_style`)
+
+Khi dựng dòng thời gian bằng `timeline_build` hoặc chỉnh sửa trực tiếp cấu hình phụ đề trong `timeline.json`, bạn có thể chỉ định đối tượng `caption_style` để tùy biến giao diện chữ hiển thị trên video.
+
+### Cấu trúc và các trường cấu hình
+
+Bộ dựng FFmpeg của Studio sử dụng bộ lọc `drawtext` với cơ chế khử ký tự đặc biệt (`escape_drawtext_text`) và căn giữa tự động. Các trường được hỗ trợ bao gồm:
+
+```yaml
+caption_style:
+  font: "Segoe UI"           # Phông chữ hệ thống Windows
+  font_size: 48              # Cỡ chữ (pixel), mặc định ~4.5% chiều cao video
+  color: "#FFFFFF"           # Màu chữ (mã hex hoặc tên màu, mặc định "white")
+  outline: 2                 # Độ dày viền chữ đen (pixel), mặc định 0
+  box: true                  # Hiển thị hộp nền chữ (mặc định true)
+  box_color: "black@0.6"     # Màu và độ mờ hộp nền (mặc định black@0.6)
+  margin_bottom: 86          # Khoảng cách mép dưới (pixel), mặc định ~8% chiều cao
+  max_width_ratio: 0.85      # Tỉ lệ chiều rộng tối đa so với khung hình (0.0 – 1.0)
+```
+
+| Trường | Kiểu | Mặc định | Ý nghĩa & Quy tắc FFmpeg |
+| :--- | :--- | :--- | :--- |
+| `font` | Chuỗi | Phông hệ thống | Tên phông chữ được Studio tự động tìm nạp trong thư mục Windows Fonts (`C:\Windows\Fonts`), ví dụ `"Segoe UI"`, `"Arial"`, `"Roboto"`. |
+| `font_size` | Số nguyên | Co giãn theo video | Cỡ chữ tính theo pixel. Nếu bỏ trống, hệ thống tự động co giãn bằng ~4.5% chiều cao video (với video 1080p tương đương 48px). |
+| `color` | Chuỗi | `"white"` | Màu sắc của chữ, chấp nhận mã màu hex dạng `"#RRGGBB"` (ví dụ `"#FFD700"` cho màu vàng kim) hoặc tên màu chuẩn của FFmpeg. |
+| `outline` | Số nguyên | `0` (không viền) | Độ dày đường viền đen bao quanh chữ (`:borderw={w}:bordercolor=black`). Thiết lập giá trị từ `2` đến `4` giúp chữ nổi bật và dễ đọc trên mọi cảnh nền phức tạp. |
+| `box` | Boolean | `true` | Bật (`true`) hoặc tắt (`false`) hộp khối màu nền phía sau chữ phụ đề. |
+| `box_color` | Chuỗi | `"black@0.6"` | Màu sắc và độ trong suốt của hộp nền, hỗ trợ định dạng `color@opacity` (ví dụ `black@0.6`) hoặc mã hex 8 ký tự `"#RRGGBBAA"`. Độ đệm hộp (`boxborderw`) tự động tính theo cỡ chữ `max(font_size / 5, 8)`. |
+| `margin_bottom` | Số nguyên | Co giãn theo video | Khoảng cách từ mép dưới khung hình video đến mép dưới của dòng phụ đề (`y = h - text_h - margin_bottom`). Mặc định khoảng 8% chiều cao video, đảm bảo phụ đề nằm trọn trong Vùng an toàn (Safe Zone), không bị thanh thời lượng YouTube che khuất. |
+| `max_width_ratio` | Số thực | `0.85` | Tỉ lệ chiều rộng giới hạn cho khối phụ đề so với độ rộng video (từ `0.0` đến `1.0`). Tránh phụ đề trải dài sát mép trái và mép phải. |
+
+> [!NOTE]
+> Hệ thống áp dụng quy tắc nghiêm ngặt `@serde(deny_unknown_fields)` đối với `caption_style`: nếu nhập thừa trường không xác định, hệ thống sẽ từ chối và báo lỗi rõ ràng bằng tiếng Việt để bảo đảm tệp cấu hình luôn hợp lệ.
+
+---
 
 ### Bước 5: Chuẩn hóa âm lượng chuẩn YouTube (−14 LUFS)
 - YouTube yêu cầu âm lượng tổng thể đạt chuẩn **−14 LUFS** để video không bị quá nhỏ so với các video khác hoặc bị nền tảng tự động hạ âm lượng do méo tiếng.
