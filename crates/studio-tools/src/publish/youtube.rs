@@ -641,6 +641,8 @@ pub async fn connect_youtube(
         let _ = secrets.set("", None, &channel_token_key, &refresh_token);
         let _ = secrets.set("", None, KEY_YOUTUBE_REFRESH_TOKEN, &refresh_token);
     }
+    let _ = secrets.set("", None, KEY_YOUTUBE_CLIENT_ID, &client_id);
+    let _ = secrets.set("", None, KEY_YOUTUBE_CLIENT_SECRET, &client_secret);
 
     Ok(channel)
 }
@@ -1294,6 +1296,83 @@ mod tests {
     /// Real private upload with the OAuth client + refresh token saved by "Kết nối YouTube".
     /// Env: LCS_YT_ORG, LCS_YT_WS (scope holding the client), LCS_YT_VIDEO, optional LCS_YT_THUMB,
     /// LCS_YT_META (PublishMetadata JSON). Privacy is forced to private.
+    #[tokio::test]
+    async fn test_youtube_credentials_app_scope_fallback_for_other_workspaces() {
+        use crate::secret::MemoryStore;
+        let store = MemoryStore::new();
+
+        // 1. In workspace "channel-alpha", OAuth client and refresh token are connected.
+        // Storing at app scope as connect_youtube does:
+        store
+            .set(
+                "org-1",
+                Some("channel-alpha"),
+                KEY_YOUTUBE_CLIENT_ID,
+                "client-id-123",
+            )
+            .unwrap();
+        store
+            .set(
+                "org-1",
+                Some("channel-alpha"),
+                KEY_YOUTUBE_CLIENT_SECRET,
+                "client-secret-abc",
+            )
+            .unwrap();
+        store
+            .set("", None, KEY_YOUTUBE_CLIENT_ID, "client-id-123")
+            .unwrap();
+        store
+            .set("", None, KEY_YOUTUBE_CLIENT_SECRET, "client-secret-abc")
+            .unwrap();
+        store
+            .set("", None, KEY_YOUTUBE_REFRESH_TOKEN, "refresh-token-xyz")
+            .unwrap();
+
+        // 2. Querying from an entirely different workspace "E2E Workspace" with no workspace-specific secrets:
+        let ws_other = "E2E Workspace";
+        assert_eq!(
+            store.get("org-1", Some(ws_other), KEY_YOUTUBE_CLIENT_ID),
+            Some("client-id-123".to_string())
+        );
+        assert_eq!(
+            store.get("org-1", Some(ws_other), KEY_YOUTUBE_CLIENT_SECRET),
+            Some("client-secret-abc".to_string())
+        );
+        assert_eq!(
+            store.get("org-1", Some(ws_other), KEY_YOUTUBE_REFRESH_TOKEN),
+            Some("refresh-token-xyz".to_string())
+        );
+
+        // 3. When workspace "E2E Workspace" calls publish_youtube_complete,
+        // it must resolve client credentials and refresh token from app scope
+        // (failing only on network token exchange rather than missing credentials).
+        let temp_video = tempfile::NamedTempFile::new().unwrap();
+        let meta = crate::publish::model::PublishMetadata::default();
+        let params = YouTubePublishParams {
+            channel_id: None,
+            video_path: temp_video.path(),
+            thumbnail_path: None,
+            metadata: &meta,
+        };
+        let err = publish_youtube_complete(&store, "org-1", Some(ws_other), params, |_, _| {})
+            .await
+            .unwrap_err();
+        let err_str = err.to_string();
+        assert!(
+            !err_str.contains("Chưa cấu hình YOUTUBE_CLIENT_ID"),
+            "Client ID must be found via app scope fallback, got: {err_str}"
+        );
+        assert!(
+            !err_str.contains("Chưa cấu hình YOUTUBE_CLIENT_SECRET"),
+            "Client Secret must be found via app scope fallback, got: {err_str}"
+        );
+        assert!(
+            !err_str.contains("Chưa kết nối YouTube"),
+            "Refresh token must be found via app scope fallback, got: {err_str}"
+        );
+    }
+
     #[tokio::test]
     #[ignore]
     async fn live_youtube_private_upload() {

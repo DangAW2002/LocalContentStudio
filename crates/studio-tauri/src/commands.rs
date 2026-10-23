@@ -3504,7 +3504,14 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_tts_model_preview_binary_and_voices() {
-        let state = AppState::new();
+        let (_temp, state) = {
+            let _lock = ENV_LOCK.lock().unwrap();
+            let temp = tempfile::tempdir().unwrap();
+            let app_dir = temp.path().join("app_data");
+            std::env::set_var("STUDIO_APP_DIR", &app_dir);
+            let state = AppState::new();
+            (temp, state)
+        };
         let bin_preview = tts_model_preview_impl(&state, "piper".into(), "binary".into())
             .await
             .expect("piper binary preview failed");
@@ -3841,6 +3848,8 @@ formats: [unclosed list
     async fn test_artifact_channel_matrix_and_cache() {
         let _lock = ENV_LOCK.lock().unwrap();
         let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join("app_data");
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
         let ws_dir = temp.path().join("my_ws");
         let ws = Workspace::create(&ws_dir, "Matrix WS").unwrap();
 

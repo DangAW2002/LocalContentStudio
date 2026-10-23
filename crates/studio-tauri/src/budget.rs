@@ -215,7 +215,10 @@ mod tests {
 
     #[test]
     fn test_budget_status_and_ledger() {
+        let _lock = crate::commands::tests::ENV_LOCK.lock().unwrap();
         let tmp = tempdir().unwrap();
+        let app_dir = tmp.path().join("app_data");
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
         let ws = Workspace::create(tmp.path().join("ws"), "Test WS").unwrap();
         let db = WorkspaceDb::open(&ws).unwrap();
 
@@ -236,7 +239,10 @@ mod tests {
 
     #[test]
     fn test_calculate_turn_budget_caps_at_remaining_daily() {
+        let _lock = crate::commands::tests::ENV_LOCK.lock().unwrap();
         let tmp = tempdir().unwrap();
+        let app_dir = tmp.path().join("app_data");
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
         let ws = Workspace::create(tmp.path().join("ws"), "Test WS").unwrap();
         let db = WorkspaceDb::open(&ws).unwrap();
 
@@ -280,7 +286,10 @@ mod tests {
 
     #[test]
     fn budget_write_keeps_other_keys_and_refuses_invalid_yaml() {
+        let _lock = crate::commands::tests::ENV_LOCK.lock().unwrap();
         let tmp = tempdir().unwrap();
+        let app_dir = tmp.path().join("app_data");
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
         let ws = Workspace::create(tmp.path().join("ws"), "Test WS").unwrap();
         let path = ws.root().join("studio.yaml");
         std::fs::write(

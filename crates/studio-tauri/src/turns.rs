@@ -957,7 +957,10 @@ mod tests {
 
     #[test]
     fn test_build_context_for_agy_and_claude() {
+        let _lock = crate::commands::tests::ENV_LOCK.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
+        let app_dir = tmp.path().join("app_data");
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
         let ws = Workspace::create(tmp.path().join("ws"), "Test Workspace").unwrap();
 
         let agy_ctx = build_context(&ws, None, &[], None, false);
@@ -1031,13 +1034,17 @@ mod tests {
         TurnTask,
         Arc<Notify>,
     ) {
+        let lock = crate::commands::tests::ENV_LOCK.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
+        let app_dir = tmp.path().join("app_data");
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
         let ws = Workspace::create(tmp.path().join("ws"), "Test WS").unwrap();
         let db = WorkspaceDb::open(&ws).unwrap();
         let state = AppState::new();
         if let Ok(mut cur) = state.current.lock() {
             *cur = Some(ws.root().to_path_buf());
         }
+        drop(lock);
 
         db.conn()
             .execute(

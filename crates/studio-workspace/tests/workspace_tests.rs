@@ -24,11 +24,16 @@ fn test_app_paths_and_app_db() {
     assert_eq!(orgs.len(), 1);
     assert_eq!(orgs[0].name, "Cá nhân");
 
-    db.record_workspace_open("D:/Studio/ca-nhan/kenh-review")
-        .unwrap();
+    let ws_path = temp.path().join("ca-nhan/kenh-review");
+    std::fs::create_dir_all(&ws_path).unwrap();
+    let ws_path_str = ws_path.to_string_lossy().to_string();
+    db.record_workspace_open(&ws_path_str).unwrap();
     let recents = db.list_recent_workspaces().unwrap();
     assert_eq!(recents.len(), 1);
-    assert_eq!(recents[0].path, "D:/Studio/ca-nhan/kenh-review");
+    assert_eq!(
+        recents[0].path,
+        studio_workspace::normalize_workspace_path(&ws_path_str)
+    );
 
     db.set_setting("theme", "dark").unwrap();
     assert_eq!(db.get_setting("theme").unwrap().as_deref(), Some("dark"));
@@ -589,6 +594,47 @@ fn test_recent_workspaces_no_duplicate_verbatim_case_trailing_slash() {
     assert!(!recents[0].path.starts_with(r"\\?\"));
     assert!(!recents[0].path.ends_with('\\'));
     assert!(!recents[0].path.ends_with('/'));
+}
+
+#[test]
+fn test_list_recent_workspaces_skips_nonexistent_paths_without_deleting_records() {
+    let temp = tempdir().unwrap();
+    let app_paths = AppPaths::new(temp.path().join("app_data"));
+    let app_db = app_paths.open_app_db().unwrap();
+
+    let existing_dir = temp.path().join("real_ws");
+    let _ws = Workspace::create(&existing_dir, "Real WS").unwrap();
+
+    let deleted_dir = temp.path().join("deleted_temp_ws");
+    // Do NOT create directory on disk for deleted_dir
+
+    let existing_str = existing_dir.to_string_lossy().to_string();
+    let deleted_str = deleted_dir.to_string_lossy().to_string();
+
+    app_db.record_workspace_open(&deleted_str).unwrap();
+    app_db.record_workspace_open(&existing_str).unwrap();
+
+    // 1. list_recent_workspaces must skip the non-existent path
+    let recents = app_db.list_recent_workspaces().unwrap();
+    assert_eq!(
+        recents.len(),
+        1,
+        "Must filter out deleted/non-existent workspaces"
+    );
+    assert_eq!(
+        recents[0].path,
+        studio_workspace::normalize_workspace_path(&existing_str)
+    );
+
+    // 2. Underlying database records must remain intact (no data deleted)
+    let raw_conn = rusqlite::Connection::open(app_paths.app_db_path()).unwrap();
+    let count: i64 = raw_conn
+        .query_row("SELECT COUNT(*) FROM recent_workspaces", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        count, 2,
+        "Database rows must not be purged; only filtered on read"
+    );
 }
 
 #[test]
