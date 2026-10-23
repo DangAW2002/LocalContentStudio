@@ -74,16 +74,30 @@ function seedWorkspaceAndAppDb({ appDir, wsDir }) {
   // demo project.yaml
   writeFileSync(
     path.join(wsDir, "projects/demo/project.yaml"),
-    `slug: demo\ntitle: "Dự án mẫu E2E"\ncreated_at: "${now}"\nkit: null\nmodules: []\n`
+    `slug: demo\ntitle: "Dự án mẫu E2E"\nseries: lich-su\ncreated_at: "${now}"\nkit: null\nmodules: []\n`
   );
 
-  // sample artifacts (3 linked artifacts: script-01 -> voice-01 -> thumb-01)
+  // series lich-su
+  mkdirSync(path.join(wsDir, "series/lich-su/references"), { recursive: true });
+  writeFileSync(
+    path.join(wsDir, "series/lich-su/series.yaml"),
+    `slug: lich-su\ntitle: "Series Lịch sử Việt Nam"\nreferences:\n  - ref-an\n`
+  );
+
+  // sample artifacts (5 linked artifacts: script-01, voice-01, thumb-01, ref-an, video-short)
+  const dummyPng = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    "base64"
+  );
+
   mkdirSync(path.join(wsDir, "projects/demo/artifacts/script-01"), { recursive: true });
   mkdirSync(path.join(wsDir, "projects/demo/artifacts/voice-01"), { recursive: true });
+  mkdirSync(path.join(wsDir, "projects/demo/artifacts/ref-an"), { recursive: true });
+  mkdirSync(path.join(wsDir, "projects/demo/artifacts/video-short"), { recursive: true });
 
   writeFileSync(
     path.join(wsDir, "projects/demo/artifacts/script-01/artifact.yaml"),
-    `id: script-01\nkind: design\ntitle: "Kịch bản E2E"\nbrand: demo\nchannels:\n  - youtube\nsource: script.txt\n`
+    `id: script-01\nkind: design\ntitle: "Kịch bản E2E"\nbrand: demo\nchannels:\n  - youtube-e2e\nsource: script.txt\n`
   );
   writeFileSync(
     path.join(wsDir, "projects/demo/artifacts/script-01/script.txt"),
@@ -92,7 +106,7 @@ function seedWorkspaceAndAppDb({ appDir, wsDir }) {
 
   writeFileSync(
     path.join(wsDir, "projects/demo/artifacts/voice-01/artifact.yaml"),
-    `id: voice-01\nkind: design\ntitle: "Giọng đọc E2E"\nbrand: demo\nchannels:\n  - youtube\nsource: voice.txt\ninputs:\n  - artifact:script-01\n`
+    `id: voice-01\nkind: audio\ntitle: "Giọng đọc E2E"\nbrand: demo\nchannels:\n  - youtube-e2e\nsource: voice.txt\ninputs:\n  - artifact:script-01\n`
   );
   writeFileSync(
     path.join(wsDir, "projects/demo/artifacts/voice-01/voice.txt"),
@@ -100,13 +114,38 @@ function seedWorkspaceAndAppDb({ appDir, wsDir }) {
   );
 
   writeFileSync(
+    path.join(wsDir, "projects/demo/artifacts/ref-an/artifact.yaml"),
+    `id: ref-an\nkind: reference\ntitle: "Hồ sơ nhân vật An"\nbrand: demo\nchannels:\n  - youtube-e2e\nsource: profile.md\nparams:\n  images:\n    - an-1.png\n`
+  );
+  writeFileSync(
+    path.join(wsDir, "projects/demo/artifacts/ref-an/profile.md"),
+    `# Hồ sơ nhân vật An\nNhân vật người dẫn chuyện phong cách lịch sử.`
+  );
+  writeFileSync(
+    path.join(wsDir, "projects/demo/artifacts/ref-an/an-1.png"),
+    dummyPng
+  );
+
+  writeFileSync(
     path.join(wsDir, "projects/demo/artifacts/thumb-01/artifact.yaml"),
-    `id: thumb-01\nkind: design\ntitle: "Thumbnail E2E"\nbrand: demo\nchannels:\n  - youtube\nsource: index.html\ninputs:\n  - ref: artifact:script-01\n    role: reference\n  - ref: artifact:voice-01\n    role: uses\n`
+    `id: thumb-01\nkind: design\ntitle: "Thumbnail E2E"\nbrand: demo\nchannels:\n  - youtube-e2e\nsource: index.html\ninputs:\n  - ref: artifact:script-01\n    role: reference\n  - ref: artifact:voice-01\n    role: uses\n`
   );
   writeFileSync(
     path.join(wsDir, "projects/demo/artifacts/thumb-01/index.html"),
     `<!DOCTYPE html><html><body style="background:#1e1e2e;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;"><h1>Thumbnail E2E</h1></body></html>`
   );
+
+  writeFileSync(
+    path.join(wsDir, "projects/demo/artifacts/video-short/artifact.yaml"),
+    `id: video-short\nkind: timeline\ntitle: "Video ngắn 9:16"\nbrand: demo\nchannels:\n  - youtube-e2e\nsource: timeline.json\ninputs:\n  - ref: artifact:thumb-01\n    role: variant_of\n  - ref: artifact:ref-an\n    role: reference\n`
+  );
+  writeFileSync(
+    path.join(wsDir, "projects/demo/artifacts/video-short/timeline.json"),
+    `{"version":1,"width":1080,"height":1920,"fps":30,"tracks":[]}`
+  );
+
+  // Render dummy output for thumb-01
+  writeFileSync(path.join(wsDir, "projects/demo/renders/thumb-01.png"), dummyPng);
 
   // 2. Workspace SQLite: .studio/studio.db
   // Only the tables the seed rows need, copied from migration v1. No schema_migrations rows: the
@@ -166,29 +205,98 @@ function seedWorkspaceAndAppDb({ appDir, wsDir }) {
       pinned INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS renders (
+      id TEXT PRIMARY KEY,
+      artifact_id TEXT NOT NULL,
+      hash TEXT NOT NULL,
+      output_path TEXT NOT NULL,
+      format TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS artifact_checks (
+      artifact_id TEXT NOT NULL,
+      project TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      render_hash TEXT NOT NULL,
+      channel_version TEXT NOT NULL,
+      status TEXT NOT NULL,
+      errors_count INTEGER NOT NULL,
+      warnings_count INTEGER NOT NULL,
+      findings_json TEXT NOT NULL,
+      checked_at TEXT NOT NULL,
+      PRIMARY KEY (project, artifact_id, channel_id)
+    );
   `);
 
-  // Seed thread with one finished turn. Events use the persisted UI format (turns.rs `persist`):
-  // without a `Done` event the thread replays the turn as still running.
-  const textEvt = JSON.stringify({
-    type: "Text",
-    text: "Chào mừng bạn đến với Local Content Studio! Tôi đã chuẩn bị sẵn kịch bản và khung làm việc.",
-  });
+  // Seed thread with 3 finished turns for a rich conversation view
   const doneEvt = JSON.stringify({ type: "Done", status: "success", text: null });
+  const textEvt1 = JSON.stringify({
+    type: "Text",
+    text: "Chào bạn! Tôi đã phân tích yêu cầu và soạn thảo kịch bản phân cảnh 60 giây gồm 4 phân đoạn chính cùng lời bình chi tiết.",
+  });
+  const textEvt2 = JSON.stringify({
+    type: "Text",
+    text: "Đã tổng hợp giọng đọc qua Piper TTS (thời lượng 58.4s) và dựng bản thiết kế thumbnail chuẩn YouTube tại `projects/demo/artifacts/thumb-01`.",
+  });
+  const textEvt3 = JSON.stringify({
+    type: "Text",
+    text: "Ma trận kênh đã kiểm định 5 ấn phẩm: Đạt chuẩn độ phân giải và âm lượng -14 LUFS; sẵn sàng xuất bản.",
+  });
+
   wsDb.exec(`
     INSERT OR REPLACE INTO threads VALUES (
-      'demo-thread-1', 'demo', 'Hội thoại kiểm thử E2E', 'agy', 'gemini-3.8-flash-medium', '${now}', '${now}'
+      'demo-thread-1', 'demo', 'Hội thoại sản xuất video', 'agy', 'gemini-3.8-flash-medium', '${now}', '${now}'
     );
     INSERT OR REPLACE INTO turns VALUES (
-      'demo-turn-1', 'demo-thread-1', 1, 'Xin chào, hãy dựng một video quảng bá.', 'success', '${now}', '${now}'
+      'demo-turn-1', 'demo-thread-1', 1, 'Xin chào, hãy lên ý tưởng và kịch bản video ngắn về pha cà phê phin.', 'success', '${now}', '${now}'
     );
-    INSERT OR REPLACE INTO events VALUES ('demo-evt-1', 'demo-turn-1', 'Text', '${textEvt}', '${now}');
-    INSERT OR REPLACE INTO events VALUES ('demo-evt-2', 'demo-turn-1', 'Done', '${doneEvt}', '${now}');
+    INSERT OR REPLACE INTO events VALUES ('demo-evt-1', 'demo-turn-1', 'Text', '${textEvt1.replace(/'/g, "''")}', '${now}');
+    INSERT OR REPLACE INTO events VALUES ('demo-evt-2', 'demo-turn-1', 'Done', '${doneEvt.replace(/'/g, "''")}', '${now}');
+
+    INSERT OR REPLACE INTO turns VALUES (
+      'demo-turn-2', 'demo-thread-1', 2, 'Hãy tạo giọng đọc TTS và thiết kế ảnh bìa thumbnail 1280x720.', 'success', '${now}', '${now}'
+    );
+    INSERT OR REPLACE INTO events VALUES ('demo-evt-3', 'demo-turn-2', 'Text', '${textEvt2.replace(/'/g, "''")}', '${now}');
+    INSERT OR REPLACE INTO events VALUES ('demo-evt-4', 'demo-turn-2', 'Done', '${doneEvt.replace(/'/g, "''")}', '${now}');
+
+    INSERT OR REPLACE INTO turns VALUES (
+      'demo-turn-3', 'demo-thread-1', 3, 'Kiểm tra tiêu chuẩn kênh YouTube xem có lỗi nào không.', 'success', '${now}', '${now}'
+    );
+    INSERT OR REPLACE INTO events VALUES ('demo-evt-5', 'demo-turn-3', 'Text', '${textEvt3.replace(/'/g, "''")}', '${now}');
+    INSERT OR REPLACE INTO events VALUES ('demo-evt-6', 'demo-turn-3', 'Done', '${doneEvt.replace(/'/g, "''")}', '${now}');
+
     INSERT OR REPLACE INTO artifacts_index VALUES (
-      'thumb-01', 'demo', 'design', 'Thumbnail E2E', 'projects/demo/artifacts/thumb-01', 'demo', '["youtube"]', 'index.html', 'design', '${now}'
+      'script-01', 'demo', 'design', 'Kịch bản E2E', 'projects/demo/artifacts/script-01', 'demo', '["youtube-e2e"]', 'script.txt', 'design', '${now}'
     );
+    INSERT OR REPLACE INTO artifacts_index VALUES (
+      'voice-01', 'demo', 'audio', 'Giọng đọc E2E', 'projects/demo/artifacts/voice-01', 'demo', '["youtube-e2e"]', 'voice.txt', 'audio', '${now}'
+    );
+    INSERT OR REPLACE INTO artifacts_index VALUES (
+      'ref-an', 'demo', 'reference', 'Hồ sơ nhân vật An', 'projects/demo/artifacts/ref-an', 'demo', '["youtube-e2e"]', 'profile.md', 'reference', '${now}'
+    );
+    INSERT OR REPLACE INTO artifacts_index VALUES (
+      'thumb-01', 'demo', 'design', 'Thumbnail E2E', 'projects/demo/artifacts/thumb-01', 'demo', '["youtube-e2e"]', 'index.html', 'design', '${now}'
+    );
+    INSERT OR REPLACE INTO artifacts_index VALUES (
+      'video-short', 'demo', 'timeline', 'Video ngắn 9:16', 'projects/demo/artifacts/video-short', 'demo', '["youtube-e2e"]', 'timeline.json', 'timeline', '${now}'
+    );
+
     INSERT OR REPLACE INTO checkpoints VALUES (
       'demo-cp-1', 'Khởi tạo ban đầu', 'demo-turn-1', 1, '${now}'
+    );
+
+    INSERT OR REPLACE INTO renders VALUES (
+      'rnd-thumb-01', 'thumb-01', 'hash-thumb-01', 'projects/demo/renders/thumb-01.png', 'png', 68, '${now}'
+    );
+
+    INSERT OR REPLACE INTO artifact_checks VALUES (
+      'thumb-01', 'demo', 'youtube-e2e', 'hash-thumb-01', 'default', 'passed', 0, 0, '[]', '${now}'
+    );
+    INSERT OR REPLACE INTO artifact_checks VALUES (
+      'script-01', 'demo', 'youtube-e2e', 'hash-script-01', 'default', 'warning', 0, 1, '[{"code":"TEXT_TOO_LONG","message":"Kịch bản có thể hơi dài so với chuẩn 60s","severity":"warn"}]', '${now}'
     );
   `);
   wsDb.close();

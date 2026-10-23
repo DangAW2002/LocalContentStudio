@@ -156,6 +156,14 @@ async fn test_downstream_plan_ordering_and_pinned_skips() {
         plan.steps[1].skip_reason.as_deref(),
         Some("Đã khóa (pinned)")
     );
+
+    // The UI reads these fields in camelCase (api/types.ts DownstreamPlan).
+    let json = serde_json::to_value(&plan).unwrap();
+    assert_eq!(json["targetRef"], "script");
+    assert!(json["freeStepsCount"].is_u64());
+    assert!(json["paidStepsCount"].is_u64());
+    assert!(json["totalEstimatedCostUsd"].is_number());
+    assert_eq!(json["steps"][1]["skipReason"], "Đã khóa (pinned)");
 }
 
 #[tokio::test]

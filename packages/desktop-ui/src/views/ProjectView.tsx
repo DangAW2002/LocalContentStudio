@@ -699,6 +699,17 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
           </>
         )}
       </div>
+
+      <CreateEpisodeDialog
+        open={createEpisodeOpen}
+        onClose={() => setCreateEpisodeOpen(false)}
+        defaultSeriesSlug={projects.find((p) => p.slug === currentSlug)?.series}
+        onCreated={async (newProj) => {
+          setCreateEpisodeOpen(false);
+          await loadProjects();
+          setCurrentSlug(newProj.slug);
+        }}
+      />
     </div>
   );
 };

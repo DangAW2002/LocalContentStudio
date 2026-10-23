@@ -292,6 +292,7 @@ pub fn graph_make_reference(
 
 /// Downstream execution step.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct DownstreamStep {
     pub id: String,
     pub kind: String,
@@ -306,6 +307,7 @@ pub struct DownstreamStep {
 
 /// Downstream update plan (dry run).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct DownstreamPlan {
     pub target_ref: String,
     pub steps: Vec<DownstreamStep>,
@@ -421,6 +423,7 @@ pub fn graph_update_downstream_plan(
 /// Run downstream update for an artifact: executes all unpinned FREE renders in topological order.
 /// Returns the updated plan showing what was executed and what remains (paid or skipped).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DownstreamRunResult {
     pub executed_ids: Vec<String>,
     pub remaining_paid: Vec<DownstreamStep>,
