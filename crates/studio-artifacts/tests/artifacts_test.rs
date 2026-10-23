@@ -2231,17 +2231,20 @@ fn test_ffmpeg_filter_generation_for_ken_burns_and_cut() {
     let out_path = PathBuf::from("rendered.mp4");
     let (args, filter_graph) = build_timeline_ffmpeg_args(&doc, &out_path).unwrap();
 
-    // v0: zoom_in on img1.png with 2x scale (3840:2160) and zoompan
+    // v0: zoom_in on img1.png — sub-pixel perspective window growing from 1.0 to 1.08 over 120 frames
     assert!(
-        filter_graph.contains("scale=3840:2160,zoompan=z=\'1+0.0800*(on/119)\':x=\'(iw-iw/zoom)/2\':y=\'(ih-ih/zoom)/2\':d=120:s=1920x1080:fps=30,trim=start=0:duration=4,setpts=PTS-STARTPTS,setsar=1,fade=t=in:st=0:d=0.5[v0]"),
+        filter_graph.contains("[0:v]scale=1920:1080,setsar=1,loop=loop=-1:size=1:start=0,fps=30,trim=start=0:duration=4,setpts=PTS-STARTPTS,perspective=x0='(W-W/(1+0.0800*(in/119)))/2'"),
         "v0 filter not matching: {filter_graph}"
     );
+    assert!(filter_graph.contains("interpolation=cubic:eval=frame,fade=t=in:st=0:d=0.5[v0]"));
 
     // v1: pan_right on img2.png with Transition::Cut (no fade filter!)
     assert!(
-        filter_graph.contains("scale=3840:2160,zoompan=z=\'1.0800\':x=\'(iw-iw/zoom)*(on/89)\':y=\'(ih-ih/zoom)/2\':d=90:s=1920x1080:fps=30,trim=start=0:duration=3,setpts=PTS-STARTPTS,setsar=1[v1]"),
+        filter_graph.contains("perspective=x0='(W-W/1.0800)*(in/89)'"),
         "v1 filter not matching: {filter_graph}"
     );
+    assert!(filter_graph.contains("interpolation=cubic:eval=frame[v1]"));
+    assert!(!filter_graph.contains("zoompan"));
 
     // v2: video broll.mp4 does not have zoompan even though motion was specified
     assert!(

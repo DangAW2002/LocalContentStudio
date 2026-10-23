@@ -673,58 +673,33 @@ pub fn build_timeline_ffmpeg_args(
                     crate::timeline::MotionKind::Auto => crate::timeline::resolve_auto_motion(i),
                     m => m,
                 };
+                // `perspective` samples sub-pixel corners; zoompan rounds its crop to whole pixels,
+                // which makes slow zooms and pans visibly wobble.
+                use crate::timeline::MotionKind as M;
                 let fps = timeline_doc.fps;
-                let total_frames = (((clip.in_point + clip.duration) * fps).round() as u64).max(1);
-                let d_denom = if total_frames > 1 {
-                    total_frames - 1
-                } else {
-                    1
+                let frames = ((clip.duration * fps).round() as u64).max(2);
+                let p = format!("(in/{})", frames - 1);
+                let s = clip.motion_strength.unwrap_or(0.08).clamp(0.001, 0.5);
+                let z = match motion {
+                    M::ZoomIn => format!("(1+{s:.4}*{p})"),
+                    M::ZoomOut => format!("(1+{s:.4}*(1-{p}))"),
+                    _ => format!("{:.4}", 1.0 + s),
                 };
-                let strength = clip.motion_strength.unwrap_or(0.08).max(0.001);
-                let s_str = format!("{:.4}", strength);
-                let one_plus_s = format!("{:.4}", 1.0 + strength);
-                let (z_expr, x_expr, y_expr) = match motion {
-                    crate::timeline::MotionKind::ZoomIn => (
-                        format!("1+{s_str}*(on/{d_denom})"),
-                        "(iw-iw/zoom)/2".to_string(),
-                        "(ih-ih/zoom)/2".to_string(),
-                    ),
-                    crate::timeline::MotionKind::ZoomOut => (
-                        format!("({one_plus_s})-{s_str}*(on/{d_denom})"),
-                        "(iw-iw/zoom)/2".to_string(),
-                        "(ih-ih/zoom)/2".to_string(),
-                    ),
-                    crate::timeline::MotionKind::PanLeft => (
-                        one_plus_s,
-                        format!("(iw-iw/zoom)*(1-on/{d_denom})"),
-                        "(ih-ih/zoom)/2".to_string(),
-                    ),
-                    crate::timeline::MotionKind::PanRight => (
-                        one_plus_s,
-                        format!("(iw-iw/zoom)*(on/{d_denom})"),
-                        "(ih-ih/zoom)/2".to_string(),
-                    ),
-                    crate::timeline::MotionKind::PanUp => (
-                        one_plus_s,
-                        "(iw-iw/zoom)/2".to_string(),
-                        format!("(ih-ih/zoom)*(1-on/{d_denom})"),
-                    ),
-                    crate::timeline::MotionKind::PanDown => (
-                        one_plus_s,
-                        "(iw-iw/zoom)/2".to_string(),
-                        format!("(ih-ih/zoom)*(on/{d_denom})"),
-                    ),
-                    crate::timeline::MotionKind::None | crate::timeline::MotionKind::Auto => {
-                        unreachable!()
-                    }
+                let centered_x = format!("(W-W/{z})/2");
+                let centered_y = format!("(H-H/{z})/2");
+                let (left, top) = match motion {
+                    M::PanLeft => (format!("(W-W/{z})*(1-{p})"), centered_y),
+                    M::PanRight => (format!("(W-W/{z})*{p}"), centered_y),
+                    M::PanUp => (centered_x, format!("(H-H/{z})*(1-{p})")),
+                    M::PanDown => (centered_x, format!("(H-H/{z})*{p}")),
+                    _ => (centered_x, centered_y),
                 };
+                let right = format!("{left}+W/{z}");
+                let bottom = format!("{top}+H/{z}");
                 let mut f = format!(
-                    "[{i}:v]scale={scale_w}:{scale_h},zoompan=z=\'{z_expr}\':x=\'{x_expr}\':y=\'{y_expr}\':d={total_frames}:s={w}x{h}:fps={fps},trim=start={in_pt}:duration={dur},setpts=PTS-STARTPTS,setsar=1",
-                    scale_w = 2 * timeline_doc.width,
-                    scale_h = 2 * timeline_doc.height,
+                    "[{i}:v]scale={w}:{h},setsar=1,loop=loop=-1:size=1:start=0,fps={fps},trim=start=0:duration={dur},setpts=PTS-STARTPTS,perspective=x0='{left}':y0='{top}':x1='{right}':y1='{top}':x2='{left}':y2='{bottom}':x3='{right}':y3='{bottom}':interpolation=cubic:eval=frame",
                     w = timeline_doc.width,
                     h = timeline_doc.height,
-                    in_pt = clip.in_point,
                     dur = clip.duration,
                 );
                 if clip.transition == crate::timeline::Transition::Fade {
