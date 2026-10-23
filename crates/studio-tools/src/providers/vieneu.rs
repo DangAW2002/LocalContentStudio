@@ -25,7 +25,7 @@ pub const VIENEU_DEFAULT_VOICES: &[&str] = &["Bình", "Mai", "Nam", "Nữ"];
 pub struct VieneuVoiceConfig {
     /// Voice preset name (e.g., "Bình", "Mai", "Nam", "Nữ").
     pub voice: String,
-    /// Speed multiplier (default 1.0).
+    /// Speed multiplier (default 0.9 for Vietnamese).
     pub speed: f32,
     /// Optional workspace-relative reference audio file for voice cloning.
     pub reference_audio: Option<String>,
@@ -35,7 +35,7 @@ impl Default for VieneuVoiceConfig {
     fn default() -> Self {
         Self {
             voice: "Bình".to_string(),
-            speed: 1.0,
+            speed: 0.9,
             reference_audio: None,
         }
     }
@@ -135,7 +135,6 @@ pub fn ensure_helper_script(cache_dir: &Path) -> Result<PathBuf> {
     })?;
 
     let script_path = script_dir.join("vieneu_helper.py");
-    // Write or refresh helper script
     fs::write(&script_path, VIENEU_HELPER_SCRIPT).map_err(|e| ToolError::Io {
         path: script_path.clone(),
         source: e,
@@ -144,7 +143,8 @@ pub fn ensure_helper_script(cache_dir: &Path) -> Result<PathBuf> {
     Ok(script_path)
 }
 
-/// Run VieNeu-TTS synthesis in-process via Python helper.
+/// Run VieNeu-TTS synthesis in-process via Python helper with natural punctuation pausing,
+/// Vietnamese text normalization, and deterministic cache.
 pub async fn run_vieneu(ws: &Workspace, out_dir: &Path, input: &Value) -> Result<Value> {
     let probe_res = probe_vieneu();
     if !probe_res.available {
@@ -164,7 +164,14 @@ pub async fn run_vieneu(ws: &Workspace, out_dir: &Path, input: &Value) -> Result
         })?;
 
     let voice_req = input.get("voice").and_then(Value::as_str);
-    let speed_req = input.get("speed").and_then(Value::as_f64).map(|s| s as f32);
+    // Default speed for Vietnamese is 0.9 if not specified
+    let speed_req = input
+        .get("speed")
+        .and_then(Value::as_f64)
+        .map(|s| s as f32)
+        .unwrap_or(0.9);
+
+    let actual_voice = voice_req.unwrap_or("Bình").to_string();
 
     let ref_audio_scoped: Option<PathBuf> =
         if let Some(ref_str) = input.get("reference_audio").and_then(Value::as_str) {
@@ -207,6 +214,36 @@ pub async fn run_vieneu(ws: &Workspace, out_dir: &Path, input: &Value) -> Result
             path
         };
 
+    // Check TTS audio cache by input hash
+    let cache_key = crate::tts::compute_tts_cache_key("tts.vieneu", input);
+    let cache_dir = ws.cache_dir().join("tts");
+    let cached_file = cache_dir.join(format!("{cache_key}.wav"));
+
+    if cached_file.is_file() {
+        let _ = fs::copy(&cached_file, &target_wav_path);
+        let duration_s = if let Ok((spec, data)) = crate::tts::read_pcm_wav(&target_wav_path) {
+            spec.duration_seconds(data.len())
+        } else {
+            0.0
+        };
+
+        let rel_path = target_wav_path
+            .strip_prefix(ws.root())
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|_| target_wav_path.to_string_lossy().replace('\\', "/"));
+
+        return Ok(json!({
+            "audio_path": rel_path,
+            "duration_seconds": (duration_s * 1000.0).round() / 1000.0,
+            "provider": "tts.vieneu",
+            "voice": actual_voice,
+            "speed": speed_req,
+            "available_voices": VIENEU_DEFAULT_VOICES,
+            "cached": true,
+            "note": "Tổng hợp giọng nói thành công qua VieNeu-TTS v3 Turbo (bản lưu cache)."
+        }));
+    }
+
     let py_exe = find_in_path("python")
         .or_else(|| find_in_path("python3"))
         .ok_or_else(|| ToolError::MissingDependency {
@@ -216,89 +253,136 @@ pub async fn run_vieneu(ws: &Workspace, out_dir: &Path, input: &Value) -> Result
 
     let script_path = ensure_helper_script(&ws.cache_dir())?;
 
-    // Create a temporary file for the text (UTF-8, avoiding shell quoting)
-    let mut temp_txt = tempfile::Builder::new()
-        .prefix("vieneu-input-")
-        .suffix(".txt")
-        .tempfile()
-        .map_err(|e| ToolError::Io {
-            path: PathBuf::from("tempfile"),
-            source: e,
-        })?;
+    // Step 1: Normalize Vietnamese text
+    let normalized = crate::tts::normalize_vietnamese_text(text);
 
-    temp_txt
-        .write_all(text.as_bytes())
-        .map_err(|e| ToolError::Io {
-            path: PathBuf::from("tempfile"),
-            source: e,
-        })?;
-    temp_txt.flush().map_err(|e| ToolError::Io {
-        path: PathBuf::from("tempfile"),
+    // Step 2: Split into speech segments with punctuation pauses
+    let pauses = crate::tts::PauseConfig::from_value(input.get("pauses"));
+    let segments = crate::tts::split_into_tts_segments(&normalized, &pauses);
+
+    if segments.is_empty() {
+        return Err(ToolError::ExecutionFailed {
+            tool_id: "tts.vieneu".into(),
+            reason: "Nội dung văn bản sau chuẩn hoá rỗng.".into(),
+        });
+    }
+
+    let chunks_dir = ws
+        .cache_dir()
+        .join("vieneu_chunks")
+        .join(uuid::Uuid::new_v4().to_string());
+    fs::create_dir_all(&chunks_dir).map_err(|e| ToolError::Io {
+        path: chunks_dir.clone(),
         source: e,
     })?;
 
-    let meta_file_path = ws
-        .cache_dir()
-        .join(format!("vieneu-meta-{}.json", uuid::Uuid::new_v4()));
+    let mut chunk_items: Vec<(PathBuf, f32)> = Vec::new();
 
-    let cmd_args = build_vieneu_args(
-        &script_path,
-        temp_txt.path(),
-        &target_wav_path,
-        voice_req,
-        speed_req,
-        ref_audio_scoped.as_deref(),
-        Some(&meta_file_path),
-    );
+    for (idx, seg) in segments.iter().enumerate() {
+        let chunk_wav = chunks_dir.join(format!("chunk_{idx}.wav"));
 
-    let output = Command::new(&py_exe)
-        .args(&cmd_args)
-        .current_dir(ws.root())
-        .output()
-        .map_err(|e| ToolError::ExecutionFailed {
-            tool_id: "tts.vieneu".into(),
-            reason: format!("Không thể khởi chạy tiến trình Python: {e}"),
+        // Create a temporary file for the segment text (UTF-8, avoiding shell quoting)
+        let mut temp_txt = tempfile::Builder::new()
+            .prefix("vieneu-input-")
+            .suffix(".txt")
+            .tempfile()
+            .map_err(|e| ToolError::Io {
+                path: PathBuf::from("tempfile"),
+                source: e,
+            })?;
+
+        temp_txt
+            .write_all(seg.text.as_bytes())
+            .map_err(|e| ToolError::Io {
+                path: PathBuf::from("tempfile"),
+                source: e,
+            })?;
+        temp_txt.flush().map_err(|e| ToolError::Io {
+            path: PathBuf::from("tempfile"),
+            source: e,
         })?;
 
-    let _ = fs::remove_file(&meta_file_path);
+        let meta_file_path = ws
+            .cache_dir()
+            .join(format!("vieneu-meta-{}.json", uuid::Uuid::new_v4()));
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        let reason = if stderr.contains("No module named 'vieneu'") {
-            "Chưa cài đặt thư viện 'vieneu'. Vui lòng chạy lệnh: pip install vieneu".to_string()
-        } else if !stderr.trim().is_empty() {
-            stderr.trim().to_string()
-        } else {
-            format!(
-                "Tiến trình VieNeu-TTS kết thúc với mã lỗi {}",
-                output.status
-            )
-        };
-        return Err(ToolError::ExecutionFailed {
-            tool_id: "tts.vieneu".into(),
-            reason,
-        });
+        let cmd_args = build_vieneu_args(
+            &script_path,
+            temp_txt.path(),
+            &chunk_wav,
+            voice_req,
+            Some(speed_req),
+            ref_audio_scoped.as_deref(),
+            Some(&meta_file_path),
+        );
+
+        let output = Command::new(&py_exe)
+            .args(&cmd_args)
+            .current_dir(ws.root())
+            .output()
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool_id: "tts.vieneu".into(),
+                reason: format!("Không thể khởi chạy tiến trình Python: {e}"),
+            })?;
+
+        let _ = fs::remove_file(&meta_file_path);
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let _ = fs::remove_dir_all(&chunks_dir);
+            let reason = if stderr.contains("No module named 'vieneu'") {
+                "Chưa cài đặt thư viện 'vieneu'. Vui lòng chạy lệnh: pip install vieneu".to_string()
+            } else if !stderr.trim().is_empty() {
+                stderr.trim().to_string()
+            } else {
+                format!(
+                    "Tiến trình VieNeu-TTS kết thúc với mã lỗi {}",
+                    output.status
+                )
+            };
+            return Err(ToolError::ExecutionFailed {
+                tool_id: "tts.vieneu".into(),
+                reason,
+            });
+        }
+
+        if !chunk_wav.is_file() {
+            let _ = fs::remove_dir_all(&chunks_dir);
+            return Err(ToolError::ExecutionFailed {
+                tool_id: "tts.vieneu".into(),
+                reason: format!(
+                    "VieNeu-TTS kết thúc nhưng không tạo được tệp âm thanh phân đoạn #{idx}."
+                ),
+            });
+        }
+
+        chunk_items.push((chunk_wav, seg.pause_after_s));
     }
 
-    if !target_wav_path.is_file() {
-        return Err(ToolError::ExecutionFailed {
-            tool_id: "tts.vieneu".into(),
-            reason: "VieNeu-TTS kết thúc nhưng không tạo được tệp âm thanh đầu ra.".into(),
-        });
-    }
+    // Step 3: Concatenate all segments with deterministic silence gaps
+    let item_refs: Vec<(&Path, f32)> = chunk_items.iter().map(|(p, s)| (p.as_path(), *s)).collect();
+    let total_duration = crate::tts::concat_wav_files_with_silence(&item_refs, &target_wav_path)?;
+
+    // Clean up temporary chunks
+    let _ = fs::remove_dir_all(&chunks_dir);
+
+    // Step 4: Write to cache
+    let _ = fs::create_dir_all(&cache_dir);
+    let _ = fs::copy(&target_wav_path, &cached_file);
 
     let rel_path = target_wav_path
         .strip_prefix(ws.root())
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|_| target_wav_path.to_string_lossy().replace('\\', "/"));
 
-    let actual_voice = voice_req.unwrap_or("Bình").to_string();
-
     Ok(json!({
         "audio_path": rel_path,
+        "duration_seconds": total_duration,
         "provider": "tts.vieneu",
         "voice": actual_voice,
+        "speed": speed_req,
         "available_voices": VIENEU_DEFAULT_VOICES,
+        "cached": false,
         "note": "Tổng hợp giọng nói thành công qua VieNeu-TTS v3 Turbo."
     }))
 }
@@ -398,7 +482,7 @@ mod tests {
         let input = json!({
             "text": "Xin chào thế giới",
             "voice": "Bình",
-            "speed": 1.0
+            "speed": 0.9
         });
 
         let rt = tokio::runtime::Runtime::new().unwrap();

@@ -30,9 +30,11 @@ flowchart TD
 - Agent dựa trên chủ đề yêu cầu và quy chuẩn giọng điệu của Brand để viết kịch bản phân cảnh chi tiết.
 - Kịch bản bao gồm: lời đọc thuyết minh (voiceover), mô tả phân cảnh hình ảnh (visual prompt) và các mốc chuyển cảnh phù hợp với thời lượng 60–90 giây.
 
-### Bước 2: Sinh giọng đọc tiếng Việt (TTS)
-- Agent sử dụng công cụ tổng hợp giọng đọc ngoại tuyến chất lượng cao: **Piper TTS** (mô hình tiếng Việt `vi_VN-vais1000-medium`) hoặc **VieNeu-TTS / Windows SAPI**.
-- Giọng đọc được cắt thành các đoạn tệp âm thanh `.wav` theo từng phân cảnh. Hệ thống tự động đo thời lượng chính xác đến từng mili-giây của từng câu để chuẩn bị cho bước dựng hình.
+### Bước 2: Sinh giọng đọc tiếng Việt tự nhiên (TTS)
+- Agent sử dụng công cụ tổng hợp giọng đọc ngoại tuyến chất lượng cao: **Piper TTS** (mô hình tiếng Việt `vi_VN-vais1000-medium`) hoặc **VieNeu-TTS** (các giọng `Bình`, `Mai`, `Nam`, `Nữ`).
+- **Ngắt nhịp tự nhiên theo dấu câu:** Hệ thống tự động phân tách câu theo dấu câu (phẩy `,` ≈ 0.18s, chấm `.` ≈ 0.45s, hỏi `?` / than `!` ≈ 0.5s, ba chấm `...` ≈ 0.6s, đoạn mới ≈ 0.8s) và hỗ trợ chèn thẻ `[ngắt x]` (ví dụ `[ngắt 0.7]` giây) để tạo điểm dừng thuyết phục.
+- **Chuẩn hóa chữ tiếng Việt:** Số ("1.500", "2,5"), tỷ lệ ("25%"), đơn vị ("km", "kg", "°C", "h"), ngày tháng ("24/10") và các từ viết tắt phổ biến ("TP.HCM", "v.v.", "VN") được tự động chuyển thành từ ngữ đọc chuẩn trước khi tổng hợp.
+- **Tốc độ nói tối ưu:** Tốc độ mặc định `speed: 0.90` giúp giọng đọc truyền cảm, rõ chữ, nhịp điệu tự nhiên (đạt chuẩn 2.3 – 2.8 từ/giây). Toàn bộ thời lượng trả về (`duration_seconds`) đã tính gộp cả khoảng lặng chính xác đến từng mili-giây để chuẩn bị cho bước dựng hình.
 
 ### Bước 3: Chuẩn bị tư liệu hình ảnh & B-roll
 - Với mỗi phân cảnh, agent tìm kiếm trong Thư viện tài nguyên có sẵn hoặc gọi công cụ tạo ảnh AI (qua Gateway kết nối OpenAI Images / Flux).

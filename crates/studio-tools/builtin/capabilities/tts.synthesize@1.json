@@ -16,7 +16,19 @@
       },
       "speed": {
         "type": "number",
-        "description": "Optional speech speed multiplier (e.g. 1.0)"
+        "description": "Optional speech speed multiplier (default 0.9 for Vietnamese)"
+      },
+      "noise_scale": {
+        "type": "number",
+        "description": "Optional generator noise scale (default 0.667 for Piper TTS)"
+      },
+      "noise_w": {
+        "type": "number",
+        "description": "Optional phoneme width noise scale (default 0.85 for Piper TTS)"
+      },
+      "pauses": {
+        "type": "object",
+        "description": "Optional custom pause durations in seconds for punctuation: comma, period, question, exclamation, ellipsis, paragraph"
       },
       "reference_audio": {
         "type": "string",
@@ -34,6 +46,10 @@
     "properties": {
       "audio_path": {
         "type": "string"
+      },
+      "duration_seconds": {
+        "type": "number",
+        "description": "Duration of the generated audio in seconds including pauses"
       },
       "provider": {
         "type": "string"

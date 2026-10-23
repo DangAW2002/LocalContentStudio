@@ -42,11 +42,15 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
 - Lưu kịch bản vào artifact loại `text` hoặc tệp `projects/<slug>/script.md`.
 
 ### 2. Giọng đọc (Voice & TTS)
-- Tách từng đoạn lời thoại theo nhịp câu phù hợp.
-- Tạo giọng đọc qua capability `tts.synthesize@1`:
-  - Gọi `capability_run` với công cụ `tts.windows-sapi` (hoặc provider khả dụng).
-  - Đảm bảo đầu ra âm thanh định dạng `.wav` hoặc `.mp3` được ghi nhận trong thư mục asset của lượt/dự án.
-  - Ghi nhận thời lượng chính xác của từng file âm thanh qua `duration_seconds` trả về sẵn (hoặc kiểm tra bằng `media.inspect@1`) để căn khớp timeline.
+- **Provider đúng:** Gọi capability `tts.synthesize@1` qua `capability_run` với provider khả dụng: `tts.piper` (mặc định giọng `vi_VN-vais1000-medium`) hoặc `tts.vieneu` (các giọng `Bình`, `Mai`, `Nam`, `Nữ`). Không dùng provider legacy.
+- **Quy tắc viết lời thuyết minh tự nhiên:**
+  - **Độ dài câu:** Mỗi câu ngắn gọn, tối đa ≤ 20 từ để giữ hơi thở tự nhiên.
+  - **Ngắt nhịp lấy hơi:** Đặt dấu phẩy `,` ở đúng chỗ ngắt nghỉ lấy hơi; mỗi câu chỉ truyền đạt một ý trọn vẹn; tránh dùng ngoặc đơn/kép `( )`, `[ ]` hay ký hiệu rườm rà.
+  - **Phân chia segment:** Mỗi phân cảnh (segment) chỉ nên dài 1–2 câu tương ứng với một tệp âm thanh WAV.
+  - **Thẻ ngắt chủ động:** Dùng thẻ `[ngắt x]` (ví dụ `[ngắt 0.7]` giây) trước các ý nhấn mạnh quan trọng hoặc ngay sau câu hỏi để tạo khoảng dừng thuyết phục người xem.
+  - **Tốc độ nói (`speed`):** Khuyến nghị thiết lập `speed` từ 0.85 – 0.95 (mặc định 0.90 cho tiếng Việt khi không truyền).
+  - **Kiểm soát nhịp độ sau tổng hợp:** Sau khi sinh âm thanh, đọc trường `duration_seconds` trả về sẵn (đã tính gộp cả các khoảng lặng dấu câu). Kiểm tra tốc độ đọc thực tế đạt khoảng 2.3 – 2.8 từ/giây. Nếu đọc quá nhanh (> 2.8 từ/giây), chủ động giảm tham số `speed` (ví dụ từ 0.90 xuống 0.85) và tổng hợp lại để đảm bảo giọng đọc truyền cảm, rõ chữ.
+- **Lưu trữ asset:** Đảm bảo đầu ra âm thanh định dạng `.wav` được lưu trữ vào thư mục asset của project (`projects/<slug>/assets/vo/`) để sẵn sàng cho bước dựng timeline.
 
 ### 3. Tư liệu hình ảnh & B-Roll (Media Gathering & Gen)
 - Thu thập hoặc sinh tư liệu hình ảnh/video bổ trợ (B-roll):
