@@ -7,8 +7,8 @@ Tài liệu hướng dẫn triển khai Local Content Studio ở chế độ **H
 ## 1. Kiến trúc & Đặc điểm chế độ Headless
 
 - **Không cần màn hình / X11 / Wayland:** Binary `studio-tauri --headless` khởi chạy trực tiếp lõi xử lý Rust, Studio MCP server, bộ lập lịch tác vụ và máy chủ web HTTP/HTTPS nhúng sẵn giao diện React.
-- **Dữ liệu & Cấu hình:** Lưu trữ trong thư mục `STUDIO_APP_DIR` (mặc định `~/.local/share/local-content-studio` trên SSD hoặc `/srv/data/studio` trên HDD).
-- **Khoá bí mật bền vững (FileSecretStore):** Trên Linux, các API key (Google, OpenAI, Facebook, YouTube) được mã hóa lưu trữ nguyên tử trong tệp `secrets.json` với phân quyền bảo mật chặt chẽ `0600` (chỉ người dùng hiện tại được đọc/ghi).
+- **Dữ liệu & Cấu hình:** Lưu trong thư mục `STUDIO_APP_DIR`. Service đặt `STUDIO_APP_DIR=~/.local/share/local-content-studio` (SSD). Nếu chạy lệnh tay mà **không** đặt biến này, binary dùng `~/.localcontentstudio` — khác thư mục của service, nên mọi lệnh tay ở dưới đều phải đặt `STUDIO_APP_DIR` giống service.
+- **Khoá bí mật bền vững (FileSecretStore):** Trên Linux, các API key (Google, OpenAI, Facebook, YouTube) được lưu dạng văn bản thường (không mã hoá) trong `secrets.json`, ghi nguyên tử, quyền `0600` (chỉ tài khoản `dang` đọc/ghi). Nếu file hỏng, Studio cất nó sang `secrets.json.corrupt-<thời điểm>` thay vì ghi đè.
 - **Đăng nhập & Sudo:** Được bảo vệ bởi mật khẩu chủ sở hữu (băm Argon2id). Lệnh quản trị nhạy cảm yêu cầu xác thực Sudo 10 phút.
 
 ---
@@ -32,8 +32,10 @@ sudo loginctl enable-linger dang
 
 ## 3. Biên dịch và cài đặt Studio
 
-Di chuyển vào thư mục mã nguồn Studio (ví dụ `~/src/LocalContentStudio`) và chạy kịch bản build tối ưu:
+Lần đầu, sau khi laptop đã `git push server studio-v2`, clone từ bare repo trên server rồi build:
 ```bash
+git clone -b studio-v2 ~/git/LocalContentStudio.git ~/src/LocalContentStudio
+cd ~/src/LocalContentStudio
 bash scripts/server/build-linux.sh
 ```
 
@@ -51,13 +53,14 @@ Kịch bản này sẽ:
 Chế độ web yêu cầu mật khẩu chủ sở hữu (tối thiểu 8 ký tự). Mật khẩu chỉ được nạp qua luồng tiêu chuẩn **stdin**, không bao giờ truyền qua tham số dòng lệnh `argv` hay lưu vào lịch sử bash:
 
 ```bash
-# Nhập tương tác từ bàn phím (an toàn nhất):
-~/.local/bin/studio-tauri --set-web-password
-# (Nhập mật khẩu của bạn rồi nhấn Enter)
-
-# Hoặc truyền qua pipe stdin từ tệp bí mật:
-cat ~/my-secret-password.txt | ~/.local/bin/studio-tauri --set-web-password
+# Gõ mật khẩu không hiện lên màn hình, không lưu vào file hay lịch sử bash:
+read -rs -p "Mật khẩu web: " P; echo
+printf '%s
+' "$P" | STUDIO_APP_DIR=~/.local/share/local-content-studio ~/.local/bin/studio-tauri --set-web-password
+unset P
 ```
+
+Phải đặt `STUDIO_APP_DIR` giống service; thiếu biến này mật khẩu sẽ ghi vào thư mục khác và trang web báo "Chưa thiết lập mật khẩu chủ sở hữu".
 
 Sau khi hoàn tất, Studio sẽ ghi băm Argon2id vào cơ sở dữ liệu `app.db` và tự động kích hoạt cờ `web:enabled = true`.
 
@@ -98,6 +101,8 @@ Chạy lệnh sau trên máy chủ (một lần duy nhất):
 ```bash
 tailscale serve --bg --https=443 http://127.0.0.1:3000
 ```
+
+Nếu báo thiếu quyền, cho tài khoản `dang` quản lý Tailscale một lần (cần sudo): `sudo tailscale set --operator=dang`.
 
 > [!TIP]
 > Đảm bảo tính năng **MagicDNS** và **HTTPS Certificates** đã được bật trong bảng điều khiển Tailscale Admin Console.
@@ -148,4 +153,4 @@ Dịch vụ sẽ khởi động lại mượt mà trong vòng 2–3 giây. Dữ 
 | `HTTP 403 Forbidden: Origin/Host không hợp lệ` | Truy cập qua tên miền chưa nằm trong danh sách `--allowed-host` | Thêm cờ `--allowed-host <tên-miền>` vào dòng `ExecStart` trong `studio-web.service`, sau đó reload service. |
 | Mất phiên làm việc sau mỗi lần tải lại trang | Trình duyệt chặn cookie không an toàn qua HTTPS proxy | Đảm bảo đã thêm cờ `--behind-https-proxy` để kích hoạt cờ `Secure` trên cookie phiên làm việc. |
 | Dịch vụ tự tắt sau khi ngắt phiên SSH | Chưa bật `linger` cho tài khoản `dang` | Chạy lệnh `sudo loginctl enable-linger dang`. |
-| Quên mật khẩu web | Cần đặt lại mật khẩu | Chạy lại `~/.local/bin/studio-tauri --set-web-password` qua SSH. |
+| Quên mật khẩu web, hoặc web báo "Chưa thiết lập mật khẩu" | Mật khẩu chưa đặt hoặc đặt nhầm thư mục (thiếu `STUDIO_APP_DIR`) | Làm lại Mục 4 qua SSH, nhớ đặt `STUDIO_APP_DIR` giống service. |
