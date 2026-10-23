@@ -41,3 +41,5 @@ Tất cả các tài liệu dưới đây được biên soạn dành cho chủ 
 ### Truy cập Di động & Mạng nội bộ
 11. **[Chế độ Web Cá nhân (LAN / Wi-Fi)](./che-do-web.md)**
     Bật kết nối HTTPS tự ký, đối chiếu mã vân tay SHA-256 an toàn từ điện thoại, mật khẩu chủ sở hữu (Argon2id), giới hạn dung lượng tải lên và cơ chế xác thực Sudo 10 phút.
+12. **[Triển khai Web Headless trên Máy chủ Linux (dang-server)](./may-chu-linux.md)**
+    Chạy Studio dạng dịch vụ nền không giao diện (`studio-tauri --headless`), lưu trữ khoá an toàn với phân quyền `0600`, kết nối qua mạng riêng ảo Tailscale Serve HTTPS và thao tác qua trình duyệt điện thoại.

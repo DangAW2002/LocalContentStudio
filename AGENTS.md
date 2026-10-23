@@ -2,7 +2,7 @@
 
 Personal, AI-first desktop studio (Tauri 2 + Rust core + React). Source of truth for design:
 `D:/Users/Dang/LocalContentStudio/.aw/` (read-only for you): `plans/2026-10-15-0009-personal-ai-first-reset.md`,
-`decisions/ADR-007..ADR-010`, and the task file you are given. If code and docs disagree, follow the docs and say so in your report.
+`decisions/ADR-007..ADR-011`, and the task file you are given. If code and docs disagree, follow the docs and say so in your report.
 
 ## Crate map (new architecture)
 
@@ -12,11 +12,11 @@ Personal, AI-first desktop studio (Tauri 2 + Rust core + React). Source of truth
 | `studio-jobs` | Job scheduler, resource pools, admission, Windows Job Objects, process supervision, `Worker` trait |
 | `studio-engine` | Agent engine adapters (`claude`, `agy`): spawn CLI, parse stream-json, normalized `Event`s |
 | `studio-catalog` | Skill catalog (`catalog/catalog.yaml`), inventory, curation checks, kit resolution, per-turn skill plugin dir |
-| `studio-tools` | Capability + tool registry, manifests, provider routing, secrets (Credential Manager), tool proxy |
-| `studio-brand` | Brand/Channel/Playbook schemas (brand@1, channel@1), loading via scope chain, checkers (palette, contrast, logo, safe zone, size/duration, char limits, captions, voice words) |
-| `studio-artifacts` | artifact.yaml model, kind registry, render dispatch (design HTML→PNG/PDF, motion HyperFrames, timeline FFmpeg), render cache by input hash, proxies |
+| `studio-tools` | Capability + tool registry, manifests, provider routing, secrets (Credential Manager on Windows, FileSecretStore on Linux), tool proxy |
+| `studio-brand` | Brand/Channel/Playbook schemas (brand@1, channel@1), loading via scope chain, checkers (palette, contrast, logo, safe zone, size/duration, char limits, captions, voice words, declared inputs, series) |
+| `studio-artifacts` | artifact.yaml model, kind registry, render dispatch (design HTML→PNG/PDF, motion HyperFrames, timeline FFmpeg), render cache by input hash, content graph (graph.rs, graph_edit.rs), series, proxies |
 | `studio-mcp` | Studio MCP server (Streamable HTTP loopback + token; stdio shim) |
-| `studio-tauri` | Desktop shell + IPC |
+| `studio-tauri` | Desktop shell + IPC + headless web mode (`--headless` cho Linux / dang-server) |
 | `studio-cli` | `studio` CLI |
 | `packages/desktop-ui` | React UI |
 
@@ -39,6 +39,7 @@ Legacy crates of the previous multi-user design were removed on 2026-10-16 (see 
 Run full workspace quality gate:
 ```
 scripts/gate.ps1  # Windows PowerShell (or ./scripts/gate.sh on Unix/Bash)
+scripts/gate.ps1 -Smoke  # With E2E smoke test (or bash scripts/gate.sh --smoke)
 ```
 Or run individual gates:
 ```
@@ -50,6 +51,6 @@ pnpm --filter @studio/desktop-ui typecheck
 pnpm --filter @studio/desktop-ui test
 pnpm --filter @studio/desktop-ui build
 ```
-For E2E smoke testing: `pnpm e2e:smoke` (or `scripts/gate.ps1 -Smoke`).
+For E2E smoke testing: `pnpm e2e:smoke` (or `scripts/gate.ps1 -Smoke` / `bash scripts/gate.sh --smoke`).
 
 Do not commit; the orchestrator reviews and commits. When committing, strictly forbid `Co-Authored-By` or AI attribution trailers. Report: what you built, public API, tests, gate output, known gaps.

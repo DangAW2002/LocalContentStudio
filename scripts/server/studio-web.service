@@ -1,6 +1,5 @@
 [Unit]
 Description=Local Content Studio (Web Headless)
-Documentation=https://github.com/LocalContentStudio
 After=network.target tailscaled.service
 Wants=network.target
 
@@ -9,7 +8,8 @@ Type=simple
 Environment=STUDIO_APP_DIR=%h/.local/share/local-content-studio
 Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
 # Headless web mode (chạy ngầm, không GUI, nghe loopback port 3000).
-# Khi dùng qua Tailscale Serve (HTTPS): thêm --behind-https-proxy và --allowed-host <domain.ts.net>
+# Khi dùng qua Tailscale Serve (HTTPS) PHẢI thêm --behind-https-proxy --allowed-host <máy>.<tailnet>.ts.net,
+# nếu không mọi request qua tên ts.net bị chặn 403 (xem docs/huong-dan/may-chu-linux.md mục 6.2).
 ExecStart=%h/.local/bin/studio-tauri --headless --port 3000
 Restart=on-failure
 RestartSec=5s
