@@ -100,10 +100,22 @@ impl FileSecretStore {
     pub fn new(path: PathBuf) -> Self {
         let mut map = HashMap::new();
         if path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Ok(deserialized) = serde_json::from_str::<HashMap<String, String>>(&content)
-                {
-                    map = deserialized;
+            let parsed = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|c| serde_json::from_str::<HashMap<String, String>>(&c).ok());
+            match parsed {
+                Some(deserialized) => map = deserialized,
+                // Keep the unreadable file aside so the next `set` cannot wipe the user's keys.
+                None => {
+                    let backup = path.with_extension(format!(
+                        "json.corrupt-{}",
+                        chrono::Utc::now().format("%Y%m%d%H%M%S")
+                    ));
+                    let _ = std::fs::rename(&path, &backup);
+                    eprintln!(
+                        "Không đọc được file secrets, đã chuyển sang {}",
+                        backup.display()
+                    );
                 }
             }
         }
@@ -393,6 +405,27 @@ impl SecretStore for CredentialManagerStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_file_secret_store_keeps_corrupt_file_aside() {
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let path = temp_dir.path().join("secrets.json");
+        std::fs::write(&path, "{ not json").expect("write corrupt");
+
+        let store = FileSecretStore::new(path.clone());
+        store.set("", None, "NEW_KEY", "v").expect("set");
+
+        let backups: Vec<_> = std::fs::read_dir(temp_dir.path())
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".corrupt-"))
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(backups[0].path()).expect("read backup"),
+            "{ not json"
+        );
+    }
 
     #[test]
     fn test_file_secret_store_crud_and_persistence() {

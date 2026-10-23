@@ -219,6 +219,9 @@ mod tests {
 
     #[test]
     fn test_set_web_password_reject_short() {
+        let _lock = crate::commands::tests::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
         std::env::set_var("STUDIO_APP_DIR", tmp.path());
 
@@ -236,6 +239,9 @@ mod tests {
 
     #[test]
     fn test_set_web_password_success() {
+        let _lock = crate::commands::tests::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
         std::env::set_var("STUDIO_APP_DIR", tmp.path());
 
@@ -257,7 +263,12 @@ mod tests {
     }
 
     #[tokio::test]
+    // The env lock must span the whole run: STUDIO_APP_DIR is read again at teardown.
+    #[allow(clippy::await_holding_lock)]
     async fn test_headless_run_and_clean_teardown() {
+        let _lock = crate::commands::tests::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
         std::env::set_var("STUDIO_APP_DIR", tmp.path());
 
