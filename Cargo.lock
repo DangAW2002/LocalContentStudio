@@ -4654,6 +4654,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "hex",
+ "regex",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",

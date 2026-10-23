@@ -42,11 +42,15 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
 - Lưu kịch bản vào artifact loại `text` hoặc tệp `projects/<slug>/script.md`.
 
 ### 2. Giọng đọc (Voice & TTS)
-- Tách từng đoạn lời thoại theo nhịp câu phù hợp.
-- Tạo giọng đọc qua capability `tts.synthesize@1`:
-  - Gọi `capability_run` với công cụ `tts.windows-sapi` (hoặc provider khả dụng).
-  - Đảm bảo đầu ra âm thanh định dạng `.wav` hoặc `.mp3` được ghi nhận trong thư mục asset của lượt/dự án.
-  - Ghi nhận thời lượng chính xác của từng file âm thanh qua `duration_seconds` trả về sẵn (hoặc kiểm tra bằng `media.inspect@1`) để căn khớp timeline.
+- **Provider đúng:** Gọi capability `tts.synthesize@1` qua `capability_run` với provider khả dụng: `tts.piper` (mặc định giọng `vi_VN-vais1000-medium`) hoặc `tts.vieneu` (các giọng `Bình`, `Mai`, `Nam`, `Nữ`). Không dùng provider legacy.
+- **Quy tắc viết lời thuyết minh tự nhiên:**
+  - **Độ dài câu:** Mỗi câu ngắn gọn, tối đa ≤ 20 từ để giữ hơi thở tự nhiên.
+  - **Ngắt nhịp lấy hơi:** Đặt dấu phẩy `,` ở đúng chỗ ngắt nghỉ lấy hơi; mỗi câu chỉ truyền đạt một ý trọn vẹn; tránh dùng ngoặc đơn/kép `( )`, `[ ]` hay ký hiệu rườm rà.
+  - **Phân chia segment:** Mỗi phân cảnh (segment) chỉ nên dài 1–2 câu tương ứng với một tệp âm thanh WAV.
+  - **Thẻ ngắt chủ động:** Dùng thẻ `[ngắt x]` (ví dụ `[ngắt 0.7]` giây) trước các ý nhấn mạnh quan trọng hoặc ngay sau câu hỏi để tạo khoảng dừng thuyết phục người xem.
+  - **Tốc độ nói (`speed`):** Khuyến nghị thiết lập `speed` từ 0.85 – 0.95 (mặc định 0.90 cho tiếng Việt khi không truyền).
+  - **Kiểm soát nhịp độ sau tổng hợp:** Lấy số tiếng (mỗi từ đơn tiếng Việt) của lời thoại gốc chia cho `duration_seconds` trả về (đã gồm khoảng lặng dấu câu). Nhịp thuyết minh tốt khoảng 2,8 – 3,4 tiếng/giây (số và ngày được đọc thành nhiều tiếng hơn nên đoạn nhiều số sẽ thấp hơn). Chỉ khi > 3,6 tiếng/giây mới giảm `speed` 0,05 (tối thiểu 0,8) và tổng hợp lại một lần; nếu vẫn nhanh, viết lại câu ngắn hơn hoặc thêm dấu phẩy/`[ngắt x]` thay vì giảm tiếp.
+- **Lưu trữ asset:** Đảm bảo đầu ra âm thanh định dạng `.wav` được lưu trữ vào thư mục asset của project (`projects/<slug>/assets/vo/`) để sẵn sàng cho bước dựng timeline.
 
 ### 3. Tư liệu hình ảnh & B-Roll (Media Gathering & Gen)
 - Thu thập hoặc sinh tư liệu hình ảnh/video bổ trợ (B-roll):

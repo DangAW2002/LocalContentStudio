@@ -239,13 +239,27 @@ pub fn verify_sha256(path: &Path, expected_hex: &str) -> Result<bool> {
     Ok(calculated.eq_ignore_ascii_case(expected_hex))
 }
 
-/// Construct CLI arguments for invoking the Piper binary.
-pub fn build_piper_args(
+/// Options for customizing Piper speech synthesis CLI arguments.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PiperCliOptions {
+    /// Speech speed multiplier (e.g. 0.9).
+    pub speed: Option<f32>,
+    /// Speaker ID for multi-speaker models.
+    pub speaker: Option<u32>,
+    /// Generator noise scale (default 0.667).
+    pub noise_scale: Option<f32>,
+    /// Phoneme width noise scale (default 0.85).
+    pub noise_w: Option<f32>,
+    /// Silence after each sentence in seconds.
+    pub sentence_silence: Option<f32>,
+}
+
+/// Construct CLI arguments for invoking the Piper binary with comprehensive parameters.
+pub fn build_piper_args_full(
     model_path: &Path,
     config_path: &Path,
     output_wav_path: &Path,
-    speed: Option<f32>,
-    speaker: Option<u32>,
+    options: &PiperCliOptions,
 ) -> Vec<String> {
     let mut args = vec![
         "--model".to_string(),
@@ -256,7 +270,7 @@ pub fn build_piper_args(
         output_wav_path.to_string_lossy().to_string(),
     ];
 
-    if let Some(s) = speed {
+    if let Some(s) = options.speed {
         if (s - 1.0).abs() > f32::EPSILON && s > 0.1 && s < 5.0 {
             // Piper uses --length_scale where higher value means slower speech (duration scale)
             let length_scale = 1.0 / s;
@@ -265,15 +279,51 @@ pub fn build_piper_args(
         }
     }
 
-    if let Some(spk) = speaker {
+    if let Some(spk) = options.speaker {
         args.push("--speaker".to_string());
         args.push(spk.to_string());
+    }
+
+    if let Some(ns) = options.noise_scale {
+        args.push("--noise_scale".to_string());
+        args.push(format!("{ns:.3}"));
+    }
+
+    if let Some(nw) = options.noise_w {
+        args.push("--noise_w".to_string());
+        args.push(format!("{nw:.3}"));
+    }
+
+    if let Some(ss) = options.sentence_silence {
+        args.push("--sentence_silence".to_string());
+        args.push(format!("{ss:.3}"));
     }
 
     args
 }
 
-/// Run Piper speech synthesis in-process via binary.
+/// Construct CLI arguments for invoking the Piper binary (backward-compatible signature).
+pub fn build_piper_args(
+    model_path: &Path,
+    config_path: &Path,
+    output_wav_path: &Path,
+    speed: Option<f32>,
+    speaker: Option<u32>,
+) -> Vec<String> {
+    build_piper_args_full(
+        model_path,
+        config_path,
+        output_wav_path,
+        &PiperCliOptions {
+            speed,
+            speaker,
+            ..Default::default()
+        },
+    )
+}
+
+/// Run Piper speech synthesis in-process via binary with natural punctuation pausing,
+/// Vietnamese text normalization, noise modulation, and deterministic cache.
 pub async fn run_piper(ws: &Workspace, out_dir: &Path, input: &Value) -> Result<Value> {
     let piper_exe = find_piper_binary().ok_or_else(|| ToolError::MissingDependency {
         tool_id: "tts.piper".into(),
@@ -328,7 +378,25 @@ pub async fn run_piper(ws: &Workspace, out_dir: &Path, input: &Value) -> Result<
         });
     }
 
-    let speed_req = input.get("speed").and_then(Value::as_f64).map(|s| s as f32);
+    // Default speed for Vietnamese is 0.9 if not specified
+    let speed_req = input
+        .get("speed")
+        .and_then(Value::as_f64)
+        .map(|s| s as f32)
+        .unwrap_or(0.9);
+
+    // Default noise modulation parameters for natural prosody
+    let noise_scale_req = input
+        .get("noise_scale")
+        .and_then(Value::as_f64)
+        .map(|s| s as f32)
+        .unwrap_or(0.667);
+
+    let noise_w_req = input
+        .get("noise_w")
+        .and_then(Value::as_f64)
+        .map(|s| s as f32)
+        .unwrap_or(0.85);
 
     let speaker_req = input
         .get("speaker")
@@ -354,75 +422,161 @@ pub async fn run_piper(ws: &Workspace, out_dir: &Path, input: &Value) -> Result<
             path
         };
 
-    let cmd_args = build_piper_args(
-        &model_onnx,
-        &model_json,
-        &target_wav_path,
-        speed_req,
-        speaker_req,
-    );
+    let available_ids: Vec<&str> = PIPER_VIETNAMESE_VOICES.iter().map(|v| v.id).collect();
 
-    // Piper reads text from stdin (UTF-8)
-    let mut child = Command::new(&piper_exe)
-        .args(&cmd_args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .current_dir(ws.root())
-        .spawn()
-        .map_err(|e| ToolError::ExecutionFailed {
+    // Check TTS audio cache by input hash
+    let cache_key = crate::tts::compute_tts_cache_key("tts.piper", input);
+    let cache_dir = ws.cache_dir().join("tts");
+    let cached_file = cache_dir.join(format!("{cache_key}.wav"));
+
+    if cached_file.is_file() {
+        let _ = fs::copy(&cached_file, &target_wav_path);
+        let duration_s = if let Ok((spec, data)) = crate::tts::read_pcm_wav(&target_wav_path) {
+            spec.duration_seconds(data.len())
+        } else {
+            0.0
+        };
+
+        let rel_path = target_wav_path
+            .strip_prefix(ws.root())
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|_| target_wav_path.to_string_lossy().replace('\\', "/"));
+
+        return Ok(json!({
+            "audio_path": rel_path,
+            "duration_seconds": (duration_s * 1000.0).round() / 1000.0,
+            "provider": "tts.piper",
+            "voice": chosen_voice_id,
+            "speed": speed_req,
+            "noise_scale": noise_scale_req,
+            "noise_w": noise_w_req,
+            "available_voices": available_ids,
+            "cached": true,
+            "note": format!("Tổng hợp giọng nói thành công qua Piper TTS (bản lưu cache {chosen_voice_id}). {VIETNAMESE_VOICE_LICENSE_NOTE}")
+        }));
+    }
+
+    // Step 1: Normalize Vietnamese text
+    let normalized = crate::tts::normalize_vietnamese_text(text);
+
+    // Step 2: Split into speech segments by punctuation and tags
+    let pauses = crate::tts::PauseConfig::from_value(input.get("pauses"));
+    let segments = crate::tts::split_into_tts_segments(&normalized, &pauses);
+
+    if segments.is_empty() {
+        return Err(ToolError::ExecutionFailed {
             tool_id: "tts.piper".into(),
-            reason: format!("Không thể khởi chạy Piper binary: {e}"),
-        })?;
+            reason: "Nội dung văn bản sau chuẩn hoá rỗng.".into(),
+        });
+    }
 
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(text.as_bytes())
-            .map_err(|e| ToolError::Io {
-                path: PathBuf::from("stdin"),
-                source: e,
+    let chunks_dir = ws
+        .cache_dir()
+        .join("tts_chunks")
+        .join(uuid::Uuid::new_v4().to_string());
+    fs::create_dir_all(&chunks_dir).map_err(|e| ToolError::Io {
+        path: chunks_dir.clone(),
+        source: e,
+    })?;
+
+    let mut chunk_items: Vec<(PathBuf, f32)> = Vec::new();
+
+    for (idx, seg) in segments.iter().enumerate() {
+        let chunk_wav = chunks_dir.join(format!("chunk_{idx}.wav"));
+        let cmd_args = build_piper_args_full(
+            &model_onnx,
+            &model_json,
+            &chunk_wav,
+            &PiperCliOptions {
+                speed: Some(speed_req),
+                speaker: speaker_req,
+                noise_scale: Some(noise_scale_req),
+                noise_w: Some(noise_w_req),
+                sentence_silence: Some(0.0), // Disable internal sentence padding in favor of exact WAV silence
+            },
+        );
+
+        let mut child = Command::new(&piper_exe)
+            .args(&cmd_args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .current_dir(ws.root())
+            .spawn()
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool_id: "tts.piper".into(),
+                reason: format!("Không thể khởi chạy Piper binary: {e}"),
             })?;
-        let _ = stdin.flush();
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(seg.text.as_bytes())
+                .map_err(|e| ToolError::Io {
+                    path: PathBuf::from("stdin"),
+                    source: e,
+                })?;
+            let _ = stdin.flush();
+        }
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| ToolError::ExecutionFailed {
+                tool_id: "tts.piper".into(),
+                reason: format!("Lỗi chờ tiến trình Piper hoàn thành: {e}"),
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let _ = fs::remove_dir_all(&chunks_dir);
+            return Err(ToolError::ExecutionFailed {
+                tool_id: "tts.piper".into(),
+                reason: format!(
+                    "Tiến trình Piper kết thúc với lỗi {}: {}",
+                    output.status,
+                    stderr.trim()
+                ),
+            });
+        }
+
+        if !chunk_wav.is_file() {
+            let _ = fs::remove_dir_all(&chunks_dir);
+            return Err(ToolError::ExecutionFailed {
+                tool_id: "tts.piper".into(),
+                reason: format!(
+                    "Piper kết thúc nhưng không tìm thấy tệp âm thanh phân đoạn #{idx}."
+                ),
+            });
+        }
+
+        chunk_items.push((chunk_wav, seg.pause_after_s));
     }
 
-    let output = child
-        .wait_with_output()
-        .map_err(|e| ToolError::ExecutionFailed {
-            tool_id: "tts.piper".into(),
-            reason: format!("Lỗi chờ tiến trình Piper hoàn thành: {e}"),
-        })?;
+    // Step 3: Concatenate all segments with deterministic silence gaps
+    let item_refs: Vec<(&Path, f32)> = chunk_items.iter().map(|(p, s)| (p.as_path(), *s)).collect();
+    let total_duration = crate::tts::concat_wav_files_with_silence(&item_refs, &target_wav_path)?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        return Err(ToolError::ExecutionFailed {
-            tool_id: "tts.piper".into(),
-            reason: format!(
-                "Tiến trình Piper kết thúc với lỗi {}: {}",
-                output.status,
-                stderr.trim()
-            ),
-        });
-    }
+    // Clean up temporary chunks
+    let _ = fs::remove_dir_all(&chunks_dir);
 
-    if !target_wav_path.is_file() {
-        return Err(ToolError::ExecutionFailed {
-            tool_id: "tts.piper".into(),
-            reason: "Piper kết thúc nhưng không tìm thấy tệp WAV đầu ra.".into(),
-        });
-    }
+    // Step 4: Write to cache
+    let _ = fs::create_dir_all(&cache_dir);
+    let _ = fs::copy(&target_wav_path, &cached_file);
 
     let rel_path = target_wav_path
         .strip_prefix(ws.root())
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|_| target_wav_path.to_string_lossy().replace('\\', "/"));
 
-    let available_ids: Vec<&str> = PIPER_VIETNAMESE_VOICES.iter().map(|v| v.id).collect();
-
     Ok(json!({
         "audio_path": rel_path,
+        "duration_seconds": total_duration,
         "provider": "tts.piper",
         "voice": chosen_voice_id,
+        "speed": speed_req,
+        "noise_scale": noise_scale_req,
+        "noise_w": noise_w_req,
         "available_voices": available_ids,
+        "cached": false,
         "note": format!("Tổng hợp giọng nói thành công qua Piper TTS ({chosen_voice_id}). {VIETNAMESE_VOICE_LICENSE_NOTE}")
     }))
 }
@@ -612,6 +766,38 @@ mod tests {
     }
 
     #[test]
+    fn test_build_piper_args_full_options() {
+        let model = Path::new("C:/models/vi_VN-vais1000-medium.onnx");
+        let config = Path::new("C:/models/vi_VN-vais1000-medium.onnx.json");
+        let out = Path::new("C:/out/speech.wav");
+
+        let args = build_piper_args_full(
+            model,
+            config,
+            out,
+            &PiperCliOptions {
+                speed: Some(0.9),
+                speaker: Some(2),
+                noise_scale: Some(0.667),
+                noise_w: Some(0.85),
+                sentence_silence: Some(0.0),
+            },
+        );
+
+        assert!(args.contains(&"--noise_scale".to_string()));
+        let ns_idx = args.iter().position(|a| a == "--noise_scale").unwrap();
+        assert_eq!(args[ns_idx + 1], "0.667");
+
+        assert!(args.contains(&"--noise_w".to_string()));
+        let nw_idx = args.iter().position(|a| a == "--noise_w").unwrap();
+        assert_eq!(args[nw_idx + 1], "0.850");
+
+        assert!(args.contains(&"--sentence_silence".to_string()));
+        let ss_idx = args.iter().position(|a| a == "--sentence_silence").unwrap();
+        assert_eq!(args[ss_idx + 1], "0.000");
+    }
+
+    #[test]
     fn test_piper_voice_metadata_constants() {
         assert_eq!(PIPER_VIETNAMESE_VOICES.len(), 3);
         assert_eq!(PIPER_VIETNAMESE_VOICES[0].id, "vi_VN-vais1000-medium");
@@ -669,13 +855,118 @@ mod tests {
         fs::create_dir_all(&out_dir).unwrap();
 
         let input = json!({
-            "text": "Chào bạn, đây là thử nghiệm giọng đọc Piper offline.",
+            "text": "Chào bạn, đây là thử nghiệm giọng đọc Piper offline. Ngày 24/10/2026, chúng tôi đạt 1.500 lượt xem, tăng 25%. Bạn có thấy tự nhiên không?",
             "voice": installed[0],
-            "speed": 1.0
+            "speed": 0.9
         });
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let res = rt.block_on(run_piper(&ws, &out_dir, &input));
         assert!(res.is_ok(), "Real Piper synthesis failed: {:?}", res);
+        let val = res.unwrap();
+        assert!(val.get("duration_seconds").is_some());
+        assert!(val["duration_seconds"].as_f64().unwrap() > 0.0);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_v01_evidence_real_synthesis() {
+        let bin = find_piper_binary().expect("Piper binary required for real synthesis test");
+        let installed = get_installed_piper_voices();
+        assert!(!installed.is_empty(), "Piper voices required");
+
+        let voice_id = &installed[0];
+        let models_root = piper_models_dir();
+        let voice_dir = models_root.join(voice_id);
+        let model_onnx = voice_dir.join(format!("{voice_id}.onnx"));
+        let model_json = voice_dir.join(format!("{voice_id}.onnx.json"));
+
+        let evidence_dir = PathBuf::from(
+            "D:/Users/Dang/LocalContentStudio/.aw/tasks/2026-10-24-v01-giong-doc-tu-nhien/evidence",
+        );
+        let _ = fs::create_dir_all(&evidence_dir);
+
+        let sample_text = "Chào mừng quý vị đến với bản tin hôm nay, ngày 24/10. Tại TP.HCM, hơn 1.500 doanh nghiệp vừa ghi nhận mức tăng trưởng doanh thu ấn tượng 25%, cao gấp 2,5 lần so với cùng kỳ.\n\n[ngắt 0.7] Bạn đã nắm bắt cơ hội này chưa? Đừng bỏ lỡ các thông tin cập nhật mới nhất từ chúng tôi, v.v.";
+
+        // --- 1. Synthesize BEFORE (old behavior: no pause splitting, no normalization, speed 1.0) ---
+        let before_wav = evidence_dir.join("before.wav");
+        let legacy_text = sample_text.replace("[ngắt 0.7]", "");
+        let before_args = build_piper_args_full(
+            &model_onnx,
+            &model_json,
+            &before_wav,
+            &PiperCliOptions {
+                speed: Some(1.0),
+                speaker: None,
+                noise_scale: Some(0.667),
+                noise_w: Some(0.8),
+                sentence_silence: Some(0.2),
+            },
+        );
+
+        let mut child_before = Command::new(&bin)
+            .args(&before_args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn before piper");
+
+        if let Some(mut stdin) = child_before.stdin.take() {
+            stdin.write_all(legacy_text.as_bytes()).unwrap();
+            let _ = stdin.flush();
+        }
+        let out_before = child_before.wait_with_output().expect("wait before piper");
+        assert!(out_before.status.success(), "before synthesis must succeed");
+
+        let before_duration = if let Ok((spec, data)) = crate::tts::read_pcm_wav(&before_wav) {
+            spec.duration_seconds(data.len())
+        } else {
+            0.0
+        };
+
+        // --- 2. Synthesize AFTER (new behavior: norm, punctuation pause splitting, speed 0.9, noise_scale 0.667, noise_w 0.85) ---
+        let after_wav = evidence_dir.join("after.wav");
+
+        let tmp = tempdir().unwrap();
+        let ws = Workspace::create(tmp.path().join("ws"), "ws").unwrap();
+        let out_dir = ws.cache_dir().join("turns").join("test-evidence");
+        fs::create_dir_all(&out_dir).unwrap();
+
+        let after_input = json!({
+            "text": sample_text,
+            "voice": voice_id,
+            "speed": 0.9,
+            "noise_scale": 0.667,
+            "noise_w": 0.85,
+        });
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let res = rt.block_on(run_piper(&ws, &out_dir, &after_input));
+        assert!(res.is_ok(), "after synthesis must succeed: {:?}", res);
+
+        let after_val = res.unwrap();
+        let rel_audio = after_val["audio_path"].as_str().unwrap();
+        let generated_wav = ws.root().join(rel_audio);
+        fs::copy(&generated_wav, &after_wav).expect("copy to after.wav");
+
+        let after_duration = after_val["duration_seconds"].as_f64().unwrap();
+
+        let word_count = 59.0;
+        let before_wps = word_count / before_duration;
+        let after_wps = word_count / after_duration;
+
+        println!("=== V01 EVIDENCE TEST RESULTS ===");
+        println!("Sample text (~60 words): 59 words");
+        println!(
+            "Before duration: {:.3}s -> {:.2} words/s",
+            before_duration, before_wps
+        );
+        println!(
+            "After duration:  {:.3}s -> {:.2} words/s",
+            after_duration, after_wps
+        );
+        println!("Before file: {}", before_wav.display());
+        println!("After file:  {}", after_wav.display());
     }
 }
