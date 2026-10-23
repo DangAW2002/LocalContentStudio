@@ -16,15 +16,13 @@ fn is_test_environment() -> bool {
     if cfg!(test) {
         return true;
     }
-    if env::var_os("RUST_TEST_THREADS").is_some()
-        || env::var_os("NEXTEST").is_some()
-        || env::var_os("CARGO_TARGET_TMPDIR").is_some()
-    {
+    // Only unambiguous signals: a false positive would silently hide the user's real data.
+    if env::var_os("NEXTEST").is_some() {
         return true;
     }
+    // Cargo test binaries live in target/<profile>/deps; shipped and `cargo run` binaries do not.
     if let Ok(exe) = env::current_exe() {
-        let s = exe.to_string_lossy().to_lowercase();
-        if s.contains(r"\deps\") || s.contains("/deps/") {
+        if exe.parent().and_then(|p| p.file_name()) == Some(std::ffi::OsStr::new("deps")) {
             return true;
         }
     }
