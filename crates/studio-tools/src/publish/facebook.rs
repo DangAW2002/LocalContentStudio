@@ -143,7 +143,7 @@ pub fn map_facebook_error(status: Option<StatusCode>, raw_body_or_msg: &str) -> 
         return YouTubeErrorDetail {
             code: "facebook_redirect_uri_mismatch".into(),
             message_vi: "Redirect URI chưa được thêm vào Meta App".into(),
-            fix_vi: "Vào developers.facebook.com → Facebook Login → Settings → thêm 'http://127.0.0.1:8911/callback' vào Valid OAuth Redirect URIs.".into(),
+            fix_vi: "Giữ Meta App ở chế độ Phát triển (Meta tự cho phép http://localhost:8911/callback) hoặc thêm URI đó vào Valid OAuth Redirect URIs nếu Meta cho phép.".into(),
         };
     }
 
@@ -381,7 +381,7 @@ pub async fn exchange_facebook_code_and_fetch_pages(
     Ok(result)
 }
 
-/// Connect Facebook Pages via OAuth loopback redirect on 127.0.0.1:8911.
+/// Connect Facebook Pages via OAuth loopback redirect on localhost:8911 (Meta only accepts plain http for localhost).
 /// Stores page access tokens into SecretStore and returns all retrieved accounts.
 pub async fn connect_facebook(
     secrets: &dyn SecretStore,
@@ -410,7 +410,7 @@ pub async fn connect_facebook(
         })?;
 
     let port = DEFAULT_FACEBOOK_LOOPBACK_PORT;
-    let redirect_uri = format!("http://127.0.0.1:{port}/callback");
+    let redirect_uri = format!("http://localhost:{port}/callback");
 
     let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
         .await
@@ -902,7 +902,7 @@ mod tests {
             "URL Blocked: This redirect failed because the redirect URI is not whitelisted",
         );
         assert_eq!(err3.code, "facebook_redirect_uri_mismatch");
-        assert!(err3.fix_vi.contains("127.0.0.1:8911"));
+        assert!(err3.fix_vi.contains("localhost:8911"));
 
         let err4 = map_facebook_error(
             Some(StatusCode::BAD_REQUEST),

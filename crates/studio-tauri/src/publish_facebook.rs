@@ -110,7 +110,7 @@ pub async fn facebook_client_status(
     facebook_client_status_impl(&state)
 }
 
-/// Connect Facebook Pages via OAuth loopback on 127.0.0.1:8911.
+/// Connect Facebook Pages via OAuth loopback on localhost:8911.
 #[tauri::command]
 pub async fn facebook_connect(
     state: tauri::State<'_, AppState>,

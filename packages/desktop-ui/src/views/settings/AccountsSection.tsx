@@ -358,12 +358,12 @@ export const AccountsSection: React.FC = () => {
 
                 <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-secondary)", lineHeight: 1.6, display: "flex", flexDirection: "column", gap: 10 }}>
                   <p style={{ margin: 0 }}>
-                    <strong>1. Thêm Redirect URI trên Meta Developer Portal:</strong><br />
-                    Vào <code>developers.facebook.com</code> → chọn App của bạn → mục <strong>Facebook Login</strong> → <strong>Cài đặt</strong>.<br />
-                    Thêm URI sau vào ô <em>Valid OAuth Redirect URIs</em>:
+                    <strong>1. Redirect URI trên Meta Developer Portal:</strong><br />
+                    Meta bắt buộc HTTPS cho URI chuyển hướng, trừ <code>localhost</code>: khi App ở chế độ <strong>Phát triển</strong>, URI dưới đây được tự cho phép, không cần thêm.<br />
+                    Nếu Meta vẫn báo URL bị chặn, vào <strong>Facebook Login</strong> → <strong>Cài đặt</strong> và thêm vào ô <em>Valid OAuth Redirect URIs</em>:
                   </p>
                   <pre style={{ background: "var(--cs-bg-raised)", padding: "8px 12px", borderRadius: 4, margin: 0, fontFamily: "var(--cs-font-mono)" }}>
-                    http://127.0.0.1:8911/callback
+                    http://localhost:8911/callback
                   </pre>
                   <p style={{ margin: 0 }}>
                     <strong>2. Lấy App ID & App Secret:</strong><br />
@@ -503,7 +503,7 @@ export const AccountsSection: React.FC = () => {
                     Trình duyệt đang mở để bạn xác thực tài khoản Facebook. Sau khi cấp quyền cho các Page, hãy quay lại đây.
                     <br />
                     <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
-                      Cổng xác thực cục bộ: <code>http://127.0.0.1:8911/callback</code>. Còn {fbCountdown} giây...
+                      Cổng xác thực cục bộ: <code>http://localhost:8911/callback</code>. Còn {fbCountdown} giây...
                     </span>
                   </div>
                 </div>

@@ -15,13 +15,13 @@ Mọi khoá xác thực và mã phiên đều được lưu trữ trực tiếp 
 3. Chọn loại trường hợp sử dụng (Use case): **Khác (Other)** → Chọn loại ứng dụng: **Doanh nghiệp (Business)**.
 4. Đặt tên hiển thị cho ứng dụng (ví dụ: `Studio Ca Nhan`) và nhập email liên hệ của bạn → Bấm **Tạo ứng dụng**.
 5. Trong bảng điều khiển ứng dụng, tìm mục **Đăng nhập bằng Facebook (Facebook Login)** → Bấm **Thiết lập (Set Up)**.
-6. Vào mục **Cài đặt (Settings)** nằm dưới phần Facebook Login ở cột bên trái:
-   - Tìm tới ô **URI chuyển hướng OAuth hợp lệ (Valid OAuth Redirect URIs)**.
-   - Điền chính xác địa chỉ loopback của Studio:
+6. Địa chỉ nhận kết quả đăng nhập của Studio là:
      ```text
-     http://127.0.0.1:8911/callback
+     http://localhost:8911/callback
      ```
-   - Bấm **Lưu thay đổi (Save Changes)** ở góc dưới màn hình.
+   Meta bắt buộc HTTPS cho mọi URI chuyển hướng (ô **Thực thi HTTPS** bị khoá), trừ `localhost`: khi ứng dụng ở chế độ
+   **Phát triển**, Meta tự cho phép địa chỉ `localhost` mà không cần thêm. Hãy giữ ứng dụng ở chế độ Phát triển. Đừng dùng
+   `127.0.0.1` — Meta sẽ báo "Phải dùng HTTPS cho mọi URI chuyển hướng".
 7. Vào mục **Cài đặt ứng dụng (App Settings) › Cơ bản (Basic)** ở cột menu bên trái:
    - Ghi lại chuỗi **ID ứng dụng (App ID)**.
    - Bấm nút "Hiển thị" tại dòng **Khoá bí mật của ứng dụng (App Secret)** và sao chép mã này.
@@ -85,7 +85,7 @@ Nếu bạn chưa muốn tạo Meta App hoặc chỉ muốn đăng thủ công m
 
 | Bạn thấy | Nguyên nhân | Cách khắc phục |
 | :--- | :--- | :--- |
-| Trình duyệt báo `redirect_uri_mismatch` hoặc "URL bị chặn" | Chưa thêm đúng địa chỉ callback trong phần cài đặt của Meta App | Mở trang Meta for Developers › Facebook Login › Settings, kiểm tra xem ô Valid OAuth Redirect URIs đã có đúng chuỗi `http://127.0.0.1:8911/callback` chưa. |
+| Trình duyệt báo `redirect_uri_mismatch` hoặc "URL bị chặn" | Chưa thêm đúng địa chỉ callback trong phần cài đặt của Meta App | Mở trang Meta for Developers › Facebook Login › Settings, kiểm tra ứng dụng còn ở chế độ **Phát triển** (Meta chỉ tự cho phép `http://localhost:8911/callback` ở chế độ này) và bạn là quản trị viên của ứng dụng. |
 | Bấm kết nối nhưng trình duyệt không mở | Cổng loopback 8911 trên máy đang bị một ứng dụng khác chiếm dụng | Khởi động lại Studio hoặc kiểm tra xem có tiến trình nào khác đang mở cổng 8911. |
 | Danh sách Page trống sau khi hoàn tất đăng nhập | Tài khoản Facebook của bạn chưa sở hữu hoặc chưa được phân quyền quản trị viên trên bất kỳ Trang nào | Đảm bảo tài khoản đăng nhập có vai trò Quản trị viên (Admin) hoặc Biên tập viên (Editor) trên Facebook Page bạn muốn đăng bài. |
 | Đăng video dung lượng lớn bị gián đoạn giữa chừng | Mạng Internet gia đình bị chập chờn | Studio sử dụng cơ chế tải lên phân đoạn (Resumable Chunked Upload). Bạn có thể bấm Thử lại để tiếp tục tải lên các phân đoạn còn lại mà không cần tải lại từ đầu. |
