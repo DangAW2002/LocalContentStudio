@@ -61,6 +61,10 @@ pub struct WebServerConfig {
     pub redirect_http_to_https: bool,
     /// Body limits.
     pub limits: WebLimitsConfig,
+    /// Allowed trusted hosts for Origin and Host validation (e.g. Tailscale ts.net domains).
+    pub allowed_hosts: Vec<String>,
+    /// Set true when running behind an HTTPS reverse proxy (e.g. tailscale serve).
+    pub behind_https_proxy: bool,
 }
 
 impl Default for WebServerConfig {
@@ -72,6 +76,8 @@ impl Default for WebServerConfig {
             app_data_dir: std::env::temp_dir().join("studio_web_default"),
             redirect_http_to_https: false,
             limits: WebLimitsConfig::default(),
+            allowed_hosts: Vec::new(),
+            behind_https_proxy: false,
         }
     }
 }
@@ -87,6 +93,8 @@ pub struct WebServerState {
     pub port: u16,
     pub tls_info: Option<TlsCertificateInfo>,
     pub limits: WebLimitsConfig,
+    pub allowed_hosts: Vec<String>,
+    pub behind_https_proxy: bool,
 }
 
 /// Running server handle.
@@ -163,6 +171,8 @@ pub async fn start(
         port: config.port,
         tls_info,
         limits: config.limits.clone(),
+        allowed_hosts: config.allowed_hosts,
+        behind_https_proxy: config.behind_https_proxy,
     });
 
     let app = build_router(state);
@@ -333,7 +343,7 @@ struct AuthStatusResponse {
 }
 
 async fn auth_status(State(state): State<Arc<WebServerState>>, headers: HeaderMap) -> Response {
-    if !verify_origin_and_host(&headers, state.lan_allowed) {
+    if !verify_origin_and_host(&headers, state.lan_allowed, &state.allowed_hosts) {
         return forbidden_response("Origin/Host không hợp lệ.");
     }
 
@@ -373,7 +383,7 @@ async fn auth_login(
     headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> Response {
-    if !verify_origin_and_host(&headers, state.lan_allowed) {
+    if !verify_origin_and_host(&headers, state.lan_allowed, &state.allowed_hosts) {
         return forbidden_response("Origin/Host không hợp lệ.");
     }
     if !verify_csrf_header(&Method::POST, &headers) {
@@ -418,11 +428,9 @@ async fn auth_login(
     if verify_password(&body.password, &stored_hash) {
         state.rate_limiter.record_success(ip);
         let session = state.sessions.create_session();
-        let cookie = make_cookie(
-            &session.token,
-            86400,
-            is_https_request(&headers, state.tls_info.is_some()),
-        );
+        let is_secure =
+            state.behind_https_proxy || is_https_request(&headers, state.tls_info.is_some());
+        let cookie = make_cookie(&session.token, 86400, is_secure);
 
         Response::builder()
             .status(StatusCode::OK)
@@ -461,7 +469,7 @@ async fn auth_login(
 }
 
 async fn auth_logout(State(state): State<Arc<WebServerState>>, headers: HeaderMap) -> Response {
-    if !verify_origin_and_host(&headers, state.lan_allowed) {
+    if !verify_origin_and_host(&headers, state.lan_allowed, &state.allowed_hosts) {
         return forbidden_response("Origin/Host không hợp lệ.");
     }
     if !verify_csrf_header(&Method::POST, &headers) {
@@ -471,7 +479,9 @@ async fn auth_logout(State(state): State<Arc<WebServerState>>, headers: HeaderMa
     if let Some(token) = extract_session_token(&headers) {
         state.sessions.remove(&token);
     }
-    let expired_cookie = make_cookie("", 0, is_https_request(&headers, state.tls_info.is_some()));
+    let is_secure =
+        state.behind_https_proxy || is_https_request(&headers, state.tls_info.is_some());
+    let expired_cookie = make_cookie("", 0, is_secure);
 
     Response::builder()
         .status(StatusCode::OK)
@@ -486,7 +496,7 @@ async fn auth_sudo(
     headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> Response {
-    if !verify_origin_and_host(&headers, state.lan_allowed) {
+    if !verify_origin_and_host(&headers, state.lan_allowed, &state.allowed_hosts) {
         return forbidden_response("Origin/Host không hợp lệ.");
     }
     if !verify_csrf_header(&Method::POST, &headers) {
@@ -530,7 +540,7 @@ async fn invoke_handler(
     headers: HeaderMap,
     body: Option<Json<Value>>,
 ) -> Response {
-    if !verify_origin_and_host(&headers, state.lan_allowed) {
+    if !verify_origin_and_host(&headers, state.lan_allowed, &state.allowed_hosts) {
         return forbidden_response("Origin/Host không hợp lệ.");
     }
     if !verify_csrf_header(&Method::POST, &headers) {
@@ -599,7 +609,7 @@ async fn file_handler(
     headers: HeaderMap,
     Query(query): Query<FileQuery>,
 ) -> Response {
-    if !verify_origin_and_host(&headers, state.lan_allowed) {
+    if !verify_origin_and_host(&headers, state.lan_allowed, &state.allowed_hosts) {
         return forbidden_response("Origin/Host không hợp lệ.");
     }
 
@@ -618,7 +628,7 @@ async fn file_handler(
 // ──────────────────────────────── Events Route ───────────────────────────────
 
 async fn events_handler(State(state): State<Arc<WebServerState>>, headers: HeaderMap) -> Response {
-    if !verify_origin_and_host(&headers, state.lan_allowed) {
+    if !verify_origin_and_host(&headers, state.lan_allowed, &state.allowed_hosts) {
         return forbidden_response("Origin/Host không hợp lệ.");
     }
 
@@ -643,7 +653,7 @@ async fn upload_handler(
     headers: HeaderMap,
     multipart: axum::extract::Multipart,
 ) -> Response {
-    if !verify_origin_and_host(&headers, state.lan_allowed) {
+    if !verify_origin_and_host(&headers, state.lan_allowed, &state.allowed_hosts) {
         return forbidden_response("Origin/Host không hợp lệ.");
     }
     if !verify_csrf_header(&Method::POST, &headers) {

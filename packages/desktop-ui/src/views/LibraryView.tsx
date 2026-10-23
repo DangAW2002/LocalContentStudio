@@ -2,6 +2,7 @@ import React from "react";
 import { Icon } from "../components/Icon";
 import { Button, EmptyState, ErrorState, Input } from "@studio/design-system";
 import { studioApi } from "../api/client";
+import { isTauri } from "../api/tauri-bridge";
 import type { AssetItem, AssetListFilter } from "../api/types";
 import { AssetCard } from "./library/AssetCard";
 import { AssetRow } from "./library/AssetRow";
@@ -261,6 +262,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onUseInThread }) => {
               onClick={() => fileInputRef.current?.click()}
               disabled={importing}
               title="Nhập tệp từ máy tính vào thư viện"
+              style={{ display: isTauri() ? undefined : "none" }}
             >
               <Icon name="upload" size={14} />
               <span style={{ marginLeft: 6 }}>
@@ -604,7 +606,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onUseInThread }) => {
                     isSelected={selectedAsset?.id === asset.id}
                     onClick={() => setSelectedAsset(asset)}
                     onUseInThread={handleUseInThread}
-                    onOpenFolder={handleOpenFolder}
+                    onOpenFolder={isTauri() ? handleOpenFolder : undefined}
                   />
                 ))}
               </div>
@@ -617,7 +619,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({ onUseInThread }) => {
               asset={selectedAsset}
               onClose={() => setSelectedAsset(null)}
               onUseInThread={handleUseInThread}
-              onOpenFolder={handleOpenFolder}
+              onOpenFolder={isTauri() ? handleOpenFolder : undefined}
               onDeleteAsset={handleDeleteAsset}
             />
           )}

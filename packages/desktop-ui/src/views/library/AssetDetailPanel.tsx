@@ -7,7 +7,7 @@ interface AssetDetailPanelProps {
   asset: AssetItem | null;
   onClose: () => void;
   onUseInThread: (asset: AssetItem) => void;
-  onOpenFolder: (asset: AssetItem) => void;
+  onOpenFolder?: (asset: AssetItem) => void;
   onDeleteAsset: (asset: AssetItem) => void;
 }
 
@@ -172,8 +172,8 @@ export const AssetDetailPanel: React.FC<AssetDetailPanelProps> = ({
             <div style={{ display: "flex", gap: "var(--cs-space-2)" }}>
               <Button
                 variant="secondary"
-                onClick={() => onOpenFolder(asset)}
-                style={{ flex: 1, justifyContent: "center" }}
+                onClick={() => onOpenFolder && onOpenFolder(asset)}
+                style={onOpenFolder ? { flex: 1, justifyContent: "center" } : { display: "none" }}
                 title="Mở thư mục chứa tệp trong Explorer"
               >
                 <Icon name="folder" size={14} />
@@ -184,6 +184,7 @@ export const AssetDetailPanel: React.FC<AssetDetailPanelProps> = ({
                 variant="destructive"
                 onClick={() => setConfirmDeleteOpen(true)}
                 title="Xoá asset khỏi workspace (hoàn tác được)"
+                style={!onOpenFolder ? { flex: 1, justifyContent: "center" } : undefined}
               >
                 <Icon name="trash" size={14} />
                 <span style={{ marginLeft: 4 }}>Xoá</span>

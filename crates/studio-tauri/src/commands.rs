@@ -3406,7 +3406,7 @@ pub async fn dialog_pick_folder() -> CmdResult<Option<String>> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -3528,7 +3528,7 @@ mod tests {
         assert!(invalid.is_err());
     }
 
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn test_scope_id_validation() {

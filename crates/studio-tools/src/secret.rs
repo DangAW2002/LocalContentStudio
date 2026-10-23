@@ -2,6 +2,7 @@
 
 use crate::error::{Result, ToolError};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 /// Interface for retrieving and managing secrets across the application scope chain.
@@ -86,20 +87,185 @@ impl SecretStore for MemoryStore {
     }
 }
 
-/// Windows Credential Manager store.
+/// Persistent file-backed secret store for non-Windows environments (Linux, macOS) or local testing.
+/// Secrets are written atomically (temp file + rename) with permissions 0600 on Unix.
+#[derive(Debug)]
+pub struct FileSecretStore {
+    path: PathBuf,
+    data: RwLock<HashMap<String, String>>,
+}
+
+impl FileSecretStore {
+    /// Create or load a secret store backed by the specified file path.
+    pub fn new(path: PathBuf) -> Self {
+        let mut map = HashMap::new();
+        if path.exists() {
+            let parsed = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|c| serde_json::from_str::<HashMap<String, String>>(&c).ok());
+            match parsed {
+                Some(deserialized) => map = deserialized,
+                // Keep the unreadable file aside so the next `set` cannot wipe the user's keys.
+                None => {
+                    let backup = path.with_extension(format!(
+                        "json.corrupt-{}",
+                        chrono::Utc::now().format("%Y%m%d%H%M%S")
+                    ));
+                    let _ = std::fs::rename(&path, &backup);
+                    eprintln!(
+                        "Không đọc được file secrets, đã chuyển sang {}",
+                        backup.display()
+                    );
+                }
+            }
+        }
+        Self {
+            path,
+            data: RwLock::new(map),
+        }
+    }
+
+    /// Path to the secrets file.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Persist current secrets map to disk atomically with 0600 permissions on Unix.
+    fn persist(&self, map: &HashMap<String, String>) -> Result<()> {
+        let parent = self.path.parent().unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(parent)
+            .map_err(|e| ToolError::SecretStoreError(format!("Lỗi tạo thư mục secrets: {e}")))?;
+
+        let serialized = serde_json::to_string_pretty(map)
+            .map_err(|e| ToolError::SecretStoreError(e.to_string()))?;
+
+        let mut temp_file = tempfile::NamedTempFile::new_in(parent)
+            .map_err(|e| ToolError::SecretStoreError(format!("Lỗi tạo file tạm: {e}")))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = temp_file
+                .as_file()
+                .metadata()
+                .map_err(|e| ToolError::SecretStoreError(format!("Lỗi metadata: {e}")))?
+                .permissions();
+            perms.set_mode(0o600);
+            temp_file
+                .as_file()
+                .set_permissions(perms)
+                .map_err(|e| ToolError::SecretStoreError(format!("Lỗi phân quyền 0600: {e}")))?;
+        }
+
+        use std::io::Write;
+        temp_file
+            .write_all(serialized.as_bytes())
+            .map_err(|e| ToolError::SecretStoreError(format!("Lỗi ghi dữ liệu: {e}")))?;
+        temp_file
+            .flush()
+            .map_err(|e| ToolError::SecretStoreError(format!("Lỗi flush file: {e}")))?;
+        temp_file
+            .as_file()
+            .sync_all()
+            .map_err(|e| ToolError::SecretStoreError(format!("Lỗi sync file: {e}")))?;
+
+        temp_file.persist(&self.path).map_err(|e| {
+            ToolError::SecretStoreError(format!("Không thể lưu file secret: {}", e.error))
+        })?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&self.path)
+                .map_err(|e| ToolError::SecretStoreError(format!("Lỗi metadata: {e}")))?
+                .permissions();
+            perms.set_mode(0o600);
+            std::fs::set_permissions(&self.path, perms)
+                .map_err(|e| ToolError::SecretStoreError(format!("Lỗi phân quyền 0600: {e}")))?;
+        }
+
+        Ok(())
+    }
+}
+
+impl SecretStore for FileSecretStore {
+    fn get(&self, org: &str, workspace: Option<&str>, key: &str) -> Option<String> {
+        let lock = self.data.read().ok()?;
+
+        // 1. Workspace scope
+        if let Some(ws) = workspace {
+            let target = format_target_name(org, Some(ws), key);
+            if let Some(val) = lock.get(&target) {
+                return Some(val.clone());
+            }
+        }
+
+        // 2. Org scope
+        let org_target = format_target_name(org, None, key);
+        if let Some(val) = lock.get(&org_target) {
+            return Some(val.clone());
+        }
+
+        // 3. App scope
+        let app_target = format_target_name("", None, key);
+        lock.get(&app_target).cloned()
+    }
+
+    fn set(&self, org: &str, workspace: Option<&str>, key: &str, val: &str) -> Result<()> {
+        let mut lock = self
+            .data
+            .write()
+            .map_err(|e| ToolError::SecretStoreError(e.to_string()))?;
+        let target = format_target_name(org, workspace, key);
+        lock.insert(target, val.to_string());
+        self.persist(&lock)
+    }
+
+    fn delete(&self, org: &str, workspace: Option<&str>, key: &str) -> Result<()> {
+        let mut lock = self
+            .data
+            .write()
+            .map_err(|e| ToolError::SecretStoreError(e.to_string()))?;
+        let target = format_target_name(org, workspace, key);
+        lock.remove(&target);
+        self.persist(&lock)
+    }
+}
+
+/// Windows Credential Manager store on Windows, or persistent file store on other platforms (Linux).
 /// Uses target names: `LocalContentStudio/<org>[/<ws>]/<KEY>`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CredentialManagerStore {
     #[cfg(not(windows))]
-    fallback: MemoryStore,
+    file_store: FileSecretStore,
+}
+
+impl Default for CredentialManagerStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CredentialManagerStore {
-    /// Create a new store backed by Windows Credential Manager.
+    /// Create a new store backed by Windows Credential Manager on Windows,
+    /// or `secrets.json` in the app data directory on non-Windows.
     pub fn new() -> Self {
         Self {
             #[cfg(not(windows))]
-            fallback: MemoryStore::new(),
+            file_store: {
+                let path = studio_workspace::AppPaths::from_env()
+                    .data_dir()
+                    .join("secrets.json");
+                FileSecretStore::new(path)
+            },
+        }
+    }
+
+    #[cfg(not(windows))]
+    /// Create a store with a specific secrets file path (useful for testing or custom dirs).
+    pub fn with_path(path: PathBuf) -> Self {
+        Self {
+            file_store: FileSecretStore::new(path),
         }
     }
 }
@@ -224,14 +390,117 @@ impl CredentialManagerStore {
 #[cfg(not(windows))]
 impl SecretStore for CredentialManagerStore {
     fn get(&self, org: &str, workspace: Option<&str>, key: &str) -> Option<String> {
-        self.fallback.get(org, workspace, key)
+        self.file_store.get(org, workspace, key)
     }
 
     fn set(&self, org: &str, workspace: Option<&str>, key: &str, val: &str) -> Result<()> {
-        self.fallback.set(org, workspace, key, val)
+        self.file_store.set(org, workspace, key, val)
     }
 
     fn delete(&self, org: &str, workspace: Option<&str>, key: &str) -> Result<()> {
-        self.fallback.delete(org, workspace, key)
+        self.file_store.delete(org, workspace, key)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_file_secret_store_keeps_corrupt_file_aside() {
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let path = temp_dir.path().join("secrets.json");
+        std::fs::write(&path, "{ not json").expect("write corrupt");
+
+        let store = FileSecretStore::new(path.clone());
+        store.set("", None, "NEW_KEY", "v").expect("set");
+
+        let backups: Vec<_> = std::fs::read_dir(temp_dir.path())
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".corrupt-"))
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(backups[0].path()).expect("read backup"),
+            "{ not json"
+        );
+    }
+
+    #[test]
+    fn test_file_secret_store_crud_and_persistence() {
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let path = temp_dir.path().join("secrets.json");
+
+        // 1. Initial write
+        {
+            let store = FileSecretStore::new(path.clone());
+            store
+                .set("org_test", Some("ws_test"), "API_KEY", "secret_ws")
+                .expect("set ws");
+            store
+                .set("org_test", None, "API_KEY", "secret_org")
+                .expect("set org");
+            store
+                .set("", None, "GLOBAL_KEY", "secret_global")
+                .expect("set app");
+
+            assert_eq!(
+                store.get("org_test", Some("ws_test"), "API_KEY"),
+                Some("secret_ws".to_string())
+            );
+            assert_eq!(
+                store.get("org_test", None, "API_KEY"),
+                Some("secret_org".to_string())
+            );
+            assert_eq!(
+                store.get("org_test", Some("ws_other"), "API_KEY"),
+                Some("secret_org".to_string())
+            );
+            assert_eq!(
+                store.get("org_test", Some("ws_test"), "GLOBAL_KEY"),
+                Some("secret_global".to_string())
+            );
+        }
+
+        // 2. Simulate restart: create brand new store pointing at same file
+        {
+            let store = FileSecretStore::new(path.clone());
+            assert_eq!(
+                store.get("org_test", Some("ws_test"), "API_KEY"),
+                Some("secret_ws".to_string())
+            );
+            assert_eq!(
+                store.get("org_test", None, "API_KEY"),
+                Some("secret_org".to_string())
+            );
+            assert_eq!(
+                store.get("", None, "GLOBAL_KEY"),
+                Some("secret_global".to_string())
+            );
+
+            // Delete workspace secret -> falls back to org secret
+            store
+                .delete("org_test", Some("ws_test"), "API_KEY")
+                .expect("delete ws");
+            assert_eq!(
+                store.get("org_test", Some("ws_test"), "API_KEY"),
+                Some("secret_org".to_string())
+            );
+
+            // Delete org secret -> none
+            store
+                .delete("org_test", None, "API_KEY")
+                .expect("delete org");
+            assert_eq!(store.get("org_test", Some("ws_test"), "API_KEY"), None);
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = std::fs::metadata(&path).expect("metadata");
+            let mode = metadata.permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "file permissions must be 0600 on unix");
+        }
     }
 }

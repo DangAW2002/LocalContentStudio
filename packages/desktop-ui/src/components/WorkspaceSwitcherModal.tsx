@@ -4,6 +4,7 @@ import { Button, Input, Callout } from "@studio/design-system";
 import { cleanDisplayPath } from "../utils/path";
 import type { WorkspaceSummary } from "../api/types";
 import { studioApi } from "../api/client";
+import { isTauri } from "../api/tauri-bridge";
 
 export interface WorkspaceSwitcherModalProps {
   open: boolean;
@@ -97,6 +98,10 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
   };
 
   const handleBrowseOpen = async () => {
+    if (!isTauri()) {
+      setError("Hộp thoại chọn thư mục chỉ hỗ trợ trên ứng dụng desktop. Vui lòng nhập đường dẫn thư mục trực tiếp.");
+      return;
+    }
     try {
       const picked = await studioApi.pickFolder();
       if (picked) {
@@ -108,6 +113,10 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
   };
 
   const handleBrowseCreate = async () => {
+    if (!isTauri()) {
+      setError("Hộp thoại chọn thư mục chỉ hỗ trợ trên ứng dụng desktop. Vui lòng nhập đường dẫn thư mục trực tiếp.");
+      return;
+    }
     try {
       const picked = await studioApi.pickFolder();
       if (picked) {
@@ -322,7 +331,7 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
                   variant="secondary"
                   onClick={handleBrowseOpen}
                   leftIcon={<Icon name="folder" size={14} />}
-                  style={{ flexShrink: 0, height: "var(--cs-control-height)" }}
+                  style={{ flexShrink: 0, height: "var(--cs-control-height)", display: isTauri() ? undefined : "none" }}
                 >
                   Chọn thư mục...
                 </Button>
@@ -365,7 +374,7 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
                   variant="secondary"
                   onClick={handleBrowseCreate}
                   leftIcon={<Icon name="folder" size={14} />}
-                  style={{ flexShrink: 0, height: "var(--cs-control-height)" }}
+                  style={{ flexShrink: 0, height: "var(--cs-control-height)", display: isTauri() ? undefined : "none" }}
                 >
                   Chọn thư mục...
                 </Button>

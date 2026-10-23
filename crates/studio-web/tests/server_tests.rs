@@ -86,6 +86,8 @@ fn setup_test_app() -> (
         port: 3000,
         tls_info: None,
         limits: studio_web::WebLimitsConfig::default(),
+        allowed_hosts: Vec::new(),
+        behind_https_proxy: false,
     });
     (build_router(state), dispatcher, tx)
 }
@@ -426,6 +428,8 @@ async fn test_json_and_upload_body_limits() {
         port: 3000,
         tls_info: None,
         limits,
+        allowed_hosts: Vec::new(),
+        behind_https_proxy: false,
     });
     let app = build_router(state.clone());
 
@@ -483,4 +487,105 @@ async fn test_json_and_upload_body_limits() {
         })
         .unwrap_or(0);
     assert_eq!(leftovers, 0);
+}
+
+#[tokio::test]
+async fn test_allowed_hosts_and_origin_blocking() {
+    let dispatcher = Arc::new(MockDispatcher::new());
+    let (tx, _) = broadcast::channel(16);
+    let state = Arc::new(WebServerState {
+        dispatcher: dispatcher.clone(),
+        sessions: Arc::new(studio_web::auth::SessionStore::new()),
+        rate_limiter: Arc::new(studio_web::auth::LoginRateLimiter::new()),
+        journal: studio_web::events::EventJournal::attach(&tx),
+        lan_allowed: false,
+        port: 3000,
+        tls_info: None,
+        limits: studio_web::WebLimitsConfig::default(),
+        allowed_hosts: vec!["dang-server.tailnet.ts.net".to_string()],
+        behind_https_proxy: true,
+    });
+    let app = build_router(state);
+
+    // 1. Valid request via Tailscale domain
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/auth/status")
+        .header("host", "dang-server.tailnet.ts.net")
+        .header("origin", "https://dang-server.tailnet.ts.net")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 2. Foreign Origin attack attempting to access the tailscale server -> 403 Forbidden
+    let evil_req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/auth/status")
+        .header("host", "dang-server.tailnet.ts.net")
+        .header("origin", "https://malicious-website.com")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.clone().oneshot(evil_req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // 3. Unknown host not in allowed_hosts -> 403 Forbidden
+    let bad_host_req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/auth/status")
+        .header("host", "random-domain.com")
+        .header("origin", "https://random-domain.com")
+        .body(Body::empty())
+        .unwrap();
+    let res = app.oneshot(bad_host_req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn test_behind_https_proxy_cookie_secure() {
+    let dispatcher = Arc::new(MockDispatcher::new());
+    let test_pw = ["test-", "proxy-", "pw123"].concat();
+    let hashed = studio_web::auth::hash_password(&test_pw).unwrap();
+    dispatcher.set_password_hash(&hashed).unwrap();
+
+    let (tx, _) = broadcast::channel(16);
+    let state = Arc::new(WebServerState {
+        dispatcher: dispatcher.clone(),
+        sessions: Arc::new(studio_web::auth::SessionStore::new()),
+        rate_limiter: Arc::new(studio_web::auth::LoginRateLimiter::new()),
+        journal: studio_web::events::EventJournal::attach(&tx),
+        lan_allowed: false,
+        port: 3000,
+        tls_info: None,
+        limits: studio_web::WebLimitsConfig::default(),
+        allowed_hosts: vec!["dang-server.ts.net".to_string()],
+        behind_https_proxy: true,
+    });
+    let app = build_router(state);
+
+    // Login through reverse proxy over plain HTTP connection to loopback
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/auth/login")
+        .header("host", "dang-server.ts.net")
+        .header("origin", "http://dang-server.ts.net")
+        .header("x-studio-csrf", "1")
+        .header("content-type", "application/json")
+        .body(Body::from(json!({ "password": test_pw }).to_string()))
+        .unwrap();
+
+    let res = app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let cookie = res
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("set-cookie")
+        .to_str()
+        .unwrap();
+    assert!(
+        cookie.contains("Secure"),
+        "Cookie must contain Secure flag when behind_https_proxy is true: {}",
+        cookie
+    );
 }

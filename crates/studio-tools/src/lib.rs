@@ -38,5 +38,7 @@ pub use providers::vieneu::{
 pub use registry::{ManifestProblem, Registry};
 pub use router::{route, route_available};
 pub use runner::{run_tool, ToolRun, ToolRunContext, MAX_INLINE_RESULT_BYTES};
-pub use secret::{format_target_name, CredentialManagerStore, MemoryStore, SecretStore};
+pub use secret::{
+    format_target_name, CredentialManagerStore, FileSecretStore, MemoryStore, SecretStore,
+};
 pub use setup::{default_agy_settings_path, remove_agy, remove_agy_at, setup_agy, setup_agy_at};
