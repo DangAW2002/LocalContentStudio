@@ -1077,4 +1077,35 @@ mod tests {
             panic!("Expected ToolError::PublishError");
         }
     }
+
+    /// Real post through the Graph API with the token saved by "Kết nối Facebook Page".
+    /// Run: `LCS_FB_LIVE_PAGE=<page id> LCS_FB_LIVE_FILE=<png> cargo test -p studio-tools --lib live_facebook -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn live_facebook_unpublished_photo() {
+        let page_id = std::env::var("LCS_FB_LIVE_PAGE").expect("LCS_FB_LIVE_PAGE");
+        let file =
+            std::path::PathBuf::from(std::env::var("LCS_FB_LIVE_FILE").expect("LCS_FB_LIVE_FILE"));
+        let metadata = PublishMetadata {
+            title: "Local Content Studio - thử kết nối".into(),
+            description: "Bài thử kết nối từ Local Content Studio (không công khai).".into(),
+            privacy: PublishPrivacy::Private,
+            ..Default::default()
+        };
+        let store = crate::CredentialManagerStore::new();
+        let url = publish_facebook_complete(
+            &store,
+            "",
+            None,
+            FacebookPublishParams {
+                page_id: &page_id,
+                file_path: &file,
+                metadata: &metadata,
+            },
+            |frac, msg| eprintln!("[{:.0}%] {msg}", frac * 100.0),
+        )
+        .await
+        .expect("publish");
+        eprintln!("RESULT_URL {url}");
+    }
 }
