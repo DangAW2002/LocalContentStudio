@@ -55,8 +55,7 @@ Chế độ web yêu cầu mật khẩu chủ sở hữu (tối thiểu 8 ký t�
 ```bash
 # Gõ mật khẩu không hiện lên màn hình, không lưu vào file hay lịch sử bash:
 read -rs -p "Mật khẩu web: " P; echo
-printf '%s
-' "$P" | STUDIO_APP_DIR=~/.local/share/local-content-studio ~/.local/bin/studio-tauri --set-web-password
+printf '%s\n' "$P" | STUDIO_APP_DIR=~/.local/share/local-content-studio ~/.local/bin/studio-tauri --set-web-password
 unset P
 ```
 
