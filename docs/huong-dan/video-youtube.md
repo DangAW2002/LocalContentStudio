@@ -41,7 +41,10 @@ flowchart TD
 ### Bước 4: Dựng dòng thời gian video (Timeline) với `timeline_build`
 - Studio tích hợp sẵn công cụ tự động dựng timeline `timeline_build`:
   - **Tự động đo thời lượng âm thanh:** Sử dụng `ffprobe` đo thời lượng chính xác của từng tệp âm thanh giọng đọc `.wav`.
-  - **Xếp đặt track video chính (Base track):** Các tư liệu hình ảnh hoặc clip B-roll được kéo giãn hoặc cắt cúp nối tiếp nhau khớp từng mili-giây với từng câu thoại.
+  - **Nhiều cảnh trong mỗi phân đoạn (`visuals`):** Mỗi phân cảnh kịch bản có thể chứa nhiều cảnh (`visuals`) gồm ảnh tĩnh và video B-roll. Studio tự động chia đều thời lượng phân cảnh cho các cảnh (hoặc theo mảng `durations` chỉ định). Nếu cảnh tĩnh kéo dài vượt quá `max_still_s` (mặc định 6 giây), công cụ sẽ trả về cảnh báo (`warnings`) gợi ý bổ sung B-roll.
+  - **Chuyển động ảnh tĩnh (Ken Burns):** Loại bỏ hoàn toàn cảm giác "slide tĩnh" bằng hiệu ứng chuyển động mượt mà: `motion` nhận `auto` (luân phiên tất định), `zoom_in`, `zoom_out`, `pan_left`, `pan_right`, `pan_up`, `pan_down` hoặc `none`, cùng cường độ `motion_strength` (mặc định 0.08 ~8% zoom). Bộ dựng FFmpeg upscale 2× trước khi zoompan, loại bỏ hiện tượng rung hình do làm tròn số nguyên. Video clip không bị áp motion.
+  - **Chuyển cảnh linh hoạt (`transition`):** Hỗ trợ `fade` (mờ chồng 0.5s), `cut` (cắt thẳng dứt khoát) và `none`. Mặc định giữa các phân cảnh lớn dùng `fade`, giữa các cảnh con trong cùng một phân cảnh dùng `cut`.
+  - **Xếp đặt video và video looping:** Clip video ngắn hơn thời lượng cảnh được lặp mượt mà (`-stream_loop -1`), hỗ trợ điểm cắt `in_point` và `out_point`.
   - **Phân tách phụ đề thông minh (Caption track):** Tự động phân chia câu thoại theo dấu câu và độ dài (tối đa 2 dòng, mỗi dòng khoảng 42 ký tự, tổng tối đa 84 ký tự mỗi thẻ phụ đề), tính toán tỷ trọng hiển thị theo độ dài ký tự của từng cụm từ.
   - **Lớp phủ thương hiệu (Overlay track):** Đặt logo thương hiệu lên góc video với toạ độ và tỷ lệ kích thước chính xác.
   - **Ghi cấu hình hoàn chỉnh:** Tự động tạo tệp `timeline.json` và `artifact.yaml` kèm đầy đủ danh sách `inputs` sẵn sàng kết xuất video MP4.

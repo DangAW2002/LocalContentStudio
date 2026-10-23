@@ -13,20 +13,83 @@ use studio_workspace::{Project, Workspace};
 
 use crate::artifact::Artifact;
 use crate::probe::probe_ffprobe;
-use crate::timeline::{CaptionStyle, Clip, TimelineDoc, Track, TrackKind, Transition};
+use crate::timeline::{CaptionStyle, Clip, MotionKind, TimelineDoc, Track, TrackKind, Transition};
 
 const MAX_LINE_CHARS: usize = 42;
 const MAX_CARD_CHARS: usize = 84;
 
-/// Input specification for a single story segment.
+/// Input specification for a visual item in a segment.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum VisualInput {
+    /// Simple path or "color:#RRGGBB"
+    Simple(String),
+    /// Detailed shot specification
+    Detailed(VisualSpec),
+}
+
+impl VisualInput {
+    /// Access the source reference of this visual.
+    pub fn source(&self) -> &str {
+        match self {
+            VisualInput::Simple(s) => s.as_str(),
+            VisualInput::Detailed(d) => d.source.as_str(),
+        }
+    }
+}
+
+/// Detailed visual specification for a shot in a segment.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct VisualSpec {
+    /// Workspace-relative visual asset path or "color:#RRGGBB".
+    #[serde(alias = "visual")]
+    pub source: String,
+    /// Ken Burns motion effect for still images.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion: Option<MotionKind>,
+    /// Motion strength / zoom ratio (default ~0.08, i.e. 8%).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion_strength: Option<f64>,
+    /// Source in-point in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_point: Option<f64>,
+    /// Source out-point in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub out_point: Option<f64>,
+    /// Explicit shot duration in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration: Option<f64>,
+    /// Transition into this shot (defaults to `cut` within a segment).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition: Option<Transition>,
+    /// Transition duration in seconds if transition is Fade.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition_duration: Option<f64>,
+}
+
+/// Input specification for a single story segment.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct SegmentInput {
     /// Workspace-relative path to audio file (e.g. WAV or MP3).
     pub audio: String,
     /// Script / dialog text for this segment used to generate captions.
     pub text: String,
     /// Workspace-relative visual asset path (image, video) or "color:#RRGGBB".
+    /// Kept for backwards compatibility. If `visuals` is non-empty, `visuals` takes precedence.
+    #[serde(default)]
     pub visual: String,
+    /// Multiple visual assets for this segment.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visuals: Vec<VisualInput>,
+    /// Optional custom durations in seconds for each visual in `visuals`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub durations: Option<Vec<f64>>,
+    /// Ken Burns motion effect for still images in this segment (default: `auto`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion: Option<MotionKind>,
+    /// Motion strength / zoom ratio (default ~0.08, i.e. 8%).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion_strength: Option<f64>,
 }
 
 /// Input specification for an overlay visual clip (e.g. logo or graphic badge).
@@ -105,6 +168,13 @@ pub struct TimelineBuildParams {
     /// Optional caption style override for burned-in captions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caption_style: Option<CaptionStyle>,
+    /// Maximum duration in seconds for a single still visual before issuing a warning (default: 6.0s).
+    #[serde(default = "default_max_still_s")]
+    pub max_still_s: f64,
+}
+
+fn default_max_still_s() -> f64 {
+    6.0
 }
 
 fn default_lead_s() -> f64 {
@@ -143,6 +213,9 @@ pub struct TimelineBuildResult {
     pub segments: Vec<SegmentOutput>,
     /// Total number of caption clips generated.
     pub captions_count: usize,
+    /// Advisory warnings for still scenes or recommendations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// Caption card chunk with formatted text and character count.
@@ -502,6 +575,7 @@ pub struct TimelineLayout {
     pub overlay_clips: Vec<Clip>,
     pub segment_outputs: Vec<SegmentOutput>,
     pub starts: Vec<f64>,
+    pub warnings: Vec<String>,
 }
 
 /// Calculate the timeline layout deterministically from audio durations and inputs.
@@ -536,14 +610,18 @@ pub fn compute_timeline_layout(
         round_ms(raw_end)
     };
 
-    let (transition_kind, transition_dur) = match params.transition.to_lowercase().as_str() {
+    let (seg_transition_kind, seg_transition_dur) = match params.transition.to_lowercase().as_str()
+    {
         "none" => (Transition::None, None),
+        "cut" => (Transition::Cut, None),
         _ => (Transition::Fade, Some(0.5)),
     };
 
-    let mut video_clips = Vec::with_capacity(n);
+    let mut video_clips = Vec::new();
     let mut audio_clips = Vec::with_capacity(n);
     let mut segment_outputs = Vec::with_capacity(n);
+    let mut warnings = Vec::new();
+    let mut global_scene_counter: usize = 0;
 
     for (i, seg) in params.segments.iter().enumerate() {
         let vs = if i == 0 { 0.0 } else { starts[i] };
@@ -557,17 +635,158 @@ pub fn compute_timeline_layout(
         let ve_r = round_ms(ve);
         let dur_r = round_ms(ve_r - vs_r);
 
-        video_clips.push(Clip {
-            id: format!("v{}", i + 1),
-            source: seg.visual.clone(),
-            in_point: 0.0,
-            out_point: None,
-            start: vs_r,
-            duration: dur_r,
-            transition: transition_kind,
-            transition_duration: transition_dur,
-            ..Default::default()
-        });
+        // Collect shots for this segment
+        let shot_specs: Vec<VisualSpec> = if !seg.visuals.is_empty() {
+            seg.visuals
+                .iter()
+                .enumerate()
+                .map(|(v_idx, v)| match v {
+                    VisualInput::Simple(src) => {
+                        let dur = seg.durations.as_ref().and_then(|ds| ds.get(v_idx).copied());
+                        VisualSpec {
+                            source: src.clone(),
+                            motion: seg.motion,
+                            motion_strength: seg.motion_strength,
+                            duration: dur,
+                            ..Default::default()
+                        }
+                    }
+                    VisualInput::Detailed(spec) => {
+                        let dur = spec.duration.or_else(|| {
+                            seg.durations.as_ref().and_then(|ds| ds.get(v_idx).copied())
+                        });
+                        let motion = spec.motion.or(seg.motion);
+                        let motion_strength = spec.motion_strength.or(seg.motion_strength);
+                        VisualSpec {
+                            duration: dur,
+                            motion,
+                            motion_strength,
+                            ..spec.clone()
+                        }
+                    }
+                })
+                .collect()
+        } else if !seg.visual.trim().is_empty() {
+            vec![VisualSpec {
+                source: seg.visual.clone(),
+                motion: seg.motion,
+                motion_strength: seg.motion_strength,
+                duration: None,
+                ..Default::default()
+            }]
+        } else {
+            return Err(format!(
+                "Phân cảnh {} thiếu nguồn hình ảnh (cần 'visual' hoặc 'visuals').",
+                i + 1
+            ));
+        };
+
+        let num_shots = shot_specs.len();
+        let mut shot_durations = Vec::with_capacity(num_shots);
+        if num_shots == 1 {
+            shot_durations.push(dur_r);
+        } else {
+            let any_explicit = shot_specs.iter().any(|s| s.duration.is_some());
+            if any_explicit {
+                let mut current_sum = 0.0;
+                for (idx, shot) in shot_specs.iter().enumerate() {
+                    if idx == num_shots - 1 {
+                        let rem = round_ms(dur_r - current_sum);
+                        shot_durations.push(rem.max(0.001));
+                    } else {
+                        let d = shot.duration.unwrap_or_else(|| {
+                            round_ms((dur_r - current_sum) / ((num_shots - idx) as f64))
+                        });
+                        current_sum += d;
+                        shot_durations.push(round_ms(d));
+                    }
+                }
+            } else {
+                let base = round_ms(dur_r / (num_shots as f64));
+                for idx in 0..num_shots {
+                    if idx == num_shots - 1 {
+                        let rem = round_ms(dur_r - base * ((num_shots - 1) as f64));
+                        shot_durations.push(rem.max(0.001));
+                    } else {
+                        shot_durations.push(base);
+                    }
+                }
+            }
+        }
+
+        // Check still scene duration warning (> max_still_s and only 1 visual)
+        if num_shots == 1
+            && dur_r > params.max_still_s
+            && !crate::renderer::is_video_source(&shot_specs[0].source)
+        {
+            warnings.push(format!(
+                "Phân cảnh {} có thời lượng cảnh tĩnh dài ({:.1}s > {:.1}s) và chỉ có 1 hình ảnh. Khuyến nghị thêm visual (B-roll hoặc video) để video sinh động hơn.",
+                i + 1, dur_r, params.max_still_s
+            ));
+        }
+
+        // Emit video clips for each shot
+        let mut current_v_start = vs;
+        for (s_idx, shot) in shot_specs.iter().enumerate() {
+            let shot_dur = shot_durations[s_idx];
+            let shot_start = round_ms(current_v_start);
+            current_v_start += shot_dur;
+
+            let is_img = crate::renderer::is_image_source(&shot.source);
+            let motion = if is_img {
+                let m = shot.motion.unwrap_or(MotionKind::Auto);
+                if m == MotionKind::Auto {
+                    Some(crate::timeline::resolve_auto_motion(global_scene_counter))
+                } else if m == MotionKind::None {
+                    Some(MotionKind::None)
+                } else {
+                    Some(m)
+                }
+            } else {
+                None
+            };
+
+            let motion_strength = if is_img && motion.is_some() && motion != Some(MotionKind::None)
+            {
+                Some(shot.motion_strength.unwrap_or(0.08))
+            } else {
+                None
+            };
+
+            let (trans, trans_dur) = if s_idx == 0 {
+                (
+                    shot.transition.unwrap_or(seg_transition_kind),
+                    shot.transition_duration.or(seg_transition_dur),
+                )
+            } else {
+                (
+                    shot.transition.unwrap_or(Transition::Cut),
+                    shot.transition_duration,
+                )
+            };
+
+            let clip_id = if num_shots == 1 {
+                format!("v{}", i + 1)
+            } else {
+                format!("v{}_{}", i + 1, s_idx + 1)
+            };
+
+            video_clips.push(Clip {
+                id: clip_id,
+                source: shot.source.clone(),
+                in_point: shot.in_point.unwrap_or(0.0),
+                out_point: shot.out_point,
+                start: shot_start,
+                duration: shot_dur,
+                transition: trans,
+                transition_duration: trans_dur,
+                motion,
+                motion_strength,
+                ..Default::default()
+            });
+
+            global_scene_counter += 1;
+        }
 
         let a_start_r = starts[i];
         let a_dur_r = round_ms(audio_durations[i]);
@@ -611,6 +830,7 @@ pub fn compute_timeline_layout(
             width: ov.width,
             height: ov.height,
             opacity: ov.opacity,
+            ..Default::default()
         });
     }
 
@@ -621,6 +841,7 @@ pub fn compute_timeline_layout(
         overlay_clips,
         segment_outputs,
         starts,
+        warnings,
     })
 }
 
@@ -698,16 +919,32 @@ pub fn build_timeline(
         audio_durations.push(dur);
         collected_inputs.push(format!("asset:{}", seg.audio.replace('\\', "/")));
 
-        // Visual
-        let visual_src = seg.visual.trim();
-        if visual_src.to_ascii_lowercase().ends_with(".svg") {
+        // Visuals
+        let visual_sources: Vec<String> = if !seg.visuals.is_empty() {
+            seg.visuals.iter().map(|v| v.source().to_string()).collect()
+        } else if !seg.visual.trim().is_empty() {
+            vec![seg.visual.clone()]
+        } else {
             return Err(format!(
-                "Nguồn visual \"{visual_src}\" có định dạng SVG. FFmpeg không thể giải mã trực tiếp định dạng SVG; vui lòng render file SVG sang PNG thông qua design artifact trước khi đưa vào timeline."
+                "Phân cảnh {} thiếu nguồn hình ảnh (cần 'visual' hoặc 'visuals').",
+                i + 1
             ));
-        }
-        if !visual_src.starts_with("color:") {
-            validate_workspace_path(visual_src, &format!("visual phân cảnh {}", i + 1))?;
-            collected_inputs.push(format!("asset:{}", visual_src.replace('\\', "/")));
+        };
+
+        for (v_idx, visual_src_raw) in visual_sources.iter().enumerate() {
+            let visual_src = visual_src_raw.trim();
+            if visual_src.to_ascii_lowercase().ends_with(".svg") {
+                return Err(format!(
+                    "Nguồn visual \"{visual_src}\" có định dạng SVG. FFmpeg không thể giải mã trực tiếp định dạng SVG; vui lòng render file SVG sang PNG thông qua design artifact trước khi đưa vào timeline."
+                ));
+            }
+            if !visual_src.starts_with("color:") {
+                validate_workspace_path(
+                    visual_src,
+                    &format!("visual phân cảnh {} cảnh {}", i + 1, v_idx + 1),
+                )?;
+                collected_inputs.push(format!("asset:{}", visual_src.replace('\\', "/")));
+            }
         }
     }
 
@@ -886,6 +1123,7 @@ pub fn build_timeline(
         duration_s: layout.total_duration,
         segments: layout.segment_outputs,
         captions_count,
+        warnings: layout.warnings,
     })
 }
 
@@ -971,11 +1209,13 @@ mod tests {
                     audio: "a1.wav".into(),
                     text: "Đoạn 1".into(),
                     visual: "v1.png".into(),
+                    ..Default::default()
                 },
                 SegmentInput {
                     audio: "a2.wav".into(),
                     text: "Đoạn 2".into(),
                     visual: "color:#1E88E5".into(),
+                    ..Default::default()
                 },
             ],
             lead_s: 0.5,
@@ -1000,6 +1240,7 @@ mod tests {
             fps: Some(30.0),
             min_duration_s: Some(10.0),
             caption_style: None,
+            max_still_s: 6.0,
         };
 
         let durations = vec![3.2, 4.5];
@@ -1026,5 +1267,196 @@ mod tests {
         assert_eq!(layout1.overlay_clips[0].start, 0.0);
         assert_eq!(layout1.overlay_clips[0].duration, 10.1);
         assert_eq!(layout1.overlay_clips[0].width, Some(150));
+    }
+
+    #[test]
+    fn test_schema_backwards_compat_and_visuals_array() {
+        let json_old = r#"{
+            "audio": "a.wav",
+            "text": "Câu thoại",
+            "visual": "scene.png"
+        }"#;
+        let seg_old: SegmentInput = serde_json::from_str(json_old).unwrap();
+        assert_eq!(seg_old.visual, "scene.png");
+        assert!(seg_old.visuals.is_empty());
+
+        let json_new_array = r#"{
+            "audio": "a.wav",
+            "text": "Câu thoại",
+            "visuals": [
+                "s1.png",
+                { "source": "s2.mp4", "in_point": 1.0, "out_point": 4.0, "motion": "zoom_in" }
+            ]
+        }"#;
+        let seg_new: SegmentInput = serde_json::from_str(json_new_array).unwrap();
+        assert_eq!(seg_new.visuals.len(), 2);
+        assert_eq!(seg_new.visuals[0].source(), "s1.png");
+        assert_eq!(seg_new.visuals[1].source(), "s2.mp4");
+    }
+
+    #[test]
+    fn test_multiple_visuals_duration_split_and_durations() {
+        // 1. Equal split of 9.0s into 3 visuals -> 3.0s each
+        let params_even = TimelineBuildParams {
+            project: "p".into(),
+            artifact: "v".into(),
+            segments: vec![SegmentInput {
+                audio: "a1.wav".into(),
+                text: "Text 1".into(),
+                visuals: vec![
+                    VisualInput::Simple("s1.png".into()),
+                    VisualInput::Simple("s2.png".into()),
+                    VisualInput::Simple("s3.png".into()),
+                ],
+                ..Default::default()
+            }],
+            lead_s: 0.0,
+            gap_s: 0.0,
+            tail_s: 0.0,
+            transition: "fade".into(),
+            captions: "none".into(),
+            overlays: vec![],
+            brand: None,
+            channels: vec![],
+            width: Some(1920),
+            height: Some(1080),
+            fps: Some(30.0),
+            min_duration_s: None,
+            caption_style: None,
+            max_still_s: 6.0,
+        };
+
+        let layout = compute_timeline_layout(&params_even, &[9.0]).unwrap();
+        assert_eq!(layout.video_clips.len(), 3);
+        assert_eq!(layout.video_clips[0].duration, 3.0);
+        assert_eq!(layout.video_clips[1].duration, 3.0);
+        assert_eq!(layout.video_clips[2].duration, 3.0);
+        assert_eq!(layout.video_clips[0].transition, Transition::Fade);
+        assert_eq!(layout.video_clips[1].transition, Transition::Cut);
+        assert_eq!(layout.video_clips[2].transition, Transition::Cut);
+
+        // 2. Custom durations: [2.5, 4.0], total 10.0s -> last gets 3.5s
+        let mut params_custom = params_even.clone();
+        params_custom.segments[0].durations = Some(vec![2.5, 4.0]);
+        let layout_custom = compute_timeline_layout(&params_custom, &[10.0]).unwrap();
+        assert_eq!(layout_custom.video_clips[0].duration, 2.5);
+        assert_eq!(layout_custom.video_clips[1].duration, 4.0);
+        assert_eq!(layout_custom.video_clips[2].duration, 3.5);
+    }
+
+    #[test]
+    fn test_motion_auto_determinism_and_assignment() {
+        assert_eq!(crate::timeline::resolve_auto_motion(0), MotionKind::ZoomIn);
+        assert_eq!(crate::timeline::resolve_auto_motion(1), MotionKind::ZoomOut);
+        assert_eq!(crate::timeline::resolve_auto_motion(2), MotionKind::PanLeft);
+        assert_eq!(
+            crate::timeline::resolve_auto_motion(3),
+            MotionKind::PanRight
+        );
+        assert_eq!(crate::timeline::resolve_auto_motion(4), MotionKind::ZoomIn);
+
+        let params = TimelineBuildParams {
+            project: "p".into(),
+            artifact: "v".into(),
+            segments: vec![
+                SegmentInput {
+                    audio: "a1.wav".into(),
+                    text: "T1".into(),
+                    visuals: vec![
+                        VisualInput::Simple("img1.png".into()),
+                        VisualInput::Simple("img2.png".into()),
+                    ],
+                    ..Default::default()
+                },
+                SegmentInput {
+                    audio: "a2.wav".into(),
+                    text: "T2".into(),
+                    visuals: vec![
+                        VisualInput::Simple("video.mp4".into()),
+                        VisualInput::Simple("img3.png".into()),
+                    ],
+                    ..Default::default()
+                },
+            ],
+            lead_s: 0.0,
+            gap_s: 0.0,
+            tail_s: 0.0,
+            transition: "fade".into(),
+            captions: "none".into(),
+            overlays: vec![],
+            brand: None,
+            channels: vec![],
+            width: Some(1920),
+            height: Some(1080),
+            fps: Some(30.0),
+            min_duration_s: None,
+            caption_style: None,
+            max_still_s: 6.0,
+        };
+
+        let layout = compute_timeline_layout(&params, &[4.0, 4.0]).unwrap();
+        assert_eq!(layout.video_clips.len(), 4);
+        // Clip 0 (img1): scene 0 -> ZoomIn
+        assert_eq!(layout.video_clips[0].motion, Some(MotionKind::ZoomIn));
+        assert_eq!(layout.video_clips[0].motion_strength, Some(0.08));
+        // Clip 1 (img2): scene 1 -> ZoomOut
+        assert_eq!(layout.video_clips[1].motion, Some(MotionKind::ZoomOut));
+        assert_eq!(layout.video_clips[1].motion_strength, Some(0.08));
+        // Clip 2 (video.mp4): scene 2 -> None (video is not given motion)
+        assert_eq!(layout.video_clips[2].motion, None);
+        // Clip 3 (img3): scene 3 -> PanRight
+        assert_eq!(layout.video_clips[3].motion, Some(MotionKind::PanRight));
+    }
+
+    #[test]
+    fn test_still_duration_warning_for_long_scenes() {
+        let params = TimelineBuildParams {
+            project: "p".into(),
+            artifact: "v".into(),
+            segments: vec![
+                // Seg 1: 1 still visual, 7.5s > 6.0s -> warning
+                SegmentInput {
+                    audio: "a1.wav".into(),
+                    text: "T1".into(),
+                    visual: "still.png".into(),
+                    ..Default::default()
+                },
+                // Seg 2: 2 visuals, 8.0s total -> each 4.0s <= 6.0s -> no warning
+                SegmentInput {
+                    audio: "a2.wav".into(),
+                    text: "T2".into(),
+                    visuals: vec![
+                        VisualInput::Simple("s1.png".into()),
+                        VisualInput::Simple("s2.png".into()),
+                    ],
+                    ..Default::default()
+                },
+                // Seg 3: 1 video visual, 8.0s > 6.0s -> video does not trigger still warning
+                SegmentInput {
+                    audio: "a3.wav".into(),
+                    text: "T3".into(),
+                    visual: "motion.mp4".into(),
+                    ..Default::default()
+                },
+            ],
+            lead_s: 0.0,
+            gap_s: 0.0,
+            tail_s: 0.0,
+            transition: "fade".into(),
+            captions: "none".into(),
+            overlays: vec![],
+            brand: None,
+            channels: vec![],
+            width: Some(1920),
+            height: Some(1080),
+            fps: Some(30.0),
+            min_duration_s: None,
+            caption_style: None,
+            max_still_s: 6.0,
+        };
+
+        let layout = compute_timeline_layout(&params, &[7.5, 8.0, 8.0]).unwrap();
+        assert_eq!(layout.warnings.len(), 1);
+        assert!(layout.warnings[0].contains("Phân cảnh 1 có thời lượng cảnh tĩnh dài"));
     }
 }

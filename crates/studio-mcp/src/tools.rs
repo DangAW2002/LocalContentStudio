@@ -44,27 +44,53 @@ pub fn definitions() -> Vec<Value> {
         tool("check_run", "Kiểm artifact theo Brand và kênh (hãy render trước rồi kiểm tra — render first, then check).", json!({ "artifact_dir": s("thư mục artifact tương đối"), "brand": s("slug brand"), "channels": { "type": "array", "items": { "type": "string" } }, "renders": { "type": "array", "items": { "type": "string" } } }), &["artifact_dir", "brand", "channels"]),
         tool(
             "timeline_build",
-            "Dựng timeline video tự động từ kịch bản, âm thanh TTS và hình ảnh b-roll. Tạo artifact.yaml và timeline.json với căn thời gian chuẩn xác, chia phụ đề theo câu, hỗ trợ lớp phủ (logo) và chuyển cảnh.",
+            "Dựng timeline video tự động từ kịch bản, âm thanh TTS và hình ảnh/video b-roll. Hỗ trợ nhiều visual mỗi phân cảnh, chuyển động Ken Burns cho ảnh tĩnh, chuyển cảnh (fade/cut/none), chia phụ đề theo câu, lớp phủ (logo).",
             json!({
                 "project": s("Slug của project (vd ca-phe-phin)"),
                 "artifact": s("ID của artifact timeline cần tạo/ghi đè (vd video)"),
                 "segments": json!({
                     "type": "array",
-                    "description": "Danh sách các phân cảnh: audio (đường dẫn WAV/MP3), text (lời thoại kịch bản), visual (đường dẫn ảnh/video hoặc 'color:#RRGGBB')",
+                    "description": "Danh sách các phân cảnh: audio (đường dẫn WAV/MP3), text (lời thoại kịch bản), visual (1 cảnh) hoặc visuals (nhiều cảnh: mảng string hoặc object { source, motion?, motion_strength?, duration?, in_point?, out_point? })",
                     "items": {
                         "type": "object",
                         "properties": {
                             "audio": s("Đường dẫn tệp âm thanh tương đối trong workspace"),
                             "text": s("Lời thoại kịch bản của phân cảnh để tạo phụ đề"),
-                            "visual": s("Đường dẫn ảnh/video tương đối trong workspace, hoặc mã màu 'color:#RRGGBB'")
+                            "visual": s("Đường dẫn ảnh/video tương đối trong workspace hoặc mã màu (nếu chỉ có 1 visual)"),
+                            "visuals": json!({
+                                "type": "array",
+                                "description": "Danh sách nhiều visual trong phân cảnh (ảnh/video). Mỗi phần tử là đường dẫn hoặc object chi tiết.",
+                                "items": {
+                                    "oneOf": [
+                                        { "type": "string" },
+                                        {
+                                            "type": "object",
+                                            "properties": {
+                                                "source": s("Đường dẫn asset ảnh hoặc video"),
+                                                "motion": json!({ "type": "string", "enum": ["none", "zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "pan_down", "auto"] }),
+                                                "motion_strength": json!({ "type": "number", "description": "Cường độ zoom (mặc định 0.08)" }),
+                                                "duration": json!({ "type": "number", "description": "Thời lượng cảnh (giây)" }),
+                                                "in_point": json!({ "type": "number" }),
+                                                "out_point": json!({ "type": "number" }),
+                                                "transition": json!({ "type": "string", "enum": ["fade", "cut", "none"] })
+                                            },
+                                            "required": ["source"]
+                                        }
+                                    ]
+                                }
+                            }),
+                            "durations": json!({ "type": "array", "items": { "type": "number" }, "description": "Thời lượng tùy chọn cho từng visual trong visuals" }),
+                            "motion": json!({ "type": "string", "enum": ["none", "zoom_in", "zoom_out", "pan_left", "pan_right", "pan_up", "pan_down", "auto"], "description": "Hiệu ứng Ken Burns cho ảnh tĩnh (mặc định: auto luân phiên)" }),
+                            "motion_strength": json!({ "type": "number", "description": "Cường độ Ken Burns (mặc định 0.08)" })
                         },
-                        "required": ["audio", "text", "visual"]
+                        "required": ["audio", "text"]
                     }
                 }),
                 "lead_s": json!({ "type": "number", "description": "Thời gian đệm đầu video (mặc định 0.5 giây)" }),
                 "gap_s": json!({ "type": "number", "description": "Khoảng cách giữa các phân cảnh âm thanh (mặc định 0.4 giây)" }),
                 "tail_s": json!({ "type": "number", "description": "Thời gian đệm đuôi video (mặc định 1.5 giây)" }),
-                "transition": json!({ "type": "string", "enum": ["fade", "none"], "description": "Hiệu ứng chuyển cảnh giữa các clip hình ảnh (mặc định 'fade' 0.5s)" }),
+                "transition": json!({ "type": "string", "enum": ["fade", "cut", "none"], "description": "Hiệu ứng chuyển cảnh giữa các phân cảnh hình ảnh (mặc định 'fade' 0.5s, cắt thẳng dùng 'cut')" }),
+                "max_still_s": json!({ "type": "number", "description": "Ngưỡng thời lượng tối đa cho cảnh tĩnh trước khi cảnh báo (mặc định 6.0 giây)" }),
                 "captions": json!({ "type": "string", "enum": ["sentences", "none"], "description": "Chế độ tạo phụ đề: 'sentences' (mặc định) hoặc 'none'" }),
                 "overlays": json!({
                     "type": "array",

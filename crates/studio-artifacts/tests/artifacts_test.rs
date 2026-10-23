@@ -290,6 +290,7 @@ fn test_ffmpeg_graph_builder_unit() {
                         width: None,
                         height: None,
                         opacity: None,
+                        ..Default::default()
                     },
                     Clip {
                         id: "c2".into(),
@@ -305,6 +306,7 @@ fn test_ffmpeg_graph_builder_unit() {
                         width: None,
                         height: None,
                         opacity: None,
+                        ..Default::default()
                     },
                 ],
                 style: None,
@@ -326,6 +328,7 @@ fn test_ffmpeg_graph_builder_unit() {
                     width: None,
                     height: None,
                     opacity: None,
+                    ..Default::default()
                 }],
                 style: None,
             },
@@ -478,6 +481,7 @@ async fn test_windows_integration_ffmpeg_timeline() {
                     width: None,
                     height: None,
                     opacity: None,
+                    ..Default::default()
                 },
                 Clip {
                     id: "part2".into(),
@@ -493,6 +497,7 @@ async fn test_windows_integration_ffmpeg_timeline() {
                     width: None,
                     height: None,
                     opacity: None,
+                    ..Default::default()
                 },
             ],
             style: None,
@@ -754,6 +759,7 @@ fn test_timeline_ffmpeg_args_with_image_audio_and_srt() {
                     width: None,
                     height: None,
                     opacity: None,
+                    ..Default::default()
                 }],
                 style: None,
             },
@@ -774,6 +780,7 @@ fn test_timeline_ffmpeg_args_with_image_audio_and_srt() {
                     width: None,
                     height: None,
                     opacity: None,
+                    ..Default::default()
                 }],
                 style: None,
             },
@@ -794,6 +801,7 @@ fn test_timeline_ffmpeg_args_with_image_audio_and_srt() {
                     width: None,
                     height: None,
                     opacity: None,
+                    ..Default::default()
                 }],
                 style: None,
             },
@@ -913,6 +921,7 @@ async fn real_timeline_assembles_image_wav_srt_to_mp4() {
                     width: None,
                     height: None,
                     opacity: None,
+                    ..Default::default()
                 }],
                 style: None,
             },
@@ -933,6 +942,7 @@ async fn real_timeline_assembles_image_wav_srt_to_mp4() {
                     width: None,
                     height: None,
                     opacity: None,
+                    ..Default::default()
                 }],
                 style: None,
             },
@@ -953,6 +963,7 @@ async fn real_timeline_assembles_image_wav_srt_to_mp4() {
                     width: None,
                     height: None,
                     opacity: None,
+                    ..Default::default()
                 }],
                 style: None,
             },
@@ -1086,6 +1097,7 @@ fn test_timeline_overlay_filter_graph() {
                     width: None,
                     height: None,
                     opacity: None,
+                    ..Default::default()
                 }],
                 style: None,
             },
@@ -1106,6 +1118,7 @@ fn test_timeline_overlay_filter_graph() {
                     width: Some(250),
                     height: None,
                     opacity: Some(0.85),
+                    ..Default::default()
                 }],
                 style: None,
             },
@@ -1149,6 +1162,7 @@ fn test_timeline_rejects_svg_source() {
                 width: None,
                 height: None,
                 opacity: None,
+                ..Default::default()
             }],
             style: None,
         }],
@@ -1226,6 +1240,7 @@ async fn real_timeline_overlay_does_not_extend_duration_beyond_base_track() {
                     width: None,
                     height: None,
                     opacity: None,
+                    ..Default::default()
                 }],
                 style: None,
             },
@@ -1246,6 +1261,7 @@ async fn real_timeline_overlay_does_not_extend_duration_beyond_base_track() {
                     width: Some(100),
                     height: Some(100),
                     opacity: Some(0.9),
+                    ..Default::default()
                 }],
                 style: None,
             },
@@ -1308,6 +1324,7 @@ fn test_timeline_build_validation_and_rejection() {
             audio: "projects/test-proj/missing.wav".into(),
             text: "Phân cảnh thử nghiệm".into(),
             visual: "color:#FF0000".into(),
+            ..Default::default()
         }],
         lead_s: 0.5,
         gap_s: 0.4,
@@ -1322,6 +1339,7 @@ fn test_timeline_build_validation_and_rejection() {
         fps: None,
         min_duration_s: None,
         caption_style: None,
+        max_still_s: 6.0,
     };
     let err = build_timeline(&ws, params_missing).unwrap_err();
     assert!(
@@ -1337,6 +1355,7 @@ fn test_timeline_build_validation_and_rejection() {
             audio: "../../outside.wav".into(),
             text: "Thoát workspace".into(),
             visual: "color:#FF0000".into(),
+            ..Default::default()
         }],
         lead_s: 0.5,
         gap_s: 0.4,
@@ -1351,6 +1370,7 @@ fn test_timeline_build_validation_and_rejection() {
         fps: None,
         min_duration_s: None,
         caption_style: None,
+        max_still_s: 6.0,
     };
     let err = build_timeline(&ws, params_escape.clone()).unwrap_err();
     assert!(
@@ -1484,11 +1504,13 @@ async fn real_timeline_build_then_render_checks_duration() {
                 audio: "projects/test-proj/vo1.wav".into(),
                 text: "Xin chào các bạn đã đến với kênh.".into(),
                 visual: "color:#1E88E5".into(),
+                ..Default::default()
             },
             SegmentInput {
                 audio: "projects/test-proj/vo2.wav".into(),
                 text: "Hôm nay chúng ta cùng tìm hiểu cách làm video hoàn toàn tự động nhé.".into(),
                 visual: "color:#43A047".into(),
+                ..Default::default()
             },
         ],
         lead_s: 0.5,
@@ -1513,6 +1535,7 @@ async fn real_timeline_build_then_render_checks_duration() {
         fps: Some(30.0),
         min_duration_s: None,
         caption_style: None,
+        max_still_s: 6.0,
     };
 
     let build_res = build_timeline(&ws, params).expect("build timeline failed");
@@ -1541,12 +1564,14 @@ async fn real_timeline_build_then_render_checks_duration() {
                     audio: "projects/test-proj/vo1.wav".into(),
                     text: "Xin chào các bạn đã đến với kênh.".into(),
                     visual: "color:#1E88E5".into(),
+                    ..Default::default()
                 },
                 SegmentInput {
                     audio: "projects/test-proj/vo2.wav".into(),
                     text: "Hôm nay chúng ta cùng tìm hiểu cách làm video hoàn toàn tự động nhé."
                         .into(),
                     visual: "color:#43A047".into(),
+                    ..Default::default()
                 },
             ],
             lead_s: 0.5,
@@ -1571,6 +1596,7 @@ async fn real_timeline_build_then_render_checks_duration() {
             fps: Some(30.0),
             min_duration_s: None,
             caption_style: None,
+            max_still_s: 6.0,
         },
     )
     .unwrap();
@@ -1658,6 +1684,7 @@ fn test_caption_defaults_scale_with_frame_height() {
                 width: None,
                 height: None,
                 opacity: None,
+                ..Default::default()
             }],
             style: None,
         }],
@@ -1691,6 +1718,7 @@ fn test_caption_defaults_scale_with_frame_height() {
                 width: None,
                 height: None,
                 opacity: None,
+                ..Default::default()
             }],
             style: None,
         }],
@@ -1723,6 +1751,7 @@ fn test_caption_defaults_scale_with_frame_height() {
                 width: None,
                 height: None,
                 opacity: None,
+                ..Default::default()
             }],
             style: Some(CaptionStyle {
                 font: Some("arial".into()),
@@ -1769,6 +1798,7 @@ fn test_caption_block_stays_inside_frame() {
                 width: None,
                 height: None,
                 opacity: None,
+                ..Default::default()
             }],
             style: None,
         }],
@@ -1810,6 +1840,7 @@ fn test_caption_text_escaping_vietnamese_quotes_colons_percentages() {
                 width: None,
                 height: None,
                 opacity: None,
+                ..Default::default()
             }],
             style: None,
         }],
@@ -1848,6 +1879,7 @@ fn test_timeline_hash_unchanged_for_timeline_without_style() {
                     width: None,
                     height: None,
                     opacity: None,
+                    ..Default::default()
                 }],
                 style: None,
             },
@@ -1868,6 +1900,7 @@ fn test_timeline_hash_unchanged_for_timeline_without_style() {
                     width: None,
                     height: None,
                     opacity: None,
+                    ..Default::default()
                 }],
                 style: None,
             },
@@ -1919,6 +1952,7 @@ async fn real_timeline_render_with_vietnamese_captions_and_frame_inspection() {
                     width: None,
                     height: None,
                     opacity: None,
+                    ..Default::default()
                 }],
                 style: None,
             },
@@ -1940,6 +1974,7 @@ async fn real_timeline_render_with_vietnamese_captions_and_frame_inspection() {
                         width: None,
                         height: None,
                         opacity: None,
+                        ..Default::default()
                     },
                     Clip {
                         id: "cap2".into(),
@@ -1955,6 +1990,7 @@ async fn real_timeline_render_with_vietnamese_captions_and_frame_inspection() {
                         width: None,
                         height: None,
                         opacity: None,
+                        ..Default::default()
                     },
                 ],
                 style: None,
@@ -2143,4 +2179,350 @@ fn test_reference_kind_status_is_fresh_with_content() {
         NodeStatus::Moi,
         "reference with content must be 'moi' (fresh), never stale"
     );
+}
+
+#[test]
+fn test_ffmpeg_filter_generation_for_ken_burns_and_cut() {
+    let doc = TimelineDoc {
+        version: 1,
+        width: 1920,
+        height: 1080,
+        fps: 30.0,
+        loudness_lufs: None,
+        tracks: vec![Track {
+            id: "video".into(),
+            kind: TrackKind::Video,
+            clips: vec![
+                Clip {
+                    id: "v1".into(),
+                    source: "img1.png".into(),
+                    start: 0.0,
+                    duration: 4.0,
+                    transition: Transition::Fade,
+                    transition_duration: Some(0.5),
+                    motion: Some(MotionKind::ZoomIn),
+                    motion_strength: Some(0.08),
+                    ..Default::default()
+                },
+                Clip {
+                    id: "v2".into(),
+                    source: "img2.png".into(),
+                    start: 4.0,
+                    duration: 3.0,
+                    transition: Transition::Cut,
+                    motion: Some(MotionKind::PanRight),
+                    motion_strength: Some(0.08),
+                    ..Default::default()
+                },
+                Clip {
+                    id: "v3".into(),
+                    source: "broll.mp4".into(),
+                    start: 7.0,
+                    duration: 5.0,
+                    transition: Transition::Fade,
+                    motion: Some(MotionKind::ZoomIn), // video must ignore motion!
+                    ..Default::default()
+                },
+            ],
+            style: None,
+        }],
+    };
+
+    let out_path = PathBuf::from("rendered.mp4");
+    let (args, filter_graph) = build_timeline_ffmpeg_args(&doc, &out_path).unwrap();
+
+    // v0: zoom_in on img1.png with 2x scale (3840:2160) and zoompan
+    assert!(
+        filter_graph.contains("scale=3840:2160,zoompan=z=\'1+0.0800*(on/119)\':x=\'(iw-iw/zoom)/2\':y=\'(ih-ih/zoom)/2\':d=120:s=1920x1080:fps=30,trim=start=0:duration=4,setpts=PTS-STARTPTS,setsar=1,fade=t=in:st=0:d=0.5[v0]"),
+        "v0 filter not matching: {filter_graph}"
+    );
+
+    // v1: pan_right on img2.png with Transition::Cut (no fade filter!)
+    assert!(
+        filter_graph.contains("scale=3840:2160,zoompan=z=\'1.0800\':x=\'(iw-iw/zoom)*(on/89)\':y=\'(ih-ih/zoom)/2\':d=90:s=1920x1080:fps=30,trim=start=0:duration=3,setpts=PTS-STARTPTS,setsar=1[v1]"),
+        "v1 filter not matching: {filter_graph}"
+    );
+
+    // v2: video broll.mp4 does not have zoompan even though motion was specified
+    assert!(
+        filter_graph.contains("[2:v]trim=start=0:duration=5,setpts=PTS-STARTPTS,fps=30,scale=1920:1080,setsar=1,fade=t=in:st=0:d=0.5[v2]"),
+        "v2 video filter not matching: {filter_graph}"
+    );
+
+    // Args includes -stream_loop -1 for broll.mp4
+    assert!(args.contains(&"-stream_loop".to_string()));
+}
+
+#[tokio::test]
+#[ignore = "real timeline render with motion, 3 segments, multi visuals, frame inspection and byte-identical determinism"]
+async fn real_timeline_render_with_motion_and_multi_visuals_evidence() {
+    let ffmpeg_report = probe_ffmpeg();
+    let ffprobe_report = probe_ffprobe();
+    if !ffmpeg_report.available || !ffprobe_report.available {
+        println!("SKIP: real_timeline_render_with_motion_and_multi_visuals_evidence — ffmpeg or ffprobe not found");
+        return;
+    }
+    let ffmpeg_bin = ffmpeg_report.path.unwrap();
+
+    let (_tmp, ws, proj) = create_test_env();
+    let assets_dir = proj.root().join("assets");
+    std::fs::create_dir_all(&assets_dir).unwrap();
+
+    // 1. Generate 3 audio files (wav) using ffmpeg
+    for (name, dur) in [("a1.wav", "3"), ("a2.wav", "6"), ("a3.wav", "3")] {
+        let p = assets_dir.join(name);
+        let status = std::process::Command::new(&ffmpeg_bin)
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("sine=frequency=440:duration={dur}"),
+                "-c:a",
+                "pcm_s16le",
+                p.to_str().unwrap(),
+            ])
+            .output()
+            .expect("generate wav");
+        assert!(status.status.success());
+    }
+
+    // 2. Generate images (png) and 1 video clip (mp4)
+    // img1: colorful testsrc
+    let img1_path = assets_dir.join("img1.png");
+    let status = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=1920x1080:rate=1:duration=1",
+            "-vframes",
+            "1",
+            img1_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("generate img1");
+    assert!(status.status.success());
+
+    // img2a: testsrc2
+    let img2a_path = assets_dir.join("img2a.png");
+    let status = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=1920x1080:rate=1:duration=1",
+            "-vframes",
+            "1",
+            img2a_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("generate img2a");
+    assert!(status.status.success());
+
+    // img2b: smptebars
+    let img2b_path = assets_dir.join("img2b.png");
+    let status = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "smptebars=size=1920x1080:rate=1:duration=1",
+            "-vframes",
+            "1",
+            img2b_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("generate img2b");
+    assert!(status.status.success());
+
+    // vid3: 2-second moving video clip (tests video loop when segment is longer)
+    let vid3_path = assets_dir.join("vid3.mp4");
+    let status = std::process::Command::new(&ffmpeg_bin)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=size=1920x1080:rate=30:duration=2",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            vid3_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("generate vid3");
+    assert!(status.status.success());
+
+    // 3. Build timeline with 3 segments:
+    // Seg 1: 1 image (img1.png) -> auto motion (ZoomIn)
+    // Seg 2: 2 images (img2a.png + img2b.png) -> 2 visuals in one segment, cut transition between them
+    // Seg 3: 1 video (vid3.mp4) -> video clip
+    let params = TimelineBuildParams {
+        project: proj.slug().to_string(),
+        artifact: "video-v02".into(),
+        segments: vec![
+            SegmentInput {
+                audio: "projects/test-proj/assets/a1.wav".into(),
+                text: "Chào mừng các bạn đến với video thử nghiệm chất lượng cao.".into(),
+                visual: "projects/test-proj/assets/img1.png".into(),
+                ..Default::default()
+            },
+            SegmentInput {
+                audio: "projects/test-proj/assets/a2.wav".into(),
+                text: "Phân cảnh thứ hai này chứa hai góc nhìn khác nhau với chuyển động mượt mà."
+                    .into(),
+                visuals: vec![
+                    VisualInput::Simple("projects/test-proj/assets/img2a.png".into()),
+                    VisualInput::Simple("projects/test-proj/assets/img2b.png".into()),
+                ],
+                ..Default::default()
+            },
+            SegmentInput {
+                audio: "projects/test-proj/assets/a3.wav".into(),
+                text: "Cuối cùng là một đoạn video B-roll chuyển động thực tế.".into(),
+                visual: "projects/test-proj/assets/vid3.mp4".into(),
+                ..Default::default()
+            },
+        ],
+        lead_s: 0.5,
+        gap_s: 0.4,
+        tail_s: 1.5,
+        transition: "fade".into(),
+        captions: "sentences".into(),
+        overlays: vec![],
+        brand: None,
+        channels: vec!["youtube".into()],
+        width: Some(1920),
+        height: Some(1080),
+        fps: Some(30.0),
+        min_duration_s: None,
+        caption_style: None,
+        max_still_s: 6.0,
+    };
+
+    let build_res = build_timeline(&ws, params).expect("build timeline ok");
+    assert_eq!(build_res.segments.len(), 3);
+    assert!(build_res.duration_s > 10.0);
+
+    let art_dir = proj.artifacts_dir().join("video-v02");
+    let doc_path = art_dir.join("timeline.json");
+    let doc_str = std::fs::read_to_string(&doc_path).expect("read timeline.json");
+    let doc: TimelineDoc = serde_json::from_str(&doc_str).expect("parse timeline.json");
+
+    // Check clips on base video track
+    let v_track = doc
+        .tracks
+        .iter()
+        .find(|t| t.id == "video")
+        .expect("video track");
+    assert_eq!(
+        v_track.clips.len(),
+        4,
+        "Seg 1 (1) + Seg 2 (2) + Seg 3 (1) = 4 video clips"
+    );
+    assert_eq!(v_track.clips[0].motion, Some(MotionKind::ZoomIn));
+    assert_eq!(v_track.clips[1].motion, Some(MotionKind::ZoomOut));
+    assert_eq!(v_track.clips[2].motion, Some(MotionKind::PanLeft));
+    assert_eq!(
+        v_track.clips[3].motion, None,
+        "Video clip must not have motion"
+    );
+    assert_eq!(
+        v_track.clips[2].transition,
+        Transition::Cut,
+        "Intra-segment transition must be Cut"
+    );
+
+    // 4. Render to MP4 twice to verify byte-identical determinism
+    let tmp_out = tempfile::tempdir().unwrap();
+    let mp4_1 = tmp_out.path().join("render_run1.mp4");
+    let mp4_2 = tmp_out.path().join("render_run2.mp4");
+
+    let (args1, _) = build_timeline_ffmpeg_args(&doc, &mp4_1).expect("args 1");
+    let (args2, _) = build_timeline_ffmpeg_args(&doc, &mp4_2).expect("args 2");
+
+    let run1 = std::process::Command::new(&ffmpeg_bin)
+        .args(&args1)
+        .current_dir(ws.root())
+        .output()
+        .expect("run ffmpeg 1");
+    assert!(
+        run1.status.success(),
+        "run 1 failed: {}",
+        String::from_utf8_lossy(&run1.stderr)
+    );
+
+    let run2 = std::process::Command::new(&ffmpeg_bin)
+        .args(&args2)
+        .current_dir(ws.root())
+        .output()
+        .expect("run ffmpeg 2");
+    assert!(
+        run2.status.success(),
+        "run 2 failed: {}",
+        String::from_utf8_lossy(&run2.stderr)
+    );
+
+    let bytes1 = std::fs::read(&mp4_1).expect("read mp4 1");
+    let bytes2 = std::fs::read(&mp4_2).expect("read mp4 2");
+    assert_eq!(bytes1, bytes2, "Double render must be byte-identical");
+
+    // 5. Extract frames at 0%, 50%, 100% of the first image clip (which has ZoomIn motion)
+    let evidence_dir = std::path::PathBuf::from(
+        r"D:\Users\Dang\LocalContentStudio\.aw\tasks\2026-10-24-v02-video-chuyen-dong\evidence",
+    );
+    let _ = std::fs::create_dir_all(&evidence_dir);
+
+    // Save final demo MP4 to evidence
+    let ev_mp4 = evidence_dir.join("v02-motion-demo.mp4");
+    std::fs::copy(&mp4_1, &ev_mp4).expect("copy demo mp4 to evidence");
+
+    let frame_0 = evidence_dir.join("frame-00pct.png");
+    let frame_50 = evidence_dir.join("frame-50pct.png");
+    let frame_100 = evidence_dir.join("frame-100pct.png");
+    let frame_1033 = evidence_dir.join("frame-1033ms.png");
+
+    let extract_frame = |ss: &str, out: &std::path::Path| {
+        let status = std::process::Command::new(&ffmpeg_bin)
+            .args([
+                "-ss",
+                ss,
+                "-i",
+                mp4_1.to_str().unwrap(),
+                "-vframes",
+                "1",
+                "-y",
+                out.to_str().unwrap(),
+            ])
+            .output()
+            .expect("extract frame");
+        assert!(status.status.success());
+    };
+
+    extract_frame("0.6", &frame_0);
+    extract_frame("1.8", &frame_50);
+    extract_frame("3.0", &frame_100);
+    extract_frame("1.833", &frame_1033);
+
+    let b_0 = std::fs::read(&frame_0).unwrap();
+    let b_50 = std::fs::read(&frame_50).unwrap();
+    let b_100 = std::fs::read(&frame_100).unwrap();
+    let b_1033 = std::fs::read(&frame_1033).unwrap();
+
+    assert_ne!(
+        b_0, b_50,
+        "Frame 0% and 50% must differ due to Ken Burns zoom motion"
+    );
+    assert_ne!(
+        b_50, b_100,
+        "Frame 50% and 100% must differ due to Ken Burns zoom motion"
+    );
+    assert_ne!(b_50, b_1033, "Consecutive frames must differ smoothly");
+
+    println!("SUCCESS: verified real render, byte-identical rerun, and motion frame extraction!");
 }

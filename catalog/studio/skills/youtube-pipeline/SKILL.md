@@ -48,22 +48,30 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
   - Đảm bảo đầu ra âm thanh định dạng `.wav` hoặc `.mp3` được ghi nhận trong thư mục asset của lượt/dự án.
   - Ghi nhận thời lượng chính xác của từng file âm thanh qua `duration_seconds` trả về sẵn (hoặc kiểm tra bằng `media.inspect@1`) để căn khớp timeline.
 
-### 3. Tư liệu hình ảnh & B-Roll (Media Gathering & Gen)
-- Thu thập hoặc sinh tư liệu hình ảnh/video bổ trợ (B-roll):
-  - **Tải từ web hoặc nhập tệp sẵn có:** Dùng `media.import@1` (`url` hoặc `path`) để tải video/audio tư liệu vào dự án.
-  - **Sinh ảnh minh hoạ AI:** Dùng `image.generate@1` (`google.imagen` hoặc `openai.images`) với tỷ lệ 16:9 (`width: 1280, height: 720` hoặc `1920x1080`).
+### 3. Lập danh sách cảnh & Tư liệu (Shot List, Media & B-Roll)
+- **Quy tắc nhịp hình (Shot List):** Tránh video bị cảm giác "trình chiếu slide" tĩnh:
+  - **Nhịp đổi cảnh:** Thay đổi hình ảnh/video mỗi 3–5 giây để duy trì sự chú ý của người xem.
+  - **Mật độ cảnh theo lời thoại:** Mỗi câu thoại ≥ 1 cảnh; với câu dài (> 6 giây), bắt buộc chia thành ≥ 2 cảnh (`visuals`).
+  - **Tỷ lệ xen kẽ video B-roll:** Xen kẽ ≥ 30% tổng số cảnh là video chuyển động (dùng `video.generate@1` qua Veo/Sora hoặc `media.import@1` từ tư liệu/b-roll có sẵn) khi ngân sách cho phép.
+  - **Chuyển động cho ảnh tĩnh:** Tất cả các cảnh ảnh tĩnh còn lại đều phải có hiệu ứng chuyển động Ken Burns (`motion: "auto"` hoặc chỉ định `zoom_in`, `zoom_out`, `pan_left`, `pan_right`...).
+  - **Đa dạng thị giác:** Tránh lặp lại cùng một ảnh giữa các cảnh liên tiếp.
+- **Thu thập & sinh tư liệu:**
+  - **Tải hoặc nhập video tư liệu:** Dùng `media.import@1` (`url` hoặc `path`) để tải video B-roll vào dự án.
+  - **Sinh ảnh minh hoạ AI:** Dùng `image.generate@1` (`google.imagen` hoặc `openai.images`) với tỷ lệ 16:9 (`1920x1080` hoặc `1280x720`).
   - **Sinh video AI:** Dùng `video.generate@1` (`google.veo` hoặc `openai.videos`) cho các phân cảnh chuyển động ấn tượng.
   - **Kiểm tra tệp tư liệu:** Dùng `media.inspect@1` để xác thực độ phân giải, fps và âm thanh của b-roll đã tải.
 
 ### 4. Dựng dòng thời gian (Timeline Assembly)
 - Dùng công cụ Studio MCP `timeline_build` để tự động tạo artifact timeline (`artifact.yaml` + `timeline.json`). Không cần viết Python qua Bash hay tự tính toán thời lượng thủ công:
   - `timeline_build` tự động probe thời lượng từng tệp âm thanh (WAV/MP3), sắp xếp các phân cảnh nối tiếp nhau với các khoảng đệm mượt mà (`lead_s`, `gap_s`, `tail_s`).
+  - **Hỗ trợ nhiều cảnh (`visuals`) trong 1 phân cảnh:** Tự động chia đều thời lượng phân cảnh cho các cảnh (hoặc theo mảng `durations` tùy chọn). Cảnh báo (`warnings`) nếu cảnh tĩnh dài > `max_still_s` (mặc định 6s) và chỉ có 1 visual.
+  - **Chuyển động ảnh tĩnh (Ken Burns):** Mặc định tự động gán `motion: "auto"` (luân phiên tất định `zoom_in`, `zoom_out`, `pan_left`, `pan_right`) cho ảnh tĩnh, render mượt mà bằng FFmpeg scale 2× + zoompan ở 1920x1080@30fps. Cảnh video giữ nguyên chuyển động gốc.
+  - **Chuyển cảnh thông minh:** Chuyển cảnh giữa các phân cảnh hỗ trợ `transition: "fade"` (mặc định 0.5s), `"cut"` hoặc `"none"`. Giữa các cảnh con trong cùng một segment mặc định là `cut` dứt khoát.
   - Tự động chia lời thoại kịch bản thành phụ đề cân đối theo câu và độ dài (tối đa 2 dòng ~42 ký tự mỗi dòng), gán mốc thời gian chính xác khớp với giọng đọc.
-  - Hỗ trợ tùy biến định dạng phụ đề qua `caption_style` (hoặc trường `style` trên track `captions` trong `timeline.json`): `font` (tên font chữ), `font_size` (cỡ chữ px, mặc định ~4.5% chiều cao khung hình), `color` (màu chữ #RRGGBB), `outline` (độ dày viền px), `box` (bật/tắt hộp nền), `box_color` (màu hộp nền, vd `#000000` hoặc `black@0.6`), `margin_bottom` (khoảng cách mép đáy px, mặc định ~8% chiều cao), `max_width_ratio` (tỷ lệ rộng tối đa 0-1). Cả khối phụ đề nhiều dòng được giữ trọn vẹn trong khung hình (`y=h-text_h-margin`).
-  - Hỗ trợ lớp phủ (overlays) hiển thị xuyên suốt video (ví dụ logo brand định dạng PNG) hoặc theo khoảng thời gian tùy chọn.
-  - Tự động thiết lập kích thước và khung hình theo chuẩn của kênh YouTube (1920x1080@30fps).
+  - Hỗ trợ tùy biến định dạng phụ đề qua `caption_style`: `font`, `font_size`, `color`, `outline`, `box`, `box_color`, `margin_bottom`, `max_width_ratio`.
+  - Hỗ trợ lớp phủ (overlays) hiển thị xuyên suốt video (ví dụ logo brand PNG) hoặc theo khoảng thời gian tùy chọn.
 - **Lưu ý định dạng SVG:** FFmpeg không giải mã trực tiếp SVG trong timeline. Hãy render tệp SVG logo sang PNG qua design artifact trước khi truyền vào `overlays` của `timeline_build`.
-- **Ví dụ gọi công cụ `timeline_build` (kèm `caption_style` và overlay logo):**
+- **Ví dụ gọi công cụ `timeline_build` (kèm `visuals`, `motion`, `caption_style` và overlay logo):**
 
   ```json
   {
@@ -73,12 +81,24 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
       {
         "audio": "projects/ca-phe-phin/assets/vo/vo-01.wav",
         "text": "Vì sao một ly cà phê phin lại cần nhỏ giọt thật chậm?",
-        "visual": "projects/ca-phe-phin/renders/scene-01/output.png"
+        "visuals": [
+          {
+            "source": "projects/ca-phe-phin/renders/scene-01a/output.png",
+            "motion": "zoom_in",
+            "motion_strength": 0.08
+          },
+          {
+            "source": "projects/ca-phe-phin/assets/broll/phin-close-up.mp4",
+            "in_point": 0.0,
+            "out_point": 3.0
+          }
+        ]
       },
       {
         "audio": "projects/ca-phe-phin/assets/vo/vo-02.wav",
         "text": "Bí quyết nằm ở nhiệt độ nước và độ nén vừa phải của phin nhôm.",
-        "visual": "projects/ca-phe-phin/renders/scene-02/output.png"
+        "visual": "projects/ca-phe-phin/renders/scene-02/output.png",
+        "motion": "pan_right"
       }
     ],
     "caption_style": {
@@ -108,7 +128,7 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
     "transition": "fade"
   }
   ```
-- Kết quả trả về gồm: `{ "artifact": "video", "duration_s": 65.2, "segments": [{"start": 0.0, "duration": 8.5}, ...], "captions_count": 8 }`. Không cần can thiệp tay vào `timeline.json`. Sau bước này, chuyển ngay sang bước 5 để kết xuất video.
+- Kết quả trả về gồm: `{ "artifact": "video", "duration_s": 65.2, "segments": [{"start": 0.0, "duration": 8.5}, ...], "captions_count": 8, "warnings": [] }`. Không cần can thiệp tay vào `timeline.json`. Sau bước này, chuyển ngay sang bước 5 để kết xuất video.
 
 ### 5. Kết xuất & Kiểm tra chất lượng (Render & Validation)
 - Thực hiện kết xuất video qua `artifact_render` cho artifact timeline:

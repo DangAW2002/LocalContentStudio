@@ -416,6 +416,19 @@ pub fn is_image_source(src: &str) -> bool {
         || lower.ends_with(".bmp")
 }
 
+/// Helper to determine if a source path references a video file.
+pub fn is_video_source(src: &str) -> bool {
+    let lower = src.to_ascii_lowercase();
+    lower.ends_with(".mp4")
+        || lower.ends_with(".mov")
+        || lower.ends_with(".webm")
+        || lower.ends_with(".mkv")
+        || lower.ends_with(".avi")
+        || lower.ends_with(".m4v")
+        || lower.ends_with(".ts")
+        || lower.ends_with(".flv")
+}
+
 /// Helper to determine if a source path references a subtitle file (SRT, VTT, ASS).
 pub fn is_subtitle_file(src: &str) -> bool {
     let lower = src.to_ascii_lowercase();
@@ -638,6 +651,13 @@ pub fn build_timeline_ffmpeg_args(
                         clip.in_point + clip.duration
                     ),
                 ]);
+            } else if is_video_source(&clip.source) {
+                args.extend_from_slice(&[
+                    "-stream_loop".into(),
+                    "-1".into(),
+                    "-i".into(),
+                    strip_verbatim(Path::new(&clip.source)),
+                ]);
             } else {
                 args.extend_from_slice(&["-i".into(), strip_verbatim(Path::new(&clip.source))]);
             }
@@ -645,25 +665,95 @@ pub fn build_timeline_ffmpeg_args(
         total_video_inputs = base_clips.len();
 
         for (i, clip) in base_clips.iter().enumerate() {
-            let loop_prefix = if is_image_source(&clip.source) {
-                "loop=loop=-1:size=1:start=0,"
+            let filter = if is_image_source(&clip.source)
+                && clip.motion.is_some()
+                && clip.motion != Some(crate::timeline::MotionKind::None)
+            {
+                let motion = match clip.motion.unwrap_or_default() {
+                    crate::timeline::MotionKind::Auto => crate::timeline::resolve_auto_motion(i),
+                    m => m,
+                };
+                let fps = timeline_doc.fps;
+                let total_frames = (((clip.in_point + clip.duration) * fps).round() as u64).max(1);
+                let d_denom = if total_frames > 1 {
+                    total_frames - 1
+                } else {
+                    1
+                };
+                let strength = clip.motion_strength.unwrap_or(0.08).max(0.001);
+                let s_str = format!("{:.4}", strength);
+                let one_plus_s = format!("{:.4}", 1.0 + strength);
+                let (z_expr, x_expr, y_expr) = match motion {
+                    crate::timeline::MotionKind::ZoomIn => (
+                        format!("1+{s_str}*(on/{d_denom})"),
+                        "(iw-iw/zoom)/2".to_string(),
+                        "(ih-ih/zoom)/2".to_string(),
+                    ),
+                    crate::timeline::MotionKind::ZoomOut => (
+                        format!("({one_plus_s})-{s_str}*(on/{d_denom})"),
+                        "(iw-iw/zoom)/2".to_string(),
+                        "(ih-ih/zoom)/2".to_string(),
+                    ),
+                    crate::timeline::MotionKind::PanLeft => (
+                        one_plus_s,
+                        format!("(iw-iw/zoom)*(1-on/{d_denom})"),
+                        "(ih-ih/zoom)/2".to_string(),
+                    ),
+                    crate::timeline::MotionKind::PanRight => (
+                        one_plus_s,
+                        format!("(iw-iw/zoom)*(on/{d_denom})"),
+                        "(ih-ih/zoom)/2".to_string(),
+                    ),
+                    crate::timeline::MotionKind::PanUp => (
+                        one_plus_s,
+                        "(iw-iw/zoom)/2".to_string(),
+                        format!("(ih-ih/zoom)*(1-on/{d_denom})"),
+                    ),
+                    crate::timeline::MotionKind::PanDown => (
+                        one_plus_s,
+                        "(iw-iw/zoom)/2".to_string(),
+                        format!("(ih-ih/zoom)*(on/{d_denom})"),
+                    ),
+                    crate::timeline::MotionKind::None | crate::timeline::MotionKind::Auto => {
+                        unreachable!()
+                    }
+                };
+                let mut f = format!(
+                    "[{i}:v]scale={scale_w}:{scale_h},zoompan=z=\'{z_expr}\':x=\'{x_expr}\':y=\'{y_expr}\':d={total_frames}:s={w}x{h}:fps={fps},trim=start={in_pt}:duration={dur},setpts=PTS-STARTPTS,setsar=1",
+                    scale_w = 2 * timeline_doc.width,
+                    scale_h = 2 * timeline_doc.height,
+                    w = timeline_doc.width,
+                    h = timeline_doc.height,
+                    in_pt = clip.in_point,
+                    dur = clip.duration,
+                );
+                if clip.transition == crate::timeline::Transition::Fade {
+                    let fade_dur = clip.transition_duration.unwrap_or(0.5);
+                    f.push_str(&format!(",fade=t=in:st=0:d={fade_dur}"));
+                }
+                f
             } else {
-                ""
+                let loop_prefix = if is_image_source(&clip.source) {
+                    "loop=loop=-1:size=1:start=0,"
+                } else {
+                    ""
+                };
+                let mut f = format!(
+                    "[{}:v]{}trim=start={}:duration={},setpts=PTS-STARTPTS,fps={},scale={}:{},setsar=1",
+                    i,
+                    loop_prefix,
+                    clip.in_point,
+                    clip.duration,
+                    timeline_doc.fps,
+                    timeline_doc.width,
+                    timeline_doc.height
+                );
+                if clip.transition == crate::timeline::Transition::Fade {
+                    let fade_dur = clip.transition_duration.unwrap_or(0.5);
+                    f.push_str(&format!(",fade=t=in:st=0:d={}", fade_dur));
+                }
+                f
             };
-            let mut filter = format!(
-                "[{}:v]{}trim=start={}:duration={},setpts=PTS-STARTPTS,fps={},scale={}:{},setsar=1",
-                i,
-                loop_prefix,
-                clip.in_point,
-                clip.duration,
-                timeline_doc.fps,
-                timeline_doc.width,
-                timeline_doc.height
-            );
-            if clip.transition == crate::timeline::Transition::Fade {
-                let fade_dur = clip.transition_duration.unwrap_or(0.5);
-                filter.push_str(&format!(",fade=t=in:st=0:d={}", fade_dur));
-            }
             let label = format!("v{}", i);
             v_filter_parts.push(format!("{}[{}]", filter, label));
         }
@@ -696,6 +786,13 @@ pub fn build_timeline_ffmpeg_args(
                         timeline_doc.fps,
                         clip.in_point + clip.duration
                     ),
+                ]);
+            } else if is_video_source(&clip.source) {
+                args.extend_from_slice(&[
+                    "-stream_loop".into(),
+                    "-1".into(),
+                    "-i".into(),
+                    strip_verbatim(Path::new(&clip.source)),
                 ]);
             } else {
                 args.extend_from_slice(&["-i".into(), strip_verbatim(Path::new(&clip.source))]);
