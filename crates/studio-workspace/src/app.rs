@@ -11,14 +11,45 @@ pub struct AppPaths {
     data_dir: PathBuf,
 }
 
+/// Helper to detect if code is running in a `cargo test` / test harness environment.
+fn is_test_environment() -> bool {
+    if cfg!(test) {
+        return true;
+    }
+    if env::var_os("RUST_TEST_THREADS").is_some()
+        || env::var_os("NEXTEST").is_some()
+        || env::var_os("CARGO_TARGET_TMPDIR").is_some()
+    {
+        return true;
+    }
+    if let Ok(exe) = env::current_exe() {
+        let s = exe.to_string_lossy().to_lowercase();
+        if s.contains(r"\deps\") || s.contains("/deps/") {
+            return true;
+        }
+    }
+    false
+}
+
 impl AppPaths {
     /// Resolve application data directory.
-    /// Checks `STUDIO_APP_DIR` environment variable first,
-    /// then falls back to `%APPDATA%/LocalContentStudio` (or equivalent).
+    /// Checks `STUDIO_APP_DIR` environment variable first.
+    /// If running under a test harness and `STUDIO_APP_DIR` is not set, safely routes to a
+    /// process-isolated temporary directory to prevent polluting real user data (%APPDATA%/LocalContentStudio).
+    /// In production, falls back to `%APPDATA%/LocalContentStudio` (or equivalent).
     pub fn from_env() -> Self {
         if let Ok(val) = env::var("STUDIO_APP_DIR") {
             return Self {
                 data_dir: PathBuf::from(val),
+            };
+        }
+
+        if is_test_environment() {
+            let test_app_dir = env::temp_dir()
+                .join("LocalContentStudio-test")
+                .join(format!("pid-{}", std::process::id()));
+            return Self {
+                data_dir: test_app_dir,
             };
         }
 
@@ -228,6 +259,7 @@ impl AppDb {
     }
 
     /// List recent workspaces, sorted descending by last_opened, deduplicated.
+    /// Filters out paths that do not exist on disk without deleting them from the database.
     pub fn list_recent_workspaces(&self) -> Result<Vec<RecentWorkspace>> {
         let mut stmt = self
             .conn
@@ -250,7 +282,7 @@ impl AppDb {
                 norm.clone()
             };
 
-            if seen.insert(key) {
+            if seen.insert(key) && Path::new(&norm).exists() {
                 list.push(RecentWorkspace {
                     path: norm,
                     last_opened: item.last_opened,
@@ -325,5 +357,35 @@ pub fn normalize_workspace_path(path: impl AsRef<Path>) -> String {
         stripped
     } else {
         trimmed.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_app_paths_from_env_under_test_never_touches_real_user_appdata() {
+        // When STUDIO_APP_DIR is explicitly set, it respects that path.
+        let custom_dir = env::temp_dir().join("test-custom-app-dir");
+        env::set_var("STUDIO_APP_DIR", &custom_dir);
+        let paths = AppPaths::from_env();
+        assert_eq!(paths.data_dir(), custom_dir.as_path());
+        env::remove_var("STUDIO_APP_DIR");
+
+        // When STUDIO_APP_DIR is not set, under test it must route to a safe test tempdir,
+        // NEVER to %APPDATA%/LocalContentStudio or home dir.
+        let paths_default = AppPaths::from_env();
+        let path_str = paths_default.data_dir().to_string_lossy();
+        assert!(
+            path_str.contains("LocalContentStudio-test"),
+            "Expected isolated test dir, got {path_str}"
+        );
+        if let Ok(app_data) = env::var("APPDATA") {
+            assert!(
+                !paths_default.data_dir().starts_with(&app_data),
+                "AppPaths under test must not use real %APPDATA%"
+            );
+        }
     }
 }

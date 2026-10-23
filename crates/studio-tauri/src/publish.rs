@@ -663,12 +663,10 @@ pub async fn youtube_client_import_impl(
         .set(org_name, ws_name, KEY_YOUTUBE_CLIENT_SECRET, &csec)
         .map_err(|e| CmdError::msg(format!("Lỗi lưu YOUTUBE_CLIENT_SECRET: {e}")))?;
 
-    if ws_name.is_some() {
-        let _ = state.secrets.set("", None, KEY_YOUTUBE_CLIENT_ID, &cid);
-        let _ = state
-            .secrets
-            .set("", None, KEY_YOUTUBE_CLIENT_SECRET, &csec);
-    }
+    let _ = state.secrets.set("", None, KEY_YOUTUBE_CLIENT_ID, &cid);
+    let _ = state
+        .secrets
+        .set("", None, KEY_YOUTUBE_CLIENT_SECRET, &csec);
 
     let last6 = extract_client_id_last6(&cid);
     Ok(YoutubeClientImportResult {
@@ -880,12 +878,18 @@ mod tests {
     #[tokio::test]
     async fn confirm_refuses_a_draft_with_blocking_findings() {
         let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join("app_data");
         let ws_dir = temp.path().join("ws");
-        let ws = Workspace::create(&ws_dir, "Test").unwrap();
+        let (ws, state) = {
+            let _lock = crate::commands::tests::ENV_LOCK.lock().unwrap();
+            std::env::set_var("STUDIO_APP_DIR", &app_dir);
+            let ws = Workspace::create(&ws_dir, "Test").unwrap();
+            let state = AppState::new();
+            (ws, state)
+        };
         let proj = Project::create(&ws, "p1", "P1").unwrap();
         // An artifact that was never rendered: validation reports a blocking finding.
         std::fs::create_dir_all(proj.artifacts_dir().join("video")).unwrap();
-        let state = AppState::new();
         *state.current.lock().unwrap() = Some(ws_dir);
         let meta = PublishMetadata {
             title: "Tiêu đề".into(),

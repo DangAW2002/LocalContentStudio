@@ -676,11 +676,15 @@ mod tests {
     use super::*;
 
     fn setup_test_workspace() -> (tempfile::TempDir, Workspace, AppState) {
+        let lock = crate::commands::tests::ENV_LOCK.lock().unwrap();
         let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join("app_data");
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
         let ws_dir = temp.path().join("test_ws");
         let ws = Workspace::create(&ws_dir, "Test Workspace").unwrap();
         let state = AppState::new();
         *state.current.lock().unwrap() = Some(ws_dir.clone());
+        drop(lock);
         (temp, ws, state)
     }
 

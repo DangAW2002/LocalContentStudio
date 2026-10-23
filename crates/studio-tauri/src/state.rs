@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use studio_engine::{AgyEngine, ClaudeEngine};
 use studio_jobs::{EstimateStore, MemoryEstimateStore, Scheduler, SchedulerConfig, SysinfoProbe};
 use studio_mcp::TokenRegistry;
-use studio_tools::{CredentialManagerStore, SecretStore};
+#[cfg(not(test))]
+use studio_tools::CredentialManagerStore;
+use studio_tools::SecretStore;
 use studio_workspace::{AppPaths, Workspace};
 use tokio::sync::Notify;
 
@@ -104,7 +106,10 @@ impl AppState {
                 estimates,
             ),
             tokens: Arc::new(TokenRegistry::new()),
+            #[cfg(not(test))]
             secrets: Arc::new(CredentialManagerStore::new()),
+            #[cfg(test)]
+            secrets: Arc::new(studio_tools::secret::MemoryStore::new()),
             broker: Arc::new(UiBroker::default()),
             mcp_port: OnceLock::new(),
             endpoints: {
