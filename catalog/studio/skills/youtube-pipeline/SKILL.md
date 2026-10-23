@@ -49,7 +49,7 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
   - **Phân chia segment:** Mỗi phân cảnh (segment) chỉ nên dài 1–2 câu tương ứng với một tệp âm thanh WAV.
   - **Thẻ ngắt chủ động:** Dùng thẻ `[ngắt x]` (ví dụ `[ngắt 0.7]` giây) trước các ý nhấn mạnh quan trọng hoặc ngay sau câu hỏi để tạo khoảng dừng thuyết phục người xem.
   - **Tốc độ nói (`speed`):** Khuyến nghị thiết lập `speed` từ 0.85 – 0.95 (mặc định 0.90 cho tiếng Việt khi không truyền).
-  - **Kiểm soát nhịp độ sau tổng hợp:** Sau khi sinh âm thanh, đọc trường `duration_seconds` trả về sẵn (đã tính gộp cả các khoảng lặng dấu câu). Kiểm tra tốc độ đọc thực tế đạt khoảng 2.3 – 2.8 từ/giây. Nếu đọc quá nhanh (> 2.8 từ/giây), chủ động giảm tham số `speed` (ví dụ từ 0.90 xuống 0.85) và tổng hợp lại để đảm bảo giọng đọc truyền cảm, rõ chữ.
+  - **Kiểm soát nhịp độ sau tổng hợp:** Lấy số tiếng (mỗi từ đơn tiếng Việt) của lời thoại gốc chia cho `duration_seconds` trả về (đã gồm khoảng lặng dấu câu). Nhịp thuyết minh tốt khoảng 2,8 – 3,4 tiếng/giây (số và ngày được đọc thành nhiều tiếng hơn nên đoạn nhiều số sẽ thấp hơn). Chỉ khi > 3,6 tiếng/giây mới giảm `speed` 0,05 (tối thiểu 0,8) và tổng hợp lại một lần; nếu vẫn nhanh, viết lại câu ngắn hơn hoặc thêm dấu phẩy/`[ngắt x]` thay vì giảm tiếp.
 - **Lưu trữ asset:** Đảm bảo đầu ra âm thanh định dạng `.wav` được lưu trữ vào thư mục asset của project (`projects/<slug>/assets/vo/`) để sẵn sàng cho bước dựng timeline.
 
 ### 3. Tư liệu hình ảnh & B-Roll (Media Gathering & Gen)
