@@ -689,6 +689,7 @@ pub async fn upload_video_resumable_to_page(
         ToolError::ParseError(format!("Lỗi phân tích phiên bắt đầu tải video: {e}"))
     })?;
 
+    let video_id = start_data.video_id.clone();
     let upload_session_id = start_data.upload_session_id.ok_or_else(|| {
         ToolError::ExecutionError("Facebook không trả về upload_session_id".into())
     })?;
@@ -802,12 +803,30 @@ pub async fn upload_video_resumable_to_page(
         )));
     }
 
-    let finish_data: FacebookPostResponse = finish_res.json().await.map_err(|e| {
+    // Graph answers the finish phase with `{"success": true}` only; the video id comes from start.
+    let finish_body = finish_res.text().await.unwrap_or_default();
+    let finish_data: serde_json::Value = serde_json::from_str(&finish_body).map_err(|e| {
         ToolError::ParseError(format!("Lỗi phân tích phản hồi hoàn tất video: {e}"))
     })?;
+    if finish_data.get("success").and_then(|v| v.as_bool()) == Some(false) {
+        return Err(ToolError::PublishError(map_facebook_error(
+            None,
+            &finish_body,
+        )));
+    }
+    let id = ["post_id", "id"]
+        .iter()
+        .find_map(|k| {
+            finish_data
+                .get(*k)
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        })
+        .or(video_id)
+        .ok_or_else(|| ToolError::ExecutionError("Facebook không trả về ID video".into()))?;
 
     progress_cb(1.0, "Đăng video lên Facebook Page thành công!");
-    Ok(finish_data.post_id.unwrap_or(finish_data.id))
+    Ok(id)
 }
 
 /// Orchestrate complete Facebook Page publish flow using secrets, channel limits, and progress callbacks.
@@ -989,7 +1008,7 @@ mod tests {
             let (mut stream3, _) = listener.accept().await.unwrap();
             let mut buf3 = [0u8; 4096];
             let _ = stream3.read(&mut buf3).await.unwrap();
-            let finish_json = r#"{"id": "vid_fb_999", "post_id": "page_post_8888"}"#;
+            let finish_json = r#"{"success": true}"#;
             let resp3 = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 finish_json.len(),
@@ -1029,7 +1048,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(post_id, "page_post_8888");
+        assert_eq!(post_id, "vid_fb_999");
         assert!(!progress.is_empty());
     }
 
