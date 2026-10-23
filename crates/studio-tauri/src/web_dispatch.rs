@@ -98,6 +98,8 @@ pub async fn start_web_server(state: &AppState) -> CmdResult<()> {
         app_data_dir: state.app_paths.data_dir().to_path_buf(),
         redirect_http_to_https: false,
         limits,
+        allowed_hosts: Vec::new(),
+        behind_https_proxy: false,
     };
 
     let dispatcher = Arc::new(TauriWebDispatcher::new(state.clone()));

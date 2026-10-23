@@ -3,12 +3,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 pub mod assets;
+mod bootstrap;
 mod broker;
 pub mod budget;
 mod commands;
 mod defaults;
 mod engines;
 mod error;
+mod headless;
 mod publish;
 mod publish_facebook;
 mod state;
@@ -16,14 +18,35 @@ mod turns;
 pub mod web_dispatch;
 mod web_settings;
 
-use std::sync::Arc;
-
-use studio_mcp::{RuntimeInfo, ServerState};
 use tauri::Manager;
 
 use crate::state::AppState;
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--set-web-password") {
+        if let Err(e) = headless::handle_set_web_password(&mut std::io::stdin()) {
+            eprintln!("[studio-tauri] Lỗi: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    if args.iter().any(|a| a == "--headless") {
+        let config = headless::parse_headless_args(&args);
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("không khởi tạo được tokio runtime");
+        let _guard = rt.enter();
+        let state = AppState::new();
+        if let Err(e) = rt.block_on(headless::run_headless(state, config, None)) {
+            eprintln!("[studio-tauri] Lỗi chạy headless: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     // The job scheduler spawns its loop on creation: enter Tauri's tokio runtime first.
     let runtime = tauri::async_runtime::handle();
     let _guard = runtime.inner().enter();
@@ -34,99 +57,9 @@ fn main() {
             let state = app.state::<AppState>();
             let _ = state.app_handle.set(handle.clone());
             state.broker.attach(handle.clone());
-            if let Err(e) = defaults::install(&state.app_paths.shared_dir(), &state.catalog_path, &state.sources_dir) {
-                eprintln!("Không cài được dữ liệu mặc định: {e}");
-            }
 
-            // Studio MCP server for engine turns (loopback + per-turn tokens) and the agy shim lockfile.
-            let shim_secret = uuid::Uuid::new_v4().simple().to_string();
-            let server_state = Arc::new(ServerState {
-                tokens: state.tokens.clone(),
-                scheduler: state.scheduler.clone(),
-                secrets: state.secrets.clone(),
-                broker: state.broker.clone(),
-                catalog_paths: vec![state.catalog_path.clone()],
-                shim_secret: shim_secret.clone(),
-                endpoints: state.endpoints.clone(),
-                pricing: state.pricing.clone(),
-            });
-            let running = tauri::async_runtime::block_on(studio_mcp::start(server_state, 0))?;
-            let port = running.addr.port();
-            let _ = state.mcp_port.set(port);
-            let runtime_path = studio_mcp::runtime::default_path();
-            let runtime_info = RuntimeInfo {
-                port,
-                shim_secret,
-                pid: std::process::id(),
-                runtime_path: Some(runtime_path.clone()),
-            };
-            studio_mcp::runtime::write(&runtime_path, &runtime_info)?;
-            if let Err(e) = studio_mcp::runtime::write_runtime_d(&runtime_info) {
-                eprintln!("Không ghi được runtime.d: {e}");
-            }
-            // Keep the server alive for the whole process lifetime.
-            std::mem::forget(running);
-
-            // Reopen the most recent workspace.
-            let recent = state
-                .app_paths
-                .open_app_db()
-                .ok()
-                .and_then(|db| db.list_recent_workspaces().ok());
-            if let Some(path) = recent.and_then(|r| r.into_iter().next()).map(|r| r.path) {
-                let _ = commands::workspace_open(handle.clone(), app.state::<AppState>(), path);
-            }
-
-            // Subscribe to scheduler events and emit "job-event" to the frontend (Tauri + SSE).
-            let mut job_rx = state.scheduler.subscribe();
-            let state_events = (*state).clone();
-            tauri::async_runtime::spawn(async move {
-                use serde_json::json;
-
-                loop {
-                    let evt = match job_rx.recv().await {
-                        Ok(evt) => evt,
-                        // A slow UI only loses old progress ticks; keep listening.
-                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    };
-                    let state_str = match evt.state {
-                        studio_jobs::event::JobState::Queued => "queued",
-                        studio_jobs::event::JobState::Admitted => "admitted",
-                        studio_jobs::event::JobState::Running => "running",
-                        studio_jobs::event::JobState::Succeeded => "succeeded",
-                        studio_jobs::event::JobState::Failed => "failed",
-                        studio_jobs::event::JobState::Cancelled => "cancelled",
-                    };
-                    let snapshot_state = match evt.state {
-                        studio_jobs::event::JobState::Queued | studio_jobs::event::JobState::Admitted => "PENDING",
-                        studio_jobs::event::JobState::Running => "RUNNING",
-                        studio_jobs::event::JobState::Succeeded => "DONE",
-                        studio_jobs::event::JobState::Failed => "FAILED",
-                        studio_jobs::event::JobState::Cancelled => "CANCELLED",
-                    };
-                    let payload = json!({
-                        "jobId": evt.job_id,
-                        "kind": evt.kind,
-                        "pool": evt.pool,
-                        "state": state_str,
-                        "progress": evt.progress,
-                        "message": evt.message,
-                        "peakMemoryBytes": evt.peak_memory_bytes,
-                        "event": {
-                            "id": evt.job_id,
-                            "title": evt.kind,
-                            "kind": evt.kind,
-                            "state": snapshot_state,
-                            "progress": evt.progress,
-                            "stageName": evt.message,
-                            "createdAt": chrono::Utc::now().to_rfc3339(),
-                            "error": if evt.state == studio_jobs::event::JobState::Failed { evt.message.clone() } else { None },
-                        }
-                    });
-                    state_events.emit("job-event", payload);
-                }
-            });
+            tauri::async_runtime::block_on(bootstrap::bootstrap(&state))
+                .map_err(|e| e as Box<dyn std::error::Error>)?;
 
             // Check if personal web mode is enabled and password is set. If so, start the web server.
             let web_enabled = state
@@ -155,8 +88,7 @@ fn main() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
-                studio_mcp::runtime::remove(&studio_mcp::runtime::default_path());
-                studio_mcp::runtime::remove_runtime_d(std::process::id());
+                bootstrap::teardown();
                 let _ = window;
             }
         })

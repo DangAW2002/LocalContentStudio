@@ -26,15 +26,34 @@ fn extract_scheme(raw: &str) -> Option<&str> {
 ///
 /// When `lan_allowed` is true, accepts either HTTP or HTTPS Origin matching the Host or LAN IP/loopback.
 /// Rejects origins with mismatched hosts or non-HTTP/HTTPS schemes.
-pub fn verify_origin_and_host(headers: &HeaderMap, lan_allowed: bool) -> bool {
+/// Check if the Origin and Host headers are valid to prevent DNS rebinding and cross-site requests.
+///
+/// When `lan_allowed` is true, accepts either HTTP or HTTPS Origin matching the Host or LAN IP/loopback.
+/// When `lan_allowed` is false, accepts loopback (127.0.0.1/localhost) or any host matching `allowed_hosts`.
+/// If Origin is provided, it must match the requested Host (preventing CSRF from foreign origins).
+pub fn verify_origin_and_host(
+    headers: &HeaderMap,
+    lan_allowed: bool,
+    allowed_hosts: &[String],
+) -> bool {
     let host_hdr = match headers.get("host").and_then(|v| v.to_str().ok()) {
         Some(h) => h,
         None => return false,
     };
     let host_name = extract_host(host_hdr);
 
-    // If LAN access is NOT enabled, only loopback addresses are accepted.
-    if !lan_allowed && host_name != "127.0.0.1" && host_name != "localhost" {
+    // Check if host is loopback or in allowed_hosts (e.g. Tailscale domain or custom hostname)
+    let is_loopback = host_name == "127.0.0.1" || host_name == "localhost";
+    let is_allowed_host = allowed_hosts.iter().any(|allowed| {
+        let pattern = extract_host(allowed);
+        if pattern.starts_with("*.") {
+            host_name.ends_with(&pattern[1..])
+        } else {
+            pattern.eq_ignore_ascii_case(host_name)
+        }
+    });
+
+    if !lan_allowed && !is_loopback && !is_allowed_host {
         return false;
     }
 
@@ -120,16 +139,16 @@ mod tests {
         headers.insert("host", HeaderValue::from_static("127.0.0.1:3000"));
         headers.insert("origin", HeaderValue::from_static("http://127.0.0.1:3000"));
 
-        assert!(verify_origin_and_host(&headers, false));
-        assert!(verify_origin_and_host(&headers, true));
+        assert!(verify_origin_and_host(&headers, false, &[]));
+        assert!(verify_origin_and_host(&headers, true, &[]));
 
         // Cross-origin attack attempt
         headers.insert(
             "origin",
             HeaderValue::from_static("http://evil-attacker.com"),
         );
-        assert!(!verify_origin_and_host(&headers, false));
-        assert!(!verify_origin_and_host(&headers, true));
+        assert!(!verify_origin_and_host(&headers, false, &[]));
+        assert!(!verify_origin_and_host(&headers, true, &[]));
     }
 
     #[test]
@@ -142,21 +161,21 @@ mod tests {
         );
 
         // LAN allowed -> accepted
-        assert!(verify_origin_and_host(&headers, true));
+        assert!(verify_origin_and_host(&headers, true, &[]));
 
         // Wrong host rejected
         headers.insert(
             "origin",
             HeaderValue::from_static("https://192.168.1.99:3000"),
         );
-        assert!(!verify_origin_and_host(&headers, true));
+        assert!(!verify_origin_and_host(&headers, true, &[]));
 
         // Wrong scheme (e.g. ftp:// or file://) rejected
         headers.insert(
             "origin",
             HeaderValue::from_static("file://192.168.1.50:3000"),
         );
-        assert!(!verify_origin_and_host(&headers, true));
+        assert!(!verify_origin_and_host(&headers, true, &[]));
     }
 
     #[test]
@@ -169,9 +188,63 @@ mod tests {
         );
 
         // Rejected when LAN not allowed
-        assert!(!verify_origin_and_host(&headers, false));
+        assert!(!verify_origin_and_host(&headers, false, &[]));
         // Accepted when LAN allowed
-        assert!(verify_origin_and_host(&headers, true));
+        assert!(verify_origin_and_host(&headers, true, &[]));
+    }
+
+    #[test]
+    fn test_origin_and_host_allowed_hosts_ts_net() {
+        let allowed = vec!["dang-server.my-tailnet.ts.net".to_string()];
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "host",
+            HeaderValue::from_static("dang-server.my-tailnet.ts.net"),
+        );
+        headers.insert(
+            "origin",
+            HeaderValue::from_static("https://dang-server.my-tailnet.ts.net"),
+        );
+
+        // Even with LAN false (loopback bind behind tailscale serve), allowed-host is accepted
+        assert!(verify_origin_and_host(&headers, false, &allowed));
+
+        // Foreign origin attack to legitimate host is strictly rejected (403 Origin mismatch)
+        headers.insert(
+            "origin",
+            HeaderValue::from_static("https://evil-attacker.com"),
+        );
+        assert!(!verify_origin_and_host(&headers, false, &allowed));
+
+        // Untrusted Host is rejected
+        let mut bad_host_headers = HeaderMap::new();
+        bad_host_headers.insert("host", HeaderValue::from_static("evil-attacker.com"));
+        bad_host_headers.insert(
+            "origin",
+            HeaderValue::from_static("https://evil-attacker.com"),
+        );
+        assert!(!verify_origin_and_host(&bad_host_headers, false, &allowed));
+    }
+
+    #[test]
+    fn test_origin_and_host_allowed_hosts_wildcard() {
+        let allowed = vec!["*.ts.net".to_string()];
+        let mut headers = HeaderMap::new();
+        headers.insert("host", HeaderValue::from_static("box-1.custom.ts.net"));
+        headers.insert(
+            "origin",
+            HeaderValue::from_static("https://box-1.custom.ts.net"),
+        );
+
+        assert!(verify_origin_and_host(&headers, false, &allowed));
+
+        // Non ts.net host rejected
+        headers.insert("host", HeaderValue::from_static("box-1.other.net"));
+        headers.insert(
+            "origin",
+            HeaderValue::from_static("https://box-1.other.net"),
+        );
+        assert!(!verify_origin_and_host(&headers, false, &allowed));
     }
 
     #[test]
