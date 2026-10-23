@@ -1290,4 +1290,38 @@ mod tests {
         assert_eq!(err9.code, "network");
         assert!(err9.message_vi.contains("kết nối mạng"));
     }
+
+    /// Real private upload with the OAuth client + refresh token saved by "Kết nối YouTube".
+    /// Env: LCS_YT_ORG, LCS_YT_WS (scope holding the client), LCS_YT_VIDEO, optional LCS_YT_THUMB,
+    /// LCS_YT_META (PublishMetadata JSON). Privacy is forced to private.
+    #[tokio::test]
+    #[ignore]
+    async fn live_youtube_private_upload() {
+        let org = std::env::var("LCS_YT_ORG").expect("LCS_YT_ORG");
+        let ws = std::env::var("LCS_YT_WS").expect("LCS_YT_WS");
+        let video = std::path::PathBuf::from(std::env::var("LCS_YT_VIDEO").expect("LCS_YT_VIDEO"));
+        let thumb = std::env::var("LCS_YT_THUMB")
+            .ok()
+            .map(std::path::PathBuf::from);
+        let meta_text = std::fs::read_to_string(std::env::var("LCS_YT_META").expect("LCS_YT_META"))
+            .expect("read meta");
+        let mut metadata: PublishMetadata = serde_json::from_str(&meta_text).expect("meta json");
+        metadata.privacy = crate::publish::model::PublishPrivacy::Private;
+        let store = crate::CredentialManagerStore::new();
+        let url = publish_youtube_complete(
+            &store,
+            &org,
+            Some(&ws),
+            YouTubePublishParams {
+                channel_id: None,
+                video_path: &video,
+                thumbnail_path: thumb.as_deref(),
+                metadata: &metadata,
+            },
+            |frac, msg| eprintln!("[{:.0}%] {msg}", frac * 100.0),
+        )
+        .await
+        .expect("upload");
+        eprintln!("RESULT_URL {url}");
+    }
 }
