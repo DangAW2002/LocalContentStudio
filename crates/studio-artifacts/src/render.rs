@@ -385,14 +385,14 @@ pub fn timeline_schema_hint(err: &serde_json::Error) -> String {
         "timeline.json không hợp lệ (dòng {}, cột {}): {detail}. Cấu trúc đúng: \
          {{\"width\":1920,\"height\":1080,\"fps\":30,\"tracks\":[{{\"id\":\"video\",\"kind\":\"video\",\
          \"clips\":[{{\"id\":\"c1\",\"source\":\"<đường dẫn tương đối từ thư mục artifact, hoặc color:#RRGGBB, \
-         hoặc chữ phụ đề>\",\"start\":0,\"duration\":5,\"in_point\":0,\"transition\":\"none\"|\"fade\"}}]}},\
+         hoặc chữ phụ đề>\",\"start\":0,\"duration\":5,\"in_point\":0,\"transition\":\"none\"|\"fade\"|\"cut\",\"motion\":\"none\"|\"zoom_in\"|\"zoom_out\"|\"pan_left\"|\"pan_right\"|\"pan_up\"|\"pan_down\"|\"auto\",\"motion_strength\":0.08}}]}},\
          {{\"id\":\"overlay\",\"kind\":\"video\",\"clips\":[{{\"id\":\"logo\",\"source\":\"assets/logo.png\",\
          \"start\":0,\"duration\":5,\"x\":50,\"y\":50,\"width\":200,\"opacity\":0.9}}]}},\
          {{\"id\":\"captions\",\"kind\":\"captions\",\"style\":{{\"font\":\"segoeui\",\"font_size\":48,\"color\":\"#ffffff\",\
          \"outline\":0,\"box\":true,\"box_color\":\"black@0.6\",\"margin_bottom\":86,\"max_width_ratio\":0.8}},\
          \"clips\":[{{\"id\":\"cap1\",\"text\":\"Lời phụ đề mẫu\",\"start\":0.5,\"duration\":3.0}}]}}]}}. \
          Mỗi track và mỗi clip bắt buộc có \"id\"; mỗi clip bắt buộc có \"source\" (hoặc \"text\") và \"duration\". \
-         Track video đầu tiên là chuỗi gốc (base), các track video tiếp theo là lớp phủ (overlay). \
+         Track video đầu tiên là chuỗi gốc (base), các track video tiếp theo là lớp phủ (overlay). Clip ảnh hỗ trợ hiệu ứng chuyển động Ken Burns (\"motion\", \"motion_strength\") và chuyển cảnh (\"transition\": \"none\"|\"fade\"|\"cut\"). \
          Track captions hỗ trợ trường \"style\" tùy chọn (font, font_size, color, outline, box, box_color, margin_bottom, max_width_ratio). \
          Không dùng file .svg trực tiếp trong timeline (cần render sang PNG trước).",
         err.line(),

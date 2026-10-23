@@ -416,6 +416,19 @@ pub fn is_image_source(src: &str) -> bool {
         || lower.ends_with(".bmp")
 }
 
+/// Helper to determine if a source path references a video file.
+pub fn is_video_source(src: &str) -> bool {
+    let lower = src.to_ascii_lowercase();
+    lower.ends_with(".mp4")
+        || lower.ends_with(".mov")
+        || lower.ends_with(".webm")
+        || lower.ends_with(".mkv")
+        || lower.ends_with(".avi")
+        || lower.ends_with(".m4v")
+        || lower.ends_with(".ts")
+        || lower.ends_with(".flv")
+}
+
 /// Helper to determine if a source path references a subtitle file (SRT, VTT, ASS).
 pub fn is_subtitle_file(src: &str) -> bool {
     let lower = src.to_ascii_lowercase();
@@ -638,6 +651,13 @@ pub fn build_timeline_ffmpeg_args(
                         clip.in_point + clip.duration
                     ),
                 ]);
+            } else if is_video_source(&clip.source) {
+                args.extend_from_slice(&[
+                    "-stream_loop".into(),
+                    "-1".into(),
+                    "-i".into(),
+                    strip_verbatim(Path::new(&clip.source)),
+                ]);
             } else {
                 args.extend_from_slice(&["-i".into(), strip_verbatim(Path::new(&clip.source))]);
             }
@@ -645,25 +665,70 @@ pub fn build_timeline_ffmpeg_args(
         total_video_inputs = base_clips.len();
 
         for (i, clip) in base_clips.iter().enumerate() {
-            let loop_prefix = if is_image_source(&clip.source) {
-                "loop=loop=-1:size=1:start=0,"
+            let filter = if is_image_source(&clip.source)
+                && clip.motion.is_some()
+                && clip.motion != Some(crate::timeline::MotionKind::None)
+            {
+                let motion = match clip.motion.unwrap_or_default() {
+                    crate::timeline::MotionKind::Auto => crate::timeline::resolve_auto_motion(i),
+                    m => m,
+                };
+                // `perspective` samples sub-pixel corners; zoompan rounds its crop to whole pixels,
+                // which makes slow zooms and pans visibly wobble.
+                use crate::timeline::MotionKind as M;
+                let fps = timeline_doc.fps;
+                let frames = ((clip.duration * fps).round() as u64).max(2);
+                let p = format!("(in/{})", frames - 1);
+                let s = clip.motion_strength.unwrap_or(0.08).clamp(0.001, 0.5);
+                let z = match motion {
+                    M::ZoomIn => format!("(1+{s:.4}*{p})"),
+                    M::ZoomOut => format!("(1+{s:.4}*(1-{p}))"),
+                    _ => format!("{:.4}", 1.0 + s),
+                };
+                let centered_x = format!("(W-W/{z})/2");
+                let centered_y = format!("(H-H/{z})/2");
+                let (left, top) = match motion {
+                    M::PanLeft => (format!("(W-W/{z})*(1-{p})"), centered_y),
+                    M::PanRight => (format!("(W-W/{z})*{p}"), centered_y),
+                    M::PanUp => (centered_x, format!("(H-H/{z})*(1-{p})")),
+                    M::PanDown => (centered_x, format!("(H-H/{z})*{p}")),
+                    _ => (centered_x, centered_y),
+                };
+                let right = format!("{left}+W/{z}");
+                let bottom = format!("{top}+H/{z}");
+                let mut f = format!(
+                    "[{i}:v]scale={w}:{h},setsar=1,loop=loop=-1:size=1:start=0,fps={fps},trim=start=0:duration={dur},setpts=PTS-STARTPTS,perspective=x0='{left}':y0='{top}':x1='{right}':y1='{top}':x2='{left}':y2='{bottom}':x3='{right}':y3='{bottom}':interpolation=cubic:eval=frame",
+                    w = timeline_doc.width,
+                    h = timeline_doc.height,
+                    dur = clip.duration,
+                );
+                if clip.transition == crate::timeline::Transition::Fade {
+                    let fade_dur = clip.transition_duration.unwrap_or(0.5);
+                    f.push_str(&format!(",fade=t=in:st=0:d={fade_dur}"));
+                }
+                f
             } else {
-                ""
+                let loop_prefix = if is_image_source(&clip.source) {
+                    "loop=loop=-1:size=1:start=0,"
+                } else {
+                    ""
+                };
+                let mut f = format!(
+                    "[{}:v]{}trim=start={}:duration={},setpts=PTS-STARTPTS,fps={},scale={}:{},setsar=1",
+                    i,
+                    loop_prefix,
+                    clip.in_point,
+                    clip.duration,
+                    timeline_doc.fps,
+                    timeline_doc.width,
+                    timeline_doc.height
+                );
+                if clip.transition == crate::timeline::Transition::Fade {
+                    let fade_dur = clip.transition_duration.unwrap_or(0.5);
+                    f.push_str(&format!(",fade=t=in:st=0:d={}", fade_dur));
+                }
+                f
             };
-            let mut filter = format!(
-                "[{}:v]{}trim=start={}:duration={},setpts=PTS-STARTPTS,fps={},scale={}:{},setsar=1",
-                i,
-                loop_prefix,
-                clip.in_point,
-                clip.duration,
-                timeline_doc.fps,
-                timeline_doc.width,
-                timeline_doc.height
-            );
-            if clip.transition == crate::timeline::Transition::Fade {
-                let fade_dur = clip.transition_duration.unwrap_or(0.5);
-                filter.push_str(&format!(",fade=t=in:st=0:d={}", fade_dur));
-            }
             let label = format!("v{}", i);
             v_filter_parts.push(format!("{}[{}]", filter, label));
         }
@@ -696,6 +761,13 @@ pub fn build_timeline_ffmpeg_args(
                         timeline_doc.fps,
                         clip.in_point + clip.duration
                     ),
+                ]);
+            } else if is_video_source(&clip.source) {
+                args.extend_from_slice(&[
+                    "-stream_loop".into(),
+                    "-1".into(),
+                    "-i".into(),
+                    strip_verbatim(Path::new(&clip.source)),
                 ]);
             } else {
                 args.extend_from_slice(&["-i".into(), strip_verbatim(Path::new(&clip.source))]);

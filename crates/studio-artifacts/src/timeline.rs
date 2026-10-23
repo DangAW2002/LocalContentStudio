@@ -122,6 +122,36 @@ pub enum Transition {
     #[default]
     None,
     Fade,
+    Cut,
+}
+
+/// Ken Burns motion effect for still visual clips.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MotionKind {
+    #[default]
+    None,
+    ZoomIn,
+    ZoomOut,
+    PanLeft,
+    PanRight,
+    PanUp,
+    PanDown,
+    Auto,
+}
+
+/// Deterministically resolve an `Auto` motion based on scene index.
+///
+/// Cycles through `[zoom_in, zoom_out, pan_left, pan_right]` to create natural,
+/// alternating visual rhythm across scenes.
+pub fn resolve_auto_motion(index: usize) -> MotionKind {
+    match index % 4 {
+        0 => MotionKind::ZoomIn,
+        1 => MotionKind::ZoomOut,
+        2 => MotionKind::PanLeft,
+        3 => MotionKind::PanRight,
+        _ => MotionKind::ZoomIn,
+    }
 }
 
 /// Clip placed on a track.
@@ -150,6 +180,12 @@ pub struct Clip {
     /// Transition duration in seconds if transition is Fade
     #[serde(default)]
     pub transition_duration: Option<f64>,
+    /// Optional Ken Burns motion effect for still images
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion: Option<MotionKind>,
+    /// Motion strength / zoom ratio (e.g. 0.08 for 8% zoom, default: 0.08)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub motion_strength: Option<f64>,
     /// Horizontal offset in pixels from top-left (default: 0).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x: Option<i32>,

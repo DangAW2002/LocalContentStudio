@@ -37,12 +37,14 @@ pub use renderer::{
     build_html_render_job, build_hyperframes_render_job, build_proxy_job,
     build_timeline_ffmpeg_args, build_timeline_render_job, detect_artboard_size,
     escape_drawtext_text, escape_ffmpeg_subtitles_path, file_url_for, is_image_source,
-    is_subtitle_file, strip_verbatim,
+    is_subtitle_file, is_video_source, strip_verbatim,
 };
 pub use starter::*;
-pub use timeline::{CaptionStyle, Clip, TimelineDoc, Track, TrackKind, Transition};
+pub use timeline::{
+    resolve_auto_motion, CaptionStyle, Clip, MotionKind, TimelineDoc, Track, TrackKind, Transition,
+};
 pub use timeline_build::{
     build_timeline, build_timeline_tool, OverlayInput, SegmentInput, SegmentOutput,
-    TimelineBuildParams, TimelineBuildResult,
+    TimelineBuildParams, TimelineBuildResult, VisualInput, VisualSpec,
 };
 pub use validate::{validate_png, validate_video, ImageMeta, VideoMeta};
