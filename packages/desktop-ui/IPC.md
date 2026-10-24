@@ -162,6 +162,11 @@ interface ThreadSummary {
 - **Input**: `{ requestId: string, allow: boolean }`
 - **Output**: `{ acknowledged: boolean }`
 
+#### `question_respond`
+- **Mục đích**: Phản hồi câu hỏi trắc nghiệm của agent (AskUserQuestion).
+- **Input**: `{ requestId: string, answers: Record<string, string | string[]> }`
+- **Output**: `{ acknowledged: boolean }`
+
 ---
 
 ### 1.4 Checkpoint (CAS)

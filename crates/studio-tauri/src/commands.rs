@@ -647,6 +647,14 @@ pub fn permission_respond_impl(
     Ok(json!({ "acknowledged": state.broker.respond(&request_id, allow) }))
 }
 
+pub fn question_respond_impl(
+    state: &AppState,
+    request_id: String,
+    answers: Value,
+) -> CmdResult<Value> {
+    Ok(json!({ "acknowledged": state.broker.respond_question(&request_id, answers) }))
+}
+
 /// Permission requests still waiting for an answer (optionally for one thread).
 pub fn permission_pending_impl(state: &AppState, thread_id: Option<String>) -> CmdResult<Value> {
     Ok(json!(state.broker.list_pending(thread_id.as_deref())))
@@ -667,6 +675,15 @@ pub fn permission_respond(
     allow: bool,
 ) -> CmdResult<Value> {
     permission_respond_impl(&state, request_id, allow)
+}
+
+#[tauri::command]
+pub fn question_respond(
+    state: State<'_, AppState>,
+    request_id: String,
+    answers: Value,
+) -> CmdResult<Value> {
+    question_respond_impl(&state, request_id, answers)
 }
 
 // ───────────────────────── Checkpoints ─────────────────────────

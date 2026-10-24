@@ -8,6 +8,7 @@ import {
   type ThreadMessage,
 } from "../../../runtime/chat/turn-reducer";
 import { ThinkingIndicator } from "./ThinkingIndicator";
+import { AskUserQuestionCard } from "./AskUserQuestionCard";
 import { UsageSummary } from "./UsageSummary";
 
 export interface AgentMessageProps {
@@ -18,6 +19,7 @@ export interface AgentMessageProps {
   toggleToolCallExpanded: (msgIdx: number, toolCallId: string) => void;
   onSelectFile: (path: string) => void;
   onPermissionRespond: (requestId: string, allow: boolean) => void;
+  onQuestionRespond?: (requestId: string, answers: Record<string, string | string[]>) => void;
   onRerunPrompt?: (prompt: string) => void;
   onRetryTurn?: (turnId?: string) => void;
   onOpenPublishDraft?: () => void;
@@ -34,6 +36,7 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
   toggleToolCallExpanded,
   onSelectFile,
   onPermissionRespond,
+  onQuestionRespond,
   onRerunPrompt,
   onRetryTurn,
   onOpenPublishDraft,
@@ -434,38 +437,55 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
           </div>
         )}
 
-        {/* Permission Requests */}
-        {msg.permissionRequests?.map((pr) => !pr.resolved && (
-          <div
-            key={pr.requestId}
-            style={{
-              marginTop: 8,
-              padding: "var(--cs-space-3)",
-              border: "1px solid var(--cs-warning)",
-              backgroundColor: "var(--cs-status-warning-bg)",
-              borderRadius: "var(--cs-radius-control)",
-              display: "flex",
-              flexDirection: "column",
-              gap: 6,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600, color: "var(--cs-warning)" }}>
-              <Icon name="shield-alert" size={16} />
-              <span>Yêu cầu cấp quyền chạy công cụ</span>
+        {/* Permission Requests & AskUserQuestion Cards */}
+        {msg.permissionRequests?.map((pr) => {
+          const isAskQuestion = pr.tool === "AskUserQuestion" || pr.tool.endsWith("AskUserQuestion");
+          if (isAskQuestion) {
+            return (
+              <AskUserQuestionCard
+                key={pr.requestId}
+                requestId={pr.requestId}
+                tool={pr.tool}
+                input={pr.input}
+                resolved={pr.resolved}
+                answers={pr.answers}
+                onRespond={(answers) => onQuestionRespond?.(pr.requestId, answers)}
+              />
+            );
+          }
+          if (pr.resolved) return null;
+          return (
+            <div
+              key={pr.requestId}
+              style={{
+                marginTop: 8,
+                padding: "var(--cs-space-3)",
+                border: "1px solid var(--cs-warning)",
+                backgroundColor: "var(--cs-status-warning-bg)",
+                borderRadius: "var(--cs-radius-control)",
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600, color: "var(--cs-warning)" }}>
+                <Icon name="shield-alert" size={16} />
+                <span>Yêu cầu cấp quyền chạy công cụ</span>
+              </div>
+              <div style={{ fontSize: "var(--cs-text-xs)" }}>
+                Agent muốn thực thi: <code>{pr.tool}</code>
+              </div>
+              <div style={{ display: "flex", gap: "var(--cs-space-2)", marginTop: 4 }}>
+                <Button size="sm" variant="primary" onClick={() => onPermissionRespond(pr.requestId, true)}>
+                  Cho phép
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => onPermissionRespond(pr.requestId, false)}>
+                  Từ chối
+                </Button>
+              </div>
             </div>
-            <div style={{ fontSize: "var(--cs-text-xs)" }}>
-              Agent muốn thực thi: <code>{pr.tool}</code>
-            </div>
-            <div style={{ display: "flex", gap: "var(--cs-space-2)", marginTop: 4 }}>
-              <Button size="sm" variant="primary" onClick={() => onPermissionRespond(pr.requestId, true)}>
-                Cho phép
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => onPermissionRespond(pr.requestId, false)}>
-                Từ chối
-              </Button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
 
         {/* Denied Actions */}
         {msg.deniedActions?.map((da, i) => (

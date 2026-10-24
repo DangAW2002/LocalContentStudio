@@ -274,6 +274,34 @@ export interface PermissionRespondResponse {
   acknowledged: boolean;
 }
 
+export interface AskUserQuestionOption {
+  label: string;
+  description?: string;
+  preview?: string;
+}
+
+export interface AskUserQuestionItem {
+  question: string;
+  header?: string;
+  description?: string;
+  options?: AskUserQuestionOption[];
+  multiSelect?: boolean;
+}
+
+export interface AskUserQuestionInput {
+  title?: string;
+  questions: AskUserQuestionItem[];
+}
+
+export interface QuestionRespondRequest {
+  requestId: string;
+  answers: Record<string, string | string[]>;
+}
+
+export interface QuestionRespondResponse {
+  acknowledged: boolean;
+}
+
 // ==========================================
 // Engine Normalized Events
 // ==========================================
