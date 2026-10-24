@@ -2825,3 +2825,59 @@ async fn real_timeline_20_images_3_videos_render_under_1gb_ram() {
 
     println!("SUCCESS: 23-scene 90s timeline rendered under memory limit, byte-identical 100%!");
 }
+
+/// Debug aid: assemble a real timeline from its cached scene chunks with the current code.
+/// `LCS_TL=<timeline.json> LCS_WS=<workspace root> LCS_OUT=<out.mp4> cargo test -p studio-artifacts --test artifacts_test debug_assemble_real_timeline -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn debug_assemble_real_timeline() {
+    use studio_artifacts::renderer::*;
+    let tl = PathBuf::from(std::env::var("LCS_TL").expect("LCS_TL"));
+    let ws = PathBuf::from(std::env::var("LCS_WS").expect("LCS_WS"));
+    let out = PathBuf::from(std::env::var("LCS_OUT").expect("LCS_OUT"));
+    let cwd = tl.parent().unwrap().to_path_buf();
+    let mut doc: studio_artifacts::timeline::TimelineDoc =
+        serde_json::from_str(&std::fs::read_to_string(&tl).unwrap()).unwrap();
+    for t in &mut doc.tracks {
+        for c in &mut t.clips {
+            if c.source.starts_with("projects/") {
+                c.source = ws.join(&c.source).to_string_lossy().to_string();
+            }
+        }
+    }
+    let ffmpeg = which_ffmpeg();
+    let cache_dir = cwd.join(".cache").join("timeline_chunks");
+    let base = &doc
+        .tracks
+        .iter()
+        .find(|t| t.kind == studio_artifacts::timeline::TrackKind::Video)
+        .unwrap()
+        .clips;
+    let mut list = String::new();
+    for (idx, clip) in base.iter().enumerate() {
+        let hash = compute_clip_chunk_hash(clip, idx, &doc, &cwd);
+        let chunk = cache_dir.join(format!("chunk_{idx}_{hash}.mp4"));
+        render_base_clip_chunk(&ffmpeg, clip, idx, &doc, &cwd, &chunk).unwrap();
+        list.push_str(&format!(
+            "file '{}'
+",
+            escape_concat_path(&chunk)
+        ));
+    }
+    let list_file = std::env::temp_dir().join("lcs_debug_concat.txt");
+    std::fs::write(&list_file, list).unwrap();
+    let (args, _) = build_timeline_concat_ffmpeg_args(&doc, &list_file, &out).unwrap();
+    let st = std::process::Command::new(&ffmpeg)
+        .args(&args)
+        .current_dir(&cwd)
+        .status()
+        .unwrap();
+    assert!(st.success());
+    println!("OUT {}", out.display());
+}
+
+fn which_ffmpeg() -> PathBuf {
+    std::env::var("LCS_FFMPEG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("ffmpeg"))
+}

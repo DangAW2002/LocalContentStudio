@@ -1285,21 +1285,30 @@ pub fn build_timeline_concat_ffmpeg_args(
                         clip.in_point + clip.duration
                     ),
                 ]);
-            } else if is_video_source(&clip.source) {
-                args.extend_from_slice(&[
-                    "-stream_loop".into(),
-                    "-1".into(),
-                    "-i".into(),
-                    strip_verbatim(Path::new(&clip.source)),
-                ]);
             } else {
+                // Repeat the source at the input and bound it there: a `loop` filter on a single
+                // PNG never syncs with the concat-demuxer base (logo silently missing), and an
+                // unbounded `-loop 1`/`-stream_loop -1` input keeps ffmpeg reading forever.
+                let bound = format!("{}", clip.in_point + clip.duration);
+                if is_image_source(&clip.source) {
+                    args.extend_from_slice(&[
+                        "-loop".into(),
+                        "1".into(),
+                        "-framerate".into(),
+                        timeline_doc.fps.to_string(),
+                        "-t".into(),
+                        bound,
+                    ]);
+                } else if is_video_source(&clip.source) {
+                    args.extend_from_slice(&[
+                        "-stream_loop".into(),
+                        "-1".into(),
+                        "-t".into(),
+                        bound,
+                    ]);
+                }
                 args.extend_from_slice(&["-i".into(), strip_verbatim(Path::new(&clip.source))]);
             }
-            let loop_prefix = if is_image_source(&clip.source) {
-                "loop=loop=-1:size=1:start=0,"
-            } else {
-                ""
-            };
             let scale_filter = match (clip.width, clip.height) {
                 (Some(w), Some(h)) => format!(",scale={w}:{h}"),
                 (Some(w), None) => format!(",scale={w}:-1"),
@@ -1312,7 +1321,7 @@ pub fn build_timeline_concat_ffmpeg_args(
             };
             let ov_label = format!("ov{}", overlay_idx);
             let ov_filter = format!(
-                "[{input_idx}:v]{loop_prefix}trim=start={}:duration={},setpts=PTS-STARTPTS+{}/TB,fps={}{scale_filter}{opacity_filter}[{ov_label}]",
+                "[{input_idx}:v]trim=start={}:duration={},setpts=PTS-STARTPTS+{}/TB,fps={}{scale_filter}{opacity_filter}[{ov_label}]",
                 clip.in_point,
                 clip.duration,
                 clip.start,
