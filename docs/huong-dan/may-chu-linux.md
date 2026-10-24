@@ -153,3 +153,24 @@ Dịch vụ sẽ khởi động lại mượt mà trong vòng 2–3 giây. Dữ 
 | Mất phiên làm việc sau mỗi lần tải lại trang | Trình duyệt chặn cookie không an toàn qua HTTPS proxy | Đảm bảo đã thêm cờ `--behind-https-proxy` để kích hoạt cờ `Secure` trên cookie phiên làm việc. |
 | Dịch vụ tự tắt sau khi ngắt phiên SSH | Chưa bật `linger` cho tài khoản `dang` | Chạy lệnh `sudo loginctl enable-linger dang`. |
 | Quên mật khẩu web, hoặc web báo "Chưa thiết lập mật khẩu" | Mật khẩu chưa đặt hoặc đặt nhầm thư mục (thiếu `STUDIO_APP_DIR`) | Làm lại Mục 4 qua SSH, nhớ đặt `STUDIO_APP_DIR` giống service. |
+
+---
+
+## 9. Tích hợp liên tục (CI) & Kiểm tra tự động
+
+Mọi commit đẩy lên các nhánh chính (`studio-v2`, `master`) và Pull Request đều được kiểm tra tự động qua GitHub Actions trên cả hai môi trường:
+- **Linux (Ubuntu 24.04):** Chạy toàn bộ cổng chất lượng (`cargo fmt`, `clippy -D warnings`, unit test, UI build/test, biên dịch release `studio-tauri` và `studio-mcp`).
+- **Windows (windows-latest):** Chạy unit test workspace và UI test trên Windows.
+
+### Theo dõi kết quả CI qua GitHub CLI (`gh`)
+
+Bạn có thể kiểm tra trực tiếp trạng thái các lượt chạy CI từ terminal:
+
+```bash
+# Xem danh sách các lần chạy CI gần nhất
+gh run list
+
+# Theo dõi tiến trình lượt chạy CI đang diễn ra
+gh run watch
+```
+

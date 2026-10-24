@@ -3102,6 +3102,7 @@ pub async fn tts_model_install(
 }
 
 /// Synthesize speech for testing/preview in settings ("Nghe thử").
+#[allow(clippy::needless_late_init)]
 pub async fn tts_synthesize_preview_impl(
     state: &AppState,
     req: TtsPreviewRequest,
