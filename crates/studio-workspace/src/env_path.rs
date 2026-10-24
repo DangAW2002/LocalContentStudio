@@ -202,8 +202,10 @@ unsafe fn read_reg_string(
 
     // Decode byte pairs instead of casting the u8 buffer to &[u16] (no alignment guarantee).
     let wide: Vec<u16> = buf[..(data_len as usize).min(buf.len())]
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&c| u16::from_le_bytes(c))
         .collect();
     let u16_slice: &[u16] = &wide;
     let end = u16_slice

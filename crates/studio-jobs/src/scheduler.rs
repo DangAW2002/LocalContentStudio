@@ -278,7 +278,7 @@ impl Scheduler {
             });
         }
 
-        for (_, f) in state.finished.iter() {
+        for f in state.finished.values() {
             list.push(f.clone());
         }
 
@@ -316,7 +316,7 @@ impl Scheduler {
         let mut active_light = 0usize;
         let mut active_rate_keys: HashMap<String, usize> = HashMap::new();
 
-        for (_, r) in state.running.iter() {
+        for r in state.running.values() {
             if r.spec.tool_id.starts_with("engine:") {
                 active_engine += 1;
             }

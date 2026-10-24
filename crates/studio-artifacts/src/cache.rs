@@ -354,7 +354,7 @@ pub fn record_render_outputs(
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .unwrap_or_else(|_| file_path.to_string_lossy().replace('\\', "/"));
 
-        let render_id = format!("{}-{}-{}", artifact_id, &hash12(hash), format);
+        let render_id = format!("{}-{}-{}", artifact_id, hash12(hash), format);
 
         db.conn().execute(
             "INSERT OR REPLACE INTO renders (id, artifact_id, hash, output_path, format, size_bytes, created_at)

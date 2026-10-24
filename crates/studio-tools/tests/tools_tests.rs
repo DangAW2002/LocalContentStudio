@@ -336,7 +336,13 @@ async fn test_paid_over_budget_needs_approval() {
         provides: vec!["video.gen@1".into()],
         run: ToolRunSpec {
             run_type: ToolRunType::Cli,
+            #[cfg(windows)]
+            command: "cmd".into(),
+            #[cfg(not(windows))]
             command: "echo".into(),
+            #[cfg(windows)]
+            args: vec!["/C".into(), "echo".into(), "done".into()],
+            #[cfg(not(windows))]
             args: vec!["done".into()],
         },
         needs: vec![],
