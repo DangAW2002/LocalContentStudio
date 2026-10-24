@@ -17,15 +17,27 @@ use studio_workspace::Workspace;
 pub const VIENEU_HELPER_SCRIPT: &str =
     include_str!("../../builtin/tools/tts.vieneu/vieneu_helper.py");
 
-/// Available default preset voices for VieNeu-TTS.
-pub const VIENEU_DEFAULT_VOICES: &[&str] = &["Bình", "Mai", "Nam", "Nữ"];
+/// Available default preset voices for VieNeu-TTS v3 Turbo.
+pub const VIENEU_DEFAULT_VOICES: &[&str] = &[
+    "Thanh Bình",
+    "Mai Anh",
+    "Minh Đức",
+    "Trúc Ly",
+    "Minh Triết",
+    "Mỹ Duyên",
+    "Quỳnh Anh",
+    "Đức Trí",
+    "Kim Thanh",
+    "Adam",
+    "Quốc Tuấn",
+];
 
 /// Options for configuring VieNeu-TTS synthesis.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VieneuVoiceConfig {
     /// Voice preset name (e.g., "Bình", "Mai", "Nam", "Nữ").
     pub voice: String,
-    /// Speed multiplier (default 0.9 for Vietnamese).
+    /// Speed multiplier (default 0.76 for Vietnamese ~3.2 syllables/s).
     pub speed: f32,
     /// Optional workspace-relative reference audio file for voice cloning.
     pub reference_audio: Option<String>,
@@ -35,7 +47,7 @@ impl Default for VieneuVoiceConfig {
     fn default() -> Self {
         Self {
             voice: "Bình".to_string(),
-            speed: 0.9,
+            speed: 0.76,
             reference_audio: None,
         }
     }
@@ -164,12 +176,12 @@ pub async fn run_vieneu(ws: &Workspace, out_dir: &Path, input: &Value) -> Result
         })?;
 
     let voice_req = input.get("voice").and_then(Value::as_str);
-    // Default speed for Vietnamese is 0.9 if not specified
+    // Default speed for Vietnamese is 0.76 (calibrated for target ~3.2 syllables/s) if not specified
     let speed_req = input
         .get("speed")
         .and_then(Value::as_f64)
         .map(|s| s as f32)
-        .unwrap_or(0.9);
+        .unwrap_or(0.76);
 
     let actual_voice = voice_req.unwrap_or("Bình").to_string();
 
@@ -232,12 +244,45 @@ pub async fn run_vieneu(ws: &Workspace, out_dir: &Path, input: &Value) -> Result
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .unwrap_or_else(|_| target_wav_path.to_string_lossy().replace('\\', "/"));
 
+        let meta_file = cache_dir.join(format!("{cache_key}.meta.json"));
+        let (cached_eff_speed, cached_sps) = if let Ok(content) = fs::read_to_string(&meta_file) {
+            if let Ok(meta_json) = serde_json::from_str::<Value>(&content) {
+                let eff = meta_json
+                    .get("effective_speed")
+                    .and_then(Value::as_f64)
+                    .map(|v| v as f32)
+                    .unwrap_or(speed_req);
+                let sps = meta_json
+                    .get("syllables_per_second")
+                    .and_then(Value::as_f64)
+                    .map(|v| v as f32)
+                    .unwrap_or(0.0);
+                (eff, sps)
+            } else {
+                let norm = crate::tts::normalize_vietnamese_text(text);
+                let syl = crate::tts::count_vietnamese_syllables(&norm);
+                (
+                    speed_req,
+                    crate::tts::compute_syllables_per_second(syl, duration_s),
+                )
+            }
+        } else {
+            let norm = crate::tts::normalize_vietnamese_text(text);
+            let syl = crate::tts::count_vietnamese_syllables(&norm);
+            (
+                speed_req,
+                crate::tts::compute_syllables_per_second(syl, duration_s),
+            )
+        };
+
         return Ok(json!({
             "audio_path": rel_path,
             "duration_seconds": (duration_s * 1000.0).round() / 1000.0,
             "provider": "tts.vieneu",
             "voice": actual_voice,
             "speed": speed_req,
+            "effective_speed": cached_eff_speed,
+            "syllables_per_second": cached_sps,
             "available_voices": VIENEU_DEFAULT_VOICES,
             "cached": true,
             "note": "Tổng hợp giọng nói thành công qua VieNeu-TTS v3 Turbo (bản lưu cache)."
@@ -277,6 +322,8 @@ pub async fn run_vieneu(ws: &Workspace, out_dir: &Path, input: &Value) -> Result
     })?;
 
     let mut chunk_items: Vec<(PathBuf, f32)> = Vec::new();
+    let mut total_base_duration = 0.0;
+    let mut total_spoken_duration = 0.0;
 
     for (idx, seg) in segments.iter().enumerate() {
         let chunk_wav = chunks_dir.join(format!("chunk_{idx}.wav"));
@@ -356,7 +403,21 @@ pub async fn run_vieneu(ws: &Workspace, out_dir: &Path, input: &Value) -> Result
             });
         }
 
-        chunk_items.push((chunk_wav, seg.pause_after_s));
+        let (spec_raw, data_raw) = crate::tts::read_pcm_wav(&chunk_wav)?;
+        let dur_raw = spec_raw.duration_seconds(data_raw.len());
+        total_base_duration += dur_raw;
+
+        if let Some(tempo) = crate::tts::calculate_atempo(dur_raw, speed_req, dur_raw) {
+            let chunk_stretched = chunks_dir.join(format!("chunk_{idx}_stretched.wav"));
+            crate::tts::apply_atempo_filter(&chunk_wav, &chunk_stretched, tempo)?;
+            let (spec_str, data_str) = crate::tts::read_pcm_wav(&chunk_stretched)?;
+            let dur_str = spec_str.duration_seconds(data_str.len());
+            total_spoken_duration += dur_str;
+            chunk_items.push((chunk_stretched, seg.pause_after_s));
+        } else {
+            total_spoken_duration += dur_raw;
+            chunk_items.push((chunk_wav, seg.pause_after_s));
+        }
     }
 
     // Step 3: Concatenate all segments with deterministic silence gaps
@@ -366,9 +427,24 @@ pub async fn run_vieneu(ws: &Workspace, out_dir: &Path, input: &Value) -> Result
     // Clean up temporary chunks
     let _ = fs::remove_dir_all(&chunks_dir);
 
-    // Step 4: Write to cache
+    // Compute rhythm & speed metrics
+    let total_syllables = crate::tts::count_vietnamese_syllables(&normalized);
+    let effective_speed =
+        crate::tts::compute_effective_speed(total_base_duration, total_spoken_duration);
+    let syllables_per_sec =
+        crate::tts::compute_syllables_per_second(total_syllables, total_duration);
+
+    // Step 4: Write to cache along with sidecar metadata
     let _ = fs::create_dir_all(&cache_dir);
     let _ = fs::copy(&target_wav_path, &cached_file);
+    let meta_file = cache_dir.join(format!("{cache_key}.meta.json"));
+    let meta_json = json!({
+        "effective_speed": effective_speed,
+        "syllables_per_second": syllables_per_sec,
+        "total_syllables": total_syllables,
+        "duration_seconds": total_duration,
+    });
+    let _ = fs::write(&meta_file, meta_json.to_string());
 
     let rel_path = target_wav_path
         .strip_prefix(ws.root())
@@ -381,6 +457,8 @@ pub async fn run_vieneu(ws: &Workspace, out_dir: &Path, input: &Value) -> Result
         "provider": "tts.vieneu",
         "voice": actual_voice,
         "speed": speed_req,
+        "effective_speed": effective_speed,
+        "syllables_per_second": syllables_per_sec,
         "available_voices": VIENEU_DEFAULT_VOICES,
         "cached": false,
         "note": "Tổng hợp giọng nói thành công qua VieNeu-TTS v3 Turbo."
@@ -488,5 +566,65 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let res = rt.block_on(run_vieneu(&ws, &out_dir, &input));
         assert!(res.is_ok(), "Real synthesis failed: {:?}", res);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_v03_evidence_real_vieneu_voices() {
+        let probe = probe_vieneu();
+        if !probe.available {
+            println!("Skipping real synthesis: {}", probe.note_vi);
+            return;
+        }
+
+        let evidence_dir = PathBuf::from(
+            "D:/Users/Dang/LocalContentStudio/.aw/tasks/2026-10-24-v03-toc-do-giong/evidence",
+        );
+        let _ = fs::create_dir_all(&evidence_dir);
+
+        let sample_text = "Hôm nay, ngày 24/10, tại TP.HCM, nhiệt độ đạt 32°C. Giá xăng tăng 1.500 đ, tương đương 6,5%.\n\n[ngắt 0.7] Bạn đã chuẩn bị cho kế hoạch lúc 15h30 chưa? Hãy cùng đón xem các tin tức mới nhất về CNTT và AI nhé!";
+
+        let tmp = tempdir().unwrap();
+        let ws = Workspace::create(tmp.path().join("ws"), "ws").unwrap();
+        let out_dir = ws.cache_dir().join("turns").join("test-vieneu-evidence");
+        fs::create_dir_all(&out_dir).unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        let voices = [
+            ("Bình", "vieneu_binh.wav"),
+            ("Mai", "vieneu_mai.wav"),
+            ("Nam", "vieneu_nam.wav"),
+            ("Nữ", "vieneu_nu.wav"),
+        ];
+
+        println!("=== V03 VIENEU MULTI-VOICE BENCHMARK RESULTS ===");
+
+        for (voice, out_name) in voices {
+            let input = json!({
+                "text": sample_text,
+                "voice": voice,
+            });
+
+            let start = std::time::Instant::now();
+            let res = rt
+                .block_on(run_vieneu(&ws, &out_dir, &input))
+                .expect("run_vieneu failed");
+            let elapsed_s = start.elapsed().as_secs_f64();
+
+            let dur_s = res["duration_seconds"].as_f64().unwrap();
+            let sps = res["syllables_per_second"].as_f64().unwrap();
+            let eff_speed = res["effective_speed"].as_f64().unwrap();
+            let actual_voice = res["voice"].as_str().unwrap_or(voice);
+
+            let gen_wav = ws.root().join(res["audio_path"].as_str().unwrap());
+            let target_ev = evidence_dir.join(out_name);
+            let _ = fs::copy(&gen_wav, &target_ev);
+
+            let ratio = elapsed_s / dur_s;
+            println!(
+                "Voice '{}' (mapped: '{}'): synth_time = {:.2}s, audio_duration = {:.2}s, ratio = {:.2}x, sps = {:.2}, effective_speed = {:.2}",
+                voice, actual_voice, elapsed_s, dur_s, ratio, sps, eff_speed
+            );
+        }
     }
 }

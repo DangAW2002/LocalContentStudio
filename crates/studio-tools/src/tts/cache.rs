@@ -19,6 +19,9 @@ pub fn compute_tts_cache_key(provider: &str, input: &Value) -> String {
     // Normalizer version
     hasher.update(b"NORM_VERSION:vi_norm_v1\n");
 
+    // Speed algorithm version tag (V03 deterministic atempo adjustment clamped [0.7, 1.0])
+    hasher.update(b"SPEED_ALGO:atempo_v1_min0.7\n");
+
     // Text content
     let text = input.get("text").and_then(Value::as_str).unwrap_or("");
     hasher.update(b"TEXT:\n");
@@ -34,12 +37,12 @@ pub fn compute_tts_cache_key(provider: &str, input: &Value) -> String {
     hasher.update(voice.as_bytes());
     hasher.update(b"\n");
 
-    // Speed (default 0.9 for Vietnamese)
+    // Speed (default 0.76 for Vietnamese ~3.2 syllables/s)
     let speed = input
         .get("speed")
         .and_then(Value::as_f64)
         .map(|s| s as f32)
-        .unwrap_or(0.9);
+        .unwrap_or(0.76);
     hasher.update(b"SPEED:\n");
     hasher.update(format!("{speed:.3}").as_bytes());
     hasher.update(b"\n");
