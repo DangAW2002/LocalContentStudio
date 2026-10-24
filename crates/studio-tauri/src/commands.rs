@@ -3254,11 +3254,11 @@ pub async fn tts_synthesize_preview_impl(
         note = format!("Tổng hợp thành công bằng Piper ({voice_name}). {lic_note}");
     } else {
         // Windows SAPI
-        let voice_name = req.voice.unwrap_or_else(|| "Microsoft An".into());
-        actual_voice = voice_name.clone();
-
         #[cfg(windows)]
         {
+            let voice_name = req.voice.unwrap_or_else(|| "Microsoft An".into());
+            actual_voice = voice_name.clone();
+
             let ps_script = r#"[Console]::InputEncoding = [System.Text.Encoding]::UTF8;
 $json = [Console]::In.ReadToEnd() | ConvertFrom-Json;
 Add-Type -AssemblyName System.Speech;
@@ -3315,6 +3315,8 @@ $s.Dispose();"#
                     stderr.trim()
                 )));
             }
+
+            note = format!("Tổng hợp thành công bằng Windows SAPI ({actual_voice})");
         }
         #[cfg(not(windows))]
         {
@@ -3322,8 +3324,6 @@ $s.Dispose();"#
                 "Windows SAPI chỉ hỗ trợ trên hệ điều hành Windows.",
             ));
         }
-
-        note = format!("Tổng hợp thành công bằng Windows SAPI ({actual_voice})");
     }
 
     if !target_wav.is_file() {

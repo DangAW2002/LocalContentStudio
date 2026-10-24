@@ -197,6 +197,8 @@ fn test_probe_missing_binary() {
     let res_powershell = probe(&tool, &secret_store, None);
     #[cfg(windows)]
     assert!(res_powershell.available);
+    #[cfg(not(windows))]
+    let _ = res_powershell;
 }
 
 #[tokio::test]

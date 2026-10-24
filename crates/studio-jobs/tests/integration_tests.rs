@@ -440,14 +440,14 @@ async fn test_memory_limit_exceeded_fails_with_oom() {
         Arc::clone(&estimates) as Arc<dyn EstimateStore>,
     ));
 
-    // Allocate 300MB in powershell with a 60MB limit.
+    // Allocate incrementally in powershell with a 60MB limit.
     // If allocation hits Job Object memory limit, catch and exit with non-zero.
     let cmd = CommandSpec::new(
         "powershell.exe",
         vec![
             "-NoProfile".into(),
             "-Command".into(),
-            "try { $a = New-Object byte[] 300MB; Start-Sleep 5 } catch { exit 1 }".into(),
+            "try { $l = New-Object System.Collections.ArrayList; 1..50 | ForEach-Object { [void]$l.Add((New-Object byte[] 10MB)) }; Start-Sleep 5 } catch { exit 1 }".into(),
         ],
         std::env::temp_dir(),
     );

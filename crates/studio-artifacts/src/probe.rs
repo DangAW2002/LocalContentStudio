@@ -282,8 +282,10 @@ mod which {
     use std::path::PathBuf;
 
     pub fn which(name: &str) -> std::result::Result<PathBuf, ()> {
+        #[cfg(windows)]
         let pathext_var =
             std::env::var_os("PATHEXT").unwrap_or_else(|| ".EXE;.CMD;.BAT;.COM".into());
+        #[cfg(windows)]
         let extensions: Vec<String> = std::env::split_paths(&pathext_var)
             .filter_map(|p| p.to_str().map(|s| s.to_string()))
             .collect();

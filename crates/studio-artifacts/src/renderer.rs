@@ -542,6 +542,7 @@ pub fn resolve_caption_font(style_font: Option<&str>) -> Option<String> {
 
     #[cfg(not(windows))]
     {
+        let _ = style_font;
         for dir in [
             "/usr/share/fonts",
             "/usr/local/share/fonts",
