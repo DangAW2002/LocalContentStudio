@@ -42,14 +42,14 @@ Playbook điều phối toàn bộ quy trình làm video YouTube chuẩn chất 
 - Lưu kịch bản vào artifact loại `text` hoặc tệp `projects/<slug>/script.md`.
 
 ### 2. Giọng đọc (Voice & TTS)
-- **Provider đúng:** Gọi capability `tts.synthesize@1` qua `capability_run` với provider khả dụng: `tts.piper` (mặc định giọng `vi_VN-vais1000-medium`) hoặc `tts.vieneu` (các giọng `Bình`, `Mai`, `Nam`, `Nữ`). Không dùng provider legacy.
+- **Provider đúng:** Gọi capability `tts.synthesize@1` qua `capability_run` với provider khả dụng: `tts.piper` (mặc định tối ưu tốc độ CPU, giọng `vi_VN-vais1000-medium`) hoặc `tts.vieneu` (chất lượng cao, các giọng `Thanh Bình`, `Mai Anh`, `Minh Đức`, `Trúc Ly` hoặc alias `Bình`, `Mai`, `Nam`, `Nữ`). Không dùng provider legacy.
 - **Quy tắc viết lời thuyết minh tự nhiên:**
   - **Độ dài câu:** Mỗi câu ngắn gọn, tối đa ≤ 20 từ để giữ hơi thở tự nhiên.
   - **Ngắt nhịp lấy hơi:** Đặt dấu phẩy `,` ở đúng chỗ ngắt nghỉ lấy hơi; mỗi câu chỉ truyền đạt một ý trọn vẹn; tránh dùng ngoặc đơn/kép `( )`, `[ ]` hay ký hiệu rườm rà.
   - **Phân chia segment:** Mỗi phân cảnh (segment) chỉ nên dài 1–2 câu tương ứng với một tệp âm thanh WAV.
   - **Thẻ ngắt chủ động:** Dùng thẻ `[ngắt x]` (ví dụ `[ngắt 0.7]` giây) trước các ý nhấn mạnh quan trọng hoặc ngay sau câu hỏi để tạo khoảng dừng thuyết phục người xem.
-  - **Tốc độ nói (`speed`):** Khuyến nghị thiết lập `speed` từ 0.85 – 0.95 (mặc định 0.90 cho tiếng Việt khi không truyền).
-  - **Kiểm soát nhịp độ sau tổng hợp:** Lấy số tiếng (mỗi từ đơn tiếng Việt) của lời thoại gốc chia cho `duration_seconds` trả về (đã gồm khoảng lặng dấu câu). Nhịp thuyết minh tốt khoảng 2,8 – 3,4 tiếng/giây (số và ngày được đọc thành nhiều tiếng hơn nên đoạn nhiều số sẽ thấp hơn). Chỉ khi > 3,6 tiếng/giây mới giảm `speed` 0,05 (tối thiểu 0,8) và tổng hợp lại một lần; nếu vẫn nhanh, viết lại câu ngắn hơn hoặc thêm dấu phẩy/`[ngắt x]` thay vì giảm tiếp.
+  - **Tốc độ nói (`speed`):** Mặc định hệ thống tự động thiết lập `speed: 0.76` cho tiếng Việt khi không truyền `speed` (kết hợp chuẩn hoá từ ngữ, ngắt dấu câu và thuật toán bù tốc độ thật bằng atempo để đạt nhịp chuẩn ≈ 3,2 tiếng/giây). Nếu muốn chỉnh tay, khuyến nghị thiết lập `speed` từ 0.75 – 0.90.
+  - **Kiểm soát nhịp độ sau tổng hợp:** Đọc trực tiếp hai trường `syllables_per_second` và `effective_speed` được hệ thống tính toán và trả về sẵn trong kết quả TTS. Nhịp thuyết minh chuẩn đạt khoảng 3,0 – 3,4 tiếng/giây (mục tiêu mặc định ≈ 3,2 tiếng/giây). Chỉ khi `syllables_per_second` > 3,5 tiếng/giây mới cần giảm `speed` xuống 0,72 – 0,75 và tổng hợp lại một lần; nếu vẫn nhanh, viết lại câu ngắn hơn hoặc thêm dấu phẩy/`[ngắt x]` thay vì giảm tiếp.
 - **Lưu trữ asset:** Đảm bảo đầu ra âm thanh định dạng `.wav` được lưu trữ vào thư mục asset của project (`projects/<slug>/assets/vo/`) để sẵn sàng cho bước dựng timeline.
 
 ### 3. Lập danh sách cảnh & Tư liệu (Shot List, Media & B-Roll)
