@@ -563,10 +563,219 @@ pub fn resolve_caption_font(style_font: Option<&str>) -> Option<String> {
     None
 }
 
+/// Measurement statistics from FFmpeg loudnorm pass 1 (`print_format=json`).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct LoudnormMeasurement {
+    pub input_i: String,
+    pub input_tp: String,
+    pub input_lra: String,
+    pub input_thresh: String,
+    pub target_offset: String,
+}
+
+/// Parse loudnorm JSON measurement output from FFmpeg stderr.
+///
+/// FFmpeg loudnorm prints a JSON object containing `input_i`, `input_tp`, `input_lra`,
+/// `input_thresh`, and `target_offset` to stderr. This function finds the JSON block
+/// even when surrounded by other FFmpeg log lines.
+pub fn parse_loudnorm_measurement(stderr: &str) -> Option<LoudnormMeasurement> {
+    for (start, _) in stderr.rmatch_indices('{') {
+        if let Some(end) = stderr[start..].find('}') {
+            let json_str = &stderr[start..=start + end];
+            if json_str.contains("input_i") && json_str.contains("target_offset") {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    let val_str = |key: &str| -> Option<String> {
+                        match v.get(key)? {
+                            serde_json::Value::String(s) => Some(s.clone()),
+                            serde_json::Value::Number(n) => Some(n.to_string()),
+                            _ => None,
+                        }
+                    };
+                    let input_i = val_str("input_i")?;
+                    let input_tp = val_str("input_tp")?;
+                    let input_lra = val_str("input_lra")?;
+                    let input_thresh = val_str("input_thresh")?;
+                    let target_offset = val_str("target_offset")?;
+                    return Some(LoudnormMeasurement {
+                        input_i,
+                        input_tp,
+                        input_lra,
+                        input_thresh,
+                        target_offset,
+                    });
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Format the loudnorm filter string for the render pass.
+///
+/// If a measurement is provided, formats two-pass loudnorm:
+/// `[amix]loudnorm=I={lufs}:TP=-1.5:LRA=11:measured_I={input_i}:measured_TP={input_tp}:measured_LRA={input_lra}:measured_thresh={input_thresh}:offset={target_offset}:linear=true,aresample=48000[a]`
+/// Otherwise, falls back to single-pass dynamic loudnorm:
+/// `[amix]loudnorm=I={lufs}:TP=-1.5:LRA=11,aresample=48000[a]`
+pub fn format_loudnorm_filter(lufs: f64, measurement: Option<&LoudnormMeasurement>) -> String {
+    if let Some(m) = measurement {
+        format!(
+            "[amix]loudnorm=I={lufs}:TP=-1.5:LRA=11:measured_I={}:measured_TP={}:measured_LRA={}:measured_thresh={}:offset={}:linear=true,aresample=48000[a]",
+            m.input_i, m.input_tp, m.input_lra, m.input_thresh, m.target_offset
+        )
+    } else {
+        format!("[amix]loudnorm=I={lufs}:TP=-1.5:LRA=11,aresample=48000[a]")
+    }
+}
+
+/// Build FFmpeg arguments for pass 1 audio loudness measurement.
+///
+/// Takes only the audio clips from the timeline, builds the `atrim/adelay/amix` chain,
+/// attaches `loudnorm=I={lufs}:TP=-1.5:LRA=11:print_format=json`, and outputs to `-f null -`.
+pub fn build_loudnorm_measure_ffmpeg_args(
+    timeline_doc: &crate::timeline::TimelineDoc,
+) -> Option<Vec<String>> {
+    let lufs = timeline_doc.loudness_lufs?;
+
+    let mut audio_clips = Vec::new();
+    for track in timeline_doc
+        .tracks
+        .iter()
+        .filter(|t| t.kind == crate::timeline::TrackKind::Audio)
+    {
+        for clip in &track.clips {
+            audio_clips.push(clip);
+        }
+    }
+
+    if audio_clips.is_empty() {
+        return None;
+    }
+
+    let mut args = vec!["-y".into()];
+    for clip in &audio_clips {
+        args.extend_from_slice(&["-i".into(), strip_verbatim(Path::new(&clip.source))]);
+    }
+
+    let mix_out = "amix";
+    let mut a_filter_parts = Vec::new();
+    for (j, clip) in audio_clips.iter().enumerate() {
+        let atrim = format!(
+            "[{}:a]atrim=start={}:duration={},asetpts=PTS-STARTPTS",
+            j, clip.in_point, clip.duration
+        );
+        let start_ms = (clip.start * 1000.0).round() as u64;
+        if audio_clips.len() == 1 {
+            if start_ms > 0 {
+                a_filter_parts.push(format!(
+                    "{},adelay={}|{}[{}]",
+                    atrim, start_ms, start_ms, mix_out
+                ));
+            } else {
+                a_filter_parts.push(format!("{}[{}]", atrim, mix_out));
+            }
+        } else {
+            if start_ms > 0 {
+                a_filter_parts.push(format!(
+                    "{},adelay={}|{}[a{}]",
+                    atrim, start_ms, start_ms, j
+                ));
+            } else {
+                a_filter_parts.push(format!("{}[a{}]", atrim, j));
+            }
+        }
+    }
+
+    if audio_clips.len() > 1 {
+        let mut mix_inputs = String::new();
+        for j in 0..audio_clips.len() {
+            mix_inputs.push_str(&format!("[a{}]", j));
+        }
+        a_filter_parts.push(format!(
+            "{}amix=inputs={}:duration=longest:dropout_transition=0[{}]",
+            mix_inputs,
+            audio_clips.len(),
+            mix_out
+        ));
+    }
+
+    a_filter_parts.push(format!(
+        "[amix]loudnorm=I={lufs}:TP=-1.5:LRA=11:print_format=json"
+    ));
+
+    let filter_graph = a_filter_parts.join(";");
+    args.extend_from_slice(&[
+        "-vn".into(),
+        "-filter_complex".into(),
+        filter_graph,
+        "-f".into(),
+        "null".into(),
+        "-".into(),
+    ]);
+
+    Some(args)
+}
+
+/// Run pass 1 audio loudness measurement using FFmpeg.
+///
+/// Returns `Some(LoudnormMeasurement)` if audio exists and measurement succeeds.
+/// If measurement fails or stderr cannot be parsed, logs a warning and returns `None`.
+pub fn measure_audio_loudnorm(
+    ffmpeg_path: &Path,
+    timeline_doc: &crate::timeline::TimelineDoc,
+    cwd: &Path,
+) -> Option<LoudnormMeasurement> {
+    let args = build_loudnorm_measure_ffmpeg_args(timeline_doc)?;
+    let mut cmd = std::process::Command::new(ffmpeg_path);
+    cmd.args(&args).current_dir(cwd);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let output = match cmd.output() {
+        Ok(out) => out,
+        Err(e) => {
+            tracing::warn!("Không thể chạy ffmpeg đo âm lượng pass 1: {e}");
+            return None;
+        }
+    };
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() {
+        tracing::warn!(
+            "FFmpeg đo âm lượng pass 1 thất bại (mã lỗi {:?}): {}",
+            output.status.code(),
+            stderr.chars().take(300).collect::<String>()
+        );
+        return None;
+    }
+
+    match parse_loudnorm_measurement(&stderr) {
+        Some(m) => Some(m),
+        None => {
+            tracing::warn!(
+                "Không parse được JSON loudnorm từ ffmpeg stderr: {}",
+                stderr.chars().take(300).collect::<String>()
+            );
+            None
+        }
+    }
+}
+
 /// Build an FFmpeg filtergraph and arguments for rendering a `timeline.json` document to MP4 H.264/AAC.
 pub fn build_timeline_ffmpeg_args(
     timeline_doc: &crate::timeline::TimelineDoc,
     output_file: &Path,
+) -> Result<(Vec<String>, String)> {
+    build_timeline_ffmpeg_args_measured(timeline_doc, output_file, None)
+}
+
+/// Build an FFmpeg filtergraph and arguments for rendering a `timeline.json` document to MP4 H.264/AAC,
+/// with optional pass 1 loudnorm measurement for two-pass loudness normalization.
+pub fn build_timeline_ffmpeg_args_measured(
+    timeline_doc: &crate::timeline::TimelineDoc,
+    output_file: &Path,
+    loudnorm: Option<&LoudnormMeasurement>,
 ) -> Result<(Vec<String>, String)> {
     // 0. Check for SVG sources: ffmpeg usually cannot decode them — reject with a clear Vietnamese error
     for track in timeline_doc
@@ -938,10 +1147,7 @@ pub fn build_timeline_ffmpeg_args(
         }
 
         if let Some(lufs) = timeline_doc.loudness_lufs {
-            // Single-pass loudnorm resamples internally (192 kHz); bring it back to 48 kHz.
-            a_filter_parts.push(format!(
-                "[amix]loudnorm=I={lufs}:TP=-1.5:LRA=11,aresample=48000[a]"
-            ));
+            a_filter_parts.push(format_loudnorm_filter(lufs, loudnorm));
         }
 
         filter_graph.push(';');
@@ -1222,6 +1428,17 @@ pub fn build_timeline_concat_ffmpeg_args(
     concat_list_file: &Path,
     output_file: &Path,
 ) -> Result<(Vec<String>, String)> {
+    build_timeline_concat_ffmpeg_args_measured(timeline_doc, concat_list_file, output_file, None)
+}
+
+/// Build FFmpeg filtergraph and arguments for assembling base chunks from a concat demuxer file
+/// with optional pass 1 loudnorm measurement for two-pass loudness normalization.
+pub fn build_timeline_concat_ffmpeg_args_measured(
+    timeline_doc: &crate::timeline::TimelineDoc,
+    concat_list_file: &Path,
+    output_file: &Path,
+    loudnorm: Option<&LoudnormMeasurement>,
+) -> Result<(Vec<String>, String)> {
     let mut args = vec!["-y".into()];
     args.extend_from_slice(&[
         "-threads".into(),
@@ -1477,9 +1694,7 @@ pub fn build_timeline_concat_ffmpeg_args(
             ));
         }
         if let Some(lufs) = timeline_doc.loudness_lufs {
-            a_filter_parts.push(format!(
-                "[amix]loudnorm=I={lufs}:TP=-1.5:LRA=11,aresample=48000[a]"
-            ));
+            a_filter_parts.push(format_loudnorm_filter(lufs, loudnorm));
         }
         if !filter_graph.is_empty() {
             filter_graph.push(';');
@@ -1548,6 +1763,12 @@ pub fn build_timeline_render_job(
         )
     })?;
 
+    let measured_loudnorm = if timeline_doc.loudness_lufs.is_some() {
+        measure_audio_loudnorm(ffmpeg_path, timeline_doc, cwd)
+    } else {
+        None
+    };
+
     let base_clips: Vec<_> = timeline_doc
         .tracks
         .iter()
@@ -1576,11 +1797,19 @@ pub fn build_timeline_render_job(
         }
         std::fs::write(&concat_list_file, list_content)?;
 
-        let (concat_args, _) =
-            build_timeline_concat_ffmpeg_args(timeline_doc, &concat_list_file, output_file)?;
+        let (concat_args, _) = build_timeline_concat_ffmpeg_args_measured(
+            timeline_doc,
+            &concat_list_file,
+            output_file,
+            measured_loudnorm.as_ref(),
+        )?;
         concat_args
     } else {
-        let (direct_args, _) = build_timeline_ffmpeg_args(timeline_doc, output_file)?;
+        let (direct_args, _) = build_timeline_ffmpeg_args_measured(
+            timeline_doc,
+            output_file,
+            measured_loudnorm.as_ref(),
+        )?;
         direct_args
     };
 
@@ -1698,5 +1927,90 @@ mod color_source_tests {
         assert_eq!(color_source_hex("color:#1e88e5:d=999"), None);
         assert_eq!(color_source_hex("color:red"), None);
         assert_eq!(color_source_hex("clips/a.mp4"), None);
+    }
+}
+
+#[cfg(test)]
+mod loudnorm_tests {
+    use super::*;
+
+    #[test]
+    fn parse_loudnorm_measurement_from_sample_stderr() {
+        let sample_stderr = r#"[Parsed_loudnorm_0 @ 00000168075009c0] 
+{
+	"input_i" : "-25.92",
+	"input_tp" : "-2.44",
+	"input_lra" : "20.10",
+	"input_thresh" : "-37.82",
+	"output_i" : "-14.33",
+	"output_tp" : "-1.50",
+	"output_lra" : "3.10",
+	"output_thresh" : "-24.85",
+	"normalization_type" : "dynamic",
+	"target_offset" : "0.33"
+}
+[out#0/null @ 0000016807500780] video:0KiB audio:750KiB subtitle:0KiB
+size=N/A time=00:01:11.30 bitrate=N/A speed=104x elapsed=0:00:00.68"#;
+
+        let parsed = parse_loudnorm_measurement(sample_stderr).expect("parse loudnorm json");
+        assert_eq!(parsed.input_i, "-25.92");
+        assert_eq!(parsed.input_tp, "-2.44");
+        assert_eq!(parsed.input_lra, "20.10");
+        assert_eq!(parsed.input_thresh, "-37.82");
+        assert_eq!(parsed.target_offset, "0.33");
+    }
+
+    #[test]
+    fn parse_loudnorm_measurement_returns_none_for_invalid_stderr() {
+        assert!(parse_loudnorm_measurement("some error occurred without json").is_none());
+        assert!(parse_loudnorm_measurement(r#"{"input_i": "-20"}"#).is_none());
+    }
+
+    #[test]
+    fn format_loudnorm_filter_single_pass_fallback() {
+        let filter = format_loudnorm_filter(-14.0, None);
+        assert_eq!(
+            filter,
+            "[amix]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[a]"
+        );
+    }
+
+    #[test]
+    fn format_loudnorm_filter_two_pass() {
+        let m = LoudnormMeasurement {
+            input_i: "-25.92".into(),
+            input_tp: "-2.44".into(),
+            input_lra: "20.10".into(),
+            input_thresh: "-37.82".into(),
+            target_offset: "0.33".into(),
+        };
+        let filter = format_loudnorm_filter(-14.0, Some(&m));
+        assert_eq!(
+            filter,
+            "[amix]loudnorm=I=-14:TP=-1.5:LRA=11:measured_I=-25.92:measured_TP=-2.44:measured_LRA=20.10:measured_thresh=-37.82:offset=0.33:linear=true,aresample=48000[a]"
+        );
+    }
+
+    #[test]
+    fn build_loudnorm_measure_ffmpeg_args_without_audio_or_lufs() {
+        let doc_no_lufs = crate::timeline::TimelineDoc {
+            version: 1,
+            width: 1920,
+            height: 1080,
+            fps: 30.0,
+            loudness_lufs: None,
+            tracks: vec![],
+        };
+        assert!(build_loudnorm_measure_ffmpeg_args(&doc_no_lufs).is_none());
+
+        let doc_no_audio = crate::timeline::TimelineDoc {
+            version: 1,
+            width: 1920,
+            height: 1080,
+            fps: 30.0,
+            loudness_lufs: Some(-14.0),
+            tracks: vec![],
+        };
+        assert!(build_loudnorm_measure_ffmpeg_args(&doc_no_audio).is_none());
     }
 }

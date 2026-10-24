@@ -34,10 +34,13 @@ pub use render::{
     timeline_schema_hint, RenderOptions, RenderOutcome,
 };
 pub use renderer::{
-    build_html_render_job, build_hyperframes_render_job, build_proxy_job,
-    build_timeline_ffmpeg_args, build_timeline_render_job, calculate_timeline_ram_mb,
-    detect_artboard_size, escape_drawtext_text, escape_ffmpeg_subtitles_path, file_url_for,
-    is_image_source, is_subtitle_file, is_video_source, strip_verbatim,
+    build_html_render_job, build_hyperframes_render_job, build_loudnorm_measure_ffmpeg_args,
+    build_proxy_job, build_timeline_concat_ffmpeg_args, build_timeline_concat_ffmpeg_args_measured,
+    build_timeline_ffmpeg_args, build_timeline_ffmpeg_args_measured, build_timeline_render_job,
+    calculate_timeline_ram_mb, detect_artboard_size, escape_drawtext_text,
+    escape_ffmpeg_subtitles_path, file_url_for, format_loudnorm_filter, is_image_source,
+    is_subtitle_file, is_video_source, measure_audio_loudnorm, parse_loudnorm_measurement,
+    strip_verbatim, LoudnormMeasurement,
 };
 pub use starter::*;
 pub use timeline::{

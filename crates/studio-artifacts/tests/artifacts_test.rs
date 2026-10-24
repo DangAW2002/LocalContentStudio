@@ -2866,7 +2866,10 @@ fn debug_assemble_real_timeline() {
     }
     let list_file = std::env::temp_dir().join("lcs_debug_concat.txt");
     std::fs::write(&list_file, list).unwrap();
-    let (args, _) = build_timeline_concat_ffmpeg_args(&doc, &list_file, &out).unwrap();
+    let loudnorm = measure_audio_loudnorm(&ffmpeg, &doc, &cwd);
+    let (args, _) =
+        build_timeline_concat_ffmpeg_args_measured(&doc, &list_file, &out, loudnorm.as_ref())
+            .unwrap();
     let st = std::process::Command::new(&ffmpeg)
         .args(&args)
         .current_dir(&cwd)
@@ -2874,6 +2877,22 @@ fn debug_assemble_real_timeline() {
         .unwrap();
     assert!(st.success());
     println!("OUT {}", out.display());
+
+    let measure = std::process::Command::new(&ffmpeg)
+        .args(["-hide_banner", "-i"])
+        .arg(&out)
+        .args([
+            "-af",
+            "loudnorm=I=-14:TP=-1.5:LRA=11:print_format=summary",
+            "-f",
+            "null",
+            "-",
+        ])
+        .output()
+        .expect("loudnorm measure failed");
+    let log = String::from_utf8_lossy(&measure.stderr);
+    let summary = &log[log.rfind("Input Integrated:").expect("no summary output")..];
+    println!("=== Measurement summary ===\n{summary}");
 }
 
 fn which_ffmpeg() -> PathBuf {
