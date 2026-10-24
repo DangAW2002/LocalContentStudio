@@ -117,6 +117,9 @@ jobs:
       - name: Install Node dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install FFmpeg on Windows
+        run: choco install ffmpeg --no-progress -y
+
       - name: Run Cargo tests
         run: cargo test --workspace
 

@@ -1314,6 +1314,11 @@ async fn real_timeline_overlay_does_not_extend_duration_beyond_base_track() {
 
 #[test]
 fn test_timeline_build_validation_and_rejection() {
+    let probe = probe_ffprobe();
+    if !probe.available {
+        println!("SKIP: test_timeline_build_validation_and_rejection — ffprobe not available");
+        return;
+    }
     let (_tmp, ws, _proj) = create_test_env();
 
     // 1. Missing audio file

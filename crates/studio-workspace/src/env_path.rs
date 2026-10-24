@@ -6,17 +6,22 @@
 use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::PathBuf;
+#[cfg(windows)]
 use std::sync::Mutex;
+#[cfg(windows)]
 use std::time::{Duration, Instant};
 
 /// Cache TTL for refreshed PATH (5 seconds).
+#[cfg(windows)]
 const CACHE_TTL: Duration = Duration::from_secs(5);
 
+#[cfg(windows)]
 struct PathCache {
     last_updated: Instant,
     paths: Vec<PathBuf>,
 }
 
+#[cfg(windows)]
 static CACHE: Mutex<Option<PathCache>> = Mutex::new(None);
 
 /// Clean and normalize a path entry for PATH search:
