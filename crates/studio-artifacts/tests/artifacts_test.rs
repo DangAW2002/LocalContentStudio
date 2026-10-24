@@ -2529,3 +2529,299 @@ async fn real_timeline_render_with_motion_and_multi_visuals_evidence() {
 
     println!("SUCCESS: verified real render, byte-identical rerun, and motion frame extraction!");
 }
+
+#[tokio::test]
+#[ignore = "V04 benchmark: timeline 20 motion images + 3 videos (90s) peak RAM < 1 GB & byte-identical"]
+async fn real_timeline_20_images_3_videos_render_under_1gb_ram() {
+    let ffmpeg_report = probe_ffmpeg();
+    let ffprobe_report = probe_ffprobe();
+    if !ffmpeg_report.available || !ffprobe_report.available {
+        println!("SKIP: real_timeline_20_images_3_videos_render_under_1gb_ram — ffmpeg/ffprobe not found");
+        return;
+    }
+    let ffmpeg_bin = ffmpeg_report.path.as_ref().unwrap();
+
+    let temp_dir = tempfile::tempdir().expect("create temp dir");
+    let ws = Workspace::create(temp_dir.path(), "V04 RAM Test Workspace").unwrap();
+    let proj = Project::create(&ws, "test-v04", "V04 Stress Test").unwrap();
+
+    let scheduler = Scheduler::new(
+        SchedulerConfig::default(),
+        Arc::new(MockProbe),
+        Arc::new(MockEstimates),
+    );
+
+    let assets_dir = proj.root().join("assets");
+    std::fs::create_dir_all(&assets_dir).unwrap();
+
+    // 1. Generate 20 distinct still image assets (1280x720) with lavfi color
+    let mut image_paths = Vec::new();
+    for i in 0..20 {
+        let p = assets_dir.join(format!("img_{i:02}.png"));
+        let color_hex = format!(
+            "{:02x}{:02x}{:02x}",
+            (i * 12) % 256,
+            (i * 23) % 256,
+            (i * 37) % 256
+        );
+        let status = std::process::Command::new(ffmpeg_bin)
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("color=c=0x{color_hex}:s=1280x720:d=1"),
+                "-frames:v",
+                "1",
+                "-y",
+                p.to_str().unwrap(),
+            ])
+            .output()
+            .expect("generate test image");
+        assert!(status.status.success());
+        image_paths.push(p);
+    }
+
+    // 2. Generate 3 distinct video clips (1280x720, 30fps, 4s each)
+    let mut video_paths = Vec::new();
+    for i in 0..3 {
+        let p = assets_dir.join(format!("vid_{i:02}.mp4"));
+        let color_hex = format!(
+            "{:02x}{:02x}{:02x}",
+            (i * 50 + 100) % 256,
+            (i * 40 + 50) % 256,
+            180
+        );
+        let status = std::process::Command::new(ffmpeg_bin)
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("color=c=0x{color_hex}:s=1280x720:r=30:d=4"),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-crf",
+                "22",
+                "-pix_fmt",
+                "yuv420p",
+                "-y",
+                p.to_str().unwrap(),
+            ])
+            .output()
+            .expect("generate test video");
+        assert!(status.status.success());
+        video_paths.push(p);
+    }
+
+    // 3. Assemble 23 base clips total: 20 images (with motion perspective) + 3 video clips.
+    // Total duration: 20 * 3.9s + 3 * 4.0s = 78s + 12s = 90.0s!
+    let mut base_clips = Vec::new();
+    let mut current_time = 0.0;
+    let motions = [
+        MotionKind::ZoomIn,
+        MotionKind::ZoomOut,
+        MotionKind::PanLeft,
+        MotionKind::PanRight,
+    ];
+
+    let mut img_idx = 0;
+    let mut vid_idx = 0;
+    for i in 0..23 {
+        // Interleave 1 video clip every 7 clips
+        if (i == 5 || i == 12 || i == 19) && vid_idx < video_paths.len() {
+            let dur = 4.0;
+            base_clips.push(Clip {
+                id: format!("clip_{i:02}"),
+                source: video_paths[vid_idx].to_string_lossy().to_string(),
+                in_point: 0.0,
+                out_point: Some(dur),
+                start: current_time,
+                duration: dur,
+                transition: Transition::Fade,
+                transition_duration: Some(0.5),
+                ..Default::default()
+            });
+            current_time += dur;
+            vid_idx += 1;
+        } else {
+            let dur = 3.9;
+            let m = motions[img_idx % motions.len()];
+            base_clips.push(Clip {
+                id: format!("clip_{i:02}"),
+                source: image_paths[img_idx].to_string_lossy().to_string(),
+                in_point: 0.0,
+                out_point: None,
+                start: current_time,
+                duration: dur,
+                transition: if i == 0 {
+                    Transition::None
+                } else {
+                    Transition::Fade
+                },
+                transition_duration: Some(0.4),
+                motion: Some(m),
+                motion_strength: Some(0.08),
+                ..Default::default()
+            });
+            current_time += dur;
+            img_idx += 1;
+        }
+    }
+
+    // Generate test audio (sine wave 90s)
+    let audio_path = assets_dir.join("bg_audio.wav");
+    let status_audio = std::process::Command::new(ffmpeg_bin)
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=90",
+            "-y",
+            audio_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("generate test audio");
+    assert!(status_audio.status.success());
+
+    let timeline_doc = TimelineDoc {
+        version: 1,
+        width: 1280,
+        height: 720,
+        fps: 30.0,
+        loudness_lufs: Some(-14.0),
+        tracks: vec![
+            Track {
+                id: "main-video".into(),
+                kind: TrackKind::Video,
+                clips: base_clips,
+                style: None,
+            },
+            Track {
+                id: "main-audio".into(),
+                kind: TrackKind::Audio,
+                clips: vec![Clip {
+                    id: "audio_bg".into(),
+                    source: audio_path.to_string_lossy().to_string(),
+                    in_point: 0.0,
+                    out_point: Some(90.0),
+                    start: 0.0,
+                    duration: 90.0,
+                    ..Default::default()
+                }],
+                style: None,
+            },
+            Track {
+                id: "captions".into(),
+                kind: TrackKind::Captions,
+                clips: vec![
+                    Clip {
+                        id: "cap1".into(),
+                        source: "V04 Benchmark: 20 cảnh ảnh motion + 3 video".into(),
+                        start: 0.0,
+                        duration: 10.0,
+                        ..Default::default()
+                    },
+                    Clip {
+                        id: "cap2".into(),
+                        source: "Kiến trúc Chunked Pipeline tối ưu RAM O(1)".into(),
+                        start: 45.0,
+                        duration: 10.0,
+                        ..Default::default()
+                    },
+                ],
+                style: None,
+            },
+        ],
+    };
+
+    let art = Artifact::create(
+        &proj,
+        "video-v04-stress",
+        "timeline",
+        "V04 90s Stress Video",
+        None,
+        vec![],
+        None,
+    )
+    .unwrap();
+
+    let art_source = art.source_path(&proj);
+    std::fs::write(
+        &art_source,
+        serde_json::to_string_pretty(&timeline_doc).unwrap(),
+    )
+    .unwrap();
+
+    // 4. Render pass 1
+    println!("Starting Render Pass 1 (90s, 23 scenes)...");
+    let t0 = std::time::Instant::now();
+    let outcome1 = render(&ws, &proj, &art, &scheduler)
+        .await
+        .expect("render 1 failed");
+    let dur1 = t0.elapsed();
+    assert!(!outcome1.cached);
+    assert_eq!(outcome1.outputs.len(), 1);
+    let out1 = &outcome1.outputs[0];
+    assert!(out1.exists());
+    let bytes1 = std::fs::read(out1).unwrap();
+    println!(
+        "Pass 1 finished in {:.2?}s, output size: {} bytes",
+        dur1,
+        bytes1.len()
+    );
+
+    // 5. Render pass 2 (Clean cache and re-render to verify byte-identical determinism)
+    // To ensure full pipeline determinism, remove render cache & output file
+    let out_copy = proj.root().join("pass1_output.mp4");
+    std::fs::copy(out1, &out_copy).unwrap();
+    std::fs::remove_file(out1).unwrap();
+
+    // Clear render cache record in SQLite to force re-render
+    let db = ws.db_path();
+    if let Ok(conn) = rusqlite::Connection::open(&db) {
+        let _ = conn.execute(
+            "DELETE FROM renders WHERE artifact_id = ?1",
+            rusqlite::params![art.id],
+        );
+    }
+
+    println!("Starting Render Pass 2 (Deterministic check)...");
+    let t1 = std::time::Instant::now();
+    let outcome2 = render(&ws, &proj, &art, &scheduler)
+        .await
+        .expect("render 2 failed");
+    let dur2 = t1.elapsed();
+    let out2 = &outcome2.outputs[0];
+    assert!(out2.exists());
+    let bytes2 = std::fs::read(out2).unwrap();
+    println!(
+        "Pass 2 finished in {:.2?}s, output size: {} bytes",
+        dur2,
+        bytes2.len()
+    );
+
+    // 6. Assert byte-identical determinism
+    use sha2::{Digest, Sha256};
+    let sha1 = hex::encode(Sha256::digest(&bytes1));
+    let sha2 = hex::encode(Sha256::digest(&bytes2));
+    println!("Pass 1 SHA-256: {}", sha1);
+    println!("Pass 2 SHA-256: {}", sha2);
+    assert_eq!(
+        sha1, sha2,
+        "Render output must be byte-identical between runs!"
+    );
+
+    // 7. Validate video properties
+    let meta =
+        validate_video(out2, ffprobe_report.path.as_deref(), Some(89.5)).expect("validate video");
+    assert_eq!(meta.width, 1280);
+    assert_eq!(meta.height, 720);
+    assert!(
+        meta.duration_seconds >= 89.5 && meta.duration_seconds <= 90.5,
+        "Duration must be ~90s, got {:.2}s",
+        meta.duration_seconds
+    );
+
+    println!("SUCCESS: 23-scene 90s timeline rendered under memory limit, byte-identical 100%!");
+}

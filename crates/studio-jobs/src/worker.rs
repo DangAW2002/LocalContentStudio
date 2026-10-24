@@ -56,16 +56,19 @@ impl Worker for LocalWorker {
             let start_time = Instant::now();
             let tool_id = spec.tool_id.clone();
 
-            // Calculate effective memory limit: declared memory_limit_mb, or 1.5x estimate
+            // Calculate effective memory limit: declared memory_limit_mb, or 1.5x estimate.
+            // Historical EWMA estimate must not lower the limit below the declared baseline.
             let estimated_ram = self
                 .estimate_store
                 .get_peak_ram_mb(&tool_id)
                 .unwrap_or(spec.resources.ram_mb)
                 .max(spec.resources.ram_mb);
 
+            let from_estimate = ((estimated_ram as f64) * 1.5).ceil() as u64;
             let effective_mem_limit = spec
                 .memory_limit_mb
-                .or_else(|| Some(((estimated_ram as f64) * 1.5).ceil() as u64));
+                .map(|decl| decl.max(from_estimate))
+                .or(Some(from_estimate));
 
             #[cfg(windows)]
             let job_obj = match JobObject::create(effective_mem_limit, spec.priority) {
