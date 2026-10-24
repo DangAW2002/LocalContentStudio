@@ -30,9 +30,13 @@ echo "==> [4/4] Biên dịch studio-tauri (release mode, CARGO_BUILD_JOBS=${CARG
 cargo build --release -p studio-tauri
 
 mkdir -p "$HOME/.local/bin"
-cp "$REPO_ROOT/target/release/studio-tauri" "$HOME/.local/bin/studio-tauri"
-chmod +x "$HOME/.local/bin/studio-tauri"
+# Chép ra file tạm rồi đổi tên: ghi đè trực tiếp lỗi "Text file busy" khi service đang chạy.
+cp "$REPO_ROOT/target/release/studio-tauri" "$HOME/.local/bin/studio-tauri.new"
+chmod +x "$HOME/.local/bin/studio-tauri.new"
+mv -f "$HOME/.local/bin/studio-tauri.new" "$HOME/.local/bin/studio-tauri"
 
 echo "==> Thành công! Đã cài đặt binary tại: $HOME/.local/bin/studio-tauri"
-echo "==> Kiểm tra phiên bản:"
-"$HOME/.local/bin/studio-tauri" --help 2>&1 || true
+echo "==> Commit: $(git -C "$REPO_ROOT" log --oneline -1)"
+if systemctl --user is-active --quiet studio-web 2>/dev/null; then
+    echo "==> Service studio-web đang chạy bản cũ; nạp bản mới: systemctl --user restart studio-web"
+fi
