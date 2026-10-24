@@ -242,6 +242,10 @@ fn build_context(
                 .into(),
         );
         lines.push(
+            "Trước khi làm, gọi skill_list (MCP \"studio\") để xem skill của kit, rồi đọc skill phù hợp bằng skill_get và làm theo; tệp tham chiếu trong skill đọc bằng skill_get với tham số file."
+                .into(),
+        );
+        lines.push(
             if agy_full_access {
                 "Bạn được chạy lệnh shell nhưng chỉ trong thư mục workspace hiện tại, không xoá/sửa tệp ngoài workspace."
             } else {
@@ -381,8 +385,9 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
     let modules = meta.as_ref().map(|m| m.modules.clone()).unwrap_or_default();
     let is_claude = thread.engine == "claude";
 
-    // Skills of the project's kit/modules, materialized per turn (ADR-010 §4).
-    let plugin_dir = if is_claude {
+    // Skills of the project's kit/modules, materialized per turn (ADR-010 §4). Claude loads them
+    // via --plugin-dir; every engine can read them through the MCP skill_list/skill_get tools.
+    let plugin_dir = {
         let dir = ws.cache_dir().join("plugins").join(&turn_id);
         match materialize_skills(
             &state,
@@ -397,8 +402,6 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
                 None
             }
         }
-    } else {
-        None
     };
 
     let note_key = format!("thread.note.{thread_id}");
@@ -455,7 +458,7 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
         session,
         model: thread.model.clone(),
         mcp: if is_claude { mcp } else { None },
-        plugin_dir: plugin_dir.clone(),
+        plugin_dir: if is_claude { plugin_dir.clone() } else { None },
         permission_prompt_tool: is_claude.then(|| "mcp__studio__approve".to_string()),
         append_system_prompt: Some(context),
         max_budget_usd: None,
@@ -484,6 +487,9 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
             )?;
             state.tokens.revoke(&token);
             state.broker.unregister_turn(&turn_id);
+            if let Some(dir) = &plugin_dir {
+                let _ = std::fs::remove_dir_all(dir);
+            }
             return Err(CmdError::msg(msg));
         }
     };
@@ -994,6 +1000,7 @@ mod tests {
         assert!(!agy_full_ctx.contains("lệnh shell bị chặn"));
         assert!(agy_ctx.contains("MCP server \"studio\""));
         assert!(agy_ctx.contains("call_mcp_tool"));
+        assert!(agy_ctx.contains("skill_list"));
         assert!(agy_ctx.contains("ServerName \"studio\""));
         assert!(agy_ctx.contains("Chỉ thao tác bên trong thư mục workspace hiện tại."));
         assert!(agy_ctx.contains("Nếu MCP server \"studio\" không tải được hoặc báo lỗi, phải dừng lại và báo lỗi ngay, không đọc tệp ở nơi khác."));

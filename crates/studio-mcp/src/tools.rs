@@ -36,6 +36,8 @@ pub fn definitions() -> Vec<Value> {
         tool("checkpoint_list", "Liệt kê checkpoint của workspace.", json!({}), &[]),
         tool("checkpoint_restore", "Khôi phục workspace về một checkpoint.", json!({ "id": s("id checkpoint") }), &["id"]),
         tool("job_status", "Trạng thái các job đang chờ/chạy/xong.", json!({}), &[]),
+        tool("skill_list", "Liệt kê skill (quy trình, quy tắc) của kit/module trong project của lượt này: tên, mô tả, các tệp tham chiếu.", json!({}), &[]),
+        tool("skill_get", "Đọc một skill của lượt này: SKILL.md, hoặc một tệp tham chiếu bên trong skill (tham số file, vd refs/shot-list/SKILL.md).", json!({ "name": s("tên skill trong skill_list"), "file": s("đường dẫn tương đối trong skill, bỏ trống = SKILL.md") }), &["name"]),
         tool("catalog_enable", "Bật thêm một module catalog (skill) cho project hiện tại.", json!({ "module": s("id module, vd render.hyperframes") }), &["module"]),
         tool("capability_search", "Tìm capability theo từ khóa (vd tts, render, ảnh).", json!({ "query": s("từ khóa") }), &["query"]),
         tool("capability_describe", "Mô tả một capability: schema vào/ra và các provider.", json!({ "id": s("vd tts.synthesize@1") }), &["id"]),
@@ -375,6 +377,12 @@ pub async fn call(
             serde_json::to_value(state.scheduler.snapshot().await).map_err(|e| e.to_string())?
         }
         "catalog_enable" => catalog_enable(state, ctx, &ws, required(args, "module")?)?,
+        "skill_list" => skill_list(&turn_skills_dir(&ws, ctx))?,
+        "skill_get" => skill_get(
+            &turn_skills_dir(&ws, ctx),
+            required(args, "name")?,
+            arg(args, "file"),
+        )?,
         "capability_search" => {
             let q = required(args, "query")?.to_lowercase();
             let reg = Registry::load(&ws);
@@ -737,6 +745,81 @@ fn catalog_enable(
     Ok(
         json!({ "project": slug, "modules": meta.modules, "note": "Module có hiệu lực từ lượt tiếp theo." }),
     )
+}
+
+/// Skills materialized for this turn by the host (`.studio/cache/plugins/<turn>/skills`).
+fn turn_skills_dir(ws: &Workspace, ctx: &TurnContext) -> PathBuf {
+    ws.cache_dir()
+        .join("plugins")
+        .join(&ctx.turn_id)
+        .join("skills")
+}
+
+/// `name`/`description` from a SKILL.md front matter.
+fn skill_front_matter(text: &str) -> (Option<String>, Option<String>) {
+    let mut name = None;
+    let mut description = None;
+    let mut lines = text.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        return (None, None);
+    }
+    for line in lines {
+        if line.trim() == "---" {
+            break;
+        }
+        if let Some(v) = line.strip_prefix("name:") {
+            name = Some(v.trim().to_string());
+        } else if let Some(v) = line.strip_prefix("description:") {
+            description = Some(v.trim().to_string());
+        }
+    }
+    (name, description)
+}
+
+fn skill_list(root: &Path) -> Result<Value, String> {
+    let mut skills = Vec::new();
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(root)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .collect()
+        })
+        .unwrap_or_default();
+    dirs.sort();
+    for dir in dirs {
+        let Some(name) = dir.file_name().map(|n| n.to_string_lossy().to_string()) else {
+            continue;
+        };
+        let text = std::fs::read_to_string(dir.join("SKILL.md")).unwrap_or_default();
+        let (_, description) = skill_front_matter(&text);
+        let mut files = Vec::new();
+        collect_files(&dir, &mut files);
+        let mut files: Vec<String> = files
+            .iter()
+            .filter_map(|p| p.strip_prefix(&dir).ok())
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .filter(|p| p != "SKILL.md")
+            .collect();
+        files.sort();
+        skills.push(json!({ "name": name, "description": description, "files": files }));
+    }
+    Ok(json!({ "skills": skills }))
+}
+
+fn skill_get(root: &Path, name: &str, file: Option<&str>) -> Result<Value, String> {
+    let file = file.filter(|f| !f.trim().is_empty()).unwrap_or("SKILL.md");
+    let not_found =
+        || format!("Không có skill \"{name}\" (tệp {file}) trong lượt này; gọi skill_list.");
+    let base = root.join(name).canonicalize().map_err(|_| not_found())?;
+    let root = root.canonicalize().map_err(|_| not_found())?;
+    let path = base.join(file).canonicalize().map_err(|_| not_found())?;
+    // Names/files must stay inside this turn's skill directory (no `..`, no absolute paths).
+    if !base.starts_with(&root) || base == root || !path.starts_with(&base) || !path.is_file() {
+        return Err(not_found());
+    }
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("Không đọc được tệp: {e}"))?;
+    Ok(json!({ "name": name, "file": file, "text": text }))
 }
 
 /// Adds `duration_seconds` next to a WAV `audio_path` in a tool result, so agents can plan a
@@ -1631,6 +1714,59 @@ fn resolve_artifact_target(
 mod tests {
     use super::*;
     use std::path::Path;
+
+    fn skills_fixture() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        let skills = tmp.path().join("skills");
+        std::fs::create_dir_all(skills.join("youtube-pipeline/refs/shots")).unwrap();
+        std::fs::write(
+            skills.join("youtube-pipeline/SKILL.md"),
+            "---
+name: youtube-pipeline
+description: Quy trình video
+---
+# Body
+",
+        )
+        .unwrap();
+        std::fs::write(skills.join("youtube-pipeline/refs/shots/SKILL.md"), "shots").unwrap();
+        std::fs::write(tmp.path().join("secret.txt"), "outside").unwrap();
+        tmp
+    }
+
+    #[test]
+    fn test_skill_list_and_get() {
+        let tmp = skills_fixture();
+        let root = tmp.path().join("skills");
+        let list = skill_list(&root).unwrap();
+        assert_eq!(list["skills"][0]["name"], "youtube-pipeline");
+        assert_eq!(list["skills"][0]["description"], "Quy trình video");
+        assert_eq!(list["skills"][0]["files"], json!(["refs/shots/SKILL.md"]));
+
+        let main = skill_get(&root, "youtube-pipeline", None).unwrap();
+        assert!(main["text"].as_str().unwrap().contains("# Body"));
+        let sub = skill_get(&root, "youtube-pipeline", Some("refs/shots/SKILL.md")).unwrap();
+        assert_eq!(sub["text"], "shots");
+    }
+
+    #[test]
+    fn test_skill_get_stays_inside_turn_skills() {
+        let tmp = skills_fixture();
+        let root = tmp.path().join("skills");
+        assert!(skill_get(&root, "youtube-pipeline", Some("../../secret.txt")).is_err());
+        assert!(skill_get(&root, "..", Some("secret.txt")).is_err());
+        assert!(skill_get(&root, ".", Some("youtube-pipeline/SKILL.md")).is_err());
+        assert!(skill_get(&root, "missing", None).is_err());
+        let abs = tmp.path().join("secret.txt");
+        assert!(skill_get(&root, "youtube-pipeline", abs.to_str()).is_err());
+    }
+
+    #[test]
+    fn test_skill_list_without_materialized_dir_is_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let list = skill_list(&tmp.path().join("nope")).unwrap();
+        assert_eq!(list["skills"], json!([]));
+    }
 
     #[test]
     fn test_normalise_path_str_verbatim() {
