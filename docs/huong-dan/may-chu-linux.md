@@ -158,7 +158,7 @@ Dịch vụ sẽ khởi động lại mượt mà trong vòng 2–3 giây. Dữ 
 
 ## 9. Tích hợp liên tục (CI) & Kiểm tra tự động
 
-Mọi commit đẩy lên các nhánh chính (`studio-v2`, `master`) và Pull Request đều được kiểm tra tự động qua GitHub Actions trên cả hai môi trường:
+Mọi commit đẩy lên các nhánh chính (`main`, `studio-v2`, `master`) và Pull Request đều được kiểm tra tự động qua GitHub Actions trên cả hai môi trường:
 - **Linux (Ubuntu 24.04):** Chạy toàn bộ cổng chất lượng (`cargo fmt`, `clippy -D warnings`, unit test, UI build/test, biên dịch release `studio-tauri` và `studio-mcp`).
 - **Windows (windows-latest):** Chạy unit test workspace và UI test trên Windows.
 
