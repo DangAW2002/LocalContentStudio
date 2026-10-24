@@ -2866,9 +2866,9 @@ fn debug_assemble_real_timeline() {
     }
     let list_file = std::env::temp_dir().join("lcs_debug_concat.txt");
     std::fs::write(&list_file, list).unwrap();
-    let loudnorm = measure_audio_loudnorm(&ffmpeg, &doc, &cwd);
+    let audio_norm = measure_audio_normalization(&ffmpeg, &doc, &cwd);
     let (args, _) =
-        build_timeline_concat_ffmpeg_args_measured(&doc, &list_file, &out, loudnorm.as_ref())
+        build_timeline_concat_ffmpeg_args_measured(&doc, &list_file, &out, audio_norm.as_ref())
             .unwrap();
     let st = std::process::Command::new(&ffmpeg)
         .args(&args)
@@ -2881,18 +2881,314 @@ fn debug_assemble_real_timeline() {
     let measure = std::process::Command::new(&ffmpeg)
         .args(["-hide_banner", "-i"])
         .arg(&out)
-        .args([
-            "-af",
-            "loudnorm=I=-14:TP=-1.5:LRA=11:print_format=summary",
-            "-f",
-            "null",
-            "-",
-        ])
+        .args(["-af", "ebur128=peak=true", "-f", "null", "-"])
         .output()
-        .expect("loudnorm measure failed");
+        .expect("ebur128 measure failed");
     let log = String::from_utf8_lossy(&measure.stderr);
-    let summary = &log[log.rfind("Input Integrated:").expect("no summary output")..];
+    let summary = &log[log.rfind("Summary:").expect("no summary output")..];
     println!("=== Measurement summary ===\n{summary}");
+    let i_val = parse_measured_loudness_i(&log).expect("parse final I");
+    let peak_val = parse_ebur128_peak(&log).expect("parse final peak");
+    println!("FINAL MEASURED: I={i_val} LUFS, Peak={peak_val} dBFS");
+    assert!(
+        (i_val - (-14.0)).abs() <= 0.5,
+        "I={i_val} out of range [-14.5, -13.5]"
+    );
+    assert!(peak_val <= -1.0, "peak={peak_val} exceeds -1.0 dBFS");
+}
+
+#[test]
+fn test_overlapping_audio_clips_do_not_hard_clip() {
+    let ffmpeg_report = probe_ffmpeg();
+    if !ffmpeg_report.available {
+        println!("SKIP: test_overlapping_audio_clips_do_not_hard_clip — FFmpeg missing");
+        return;
+    }
+    let ffmpeg = which_ffmpeg();
+    let tmp_dir = tempfile::tempdir().unwrap();
+    let path1 = tmp_dir.path().join("clip1.wav");
+    let path2 = tmp_dir.path().join("clip2.wav");
+    let out_mp4 = tmp_dir.path().join("overlap_out.mp4");
+
+    // Generate two loud clips (0 dBFS sine waves) that play at the same time
+    let s1 = std::process::Command::new(&ffmpeg)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=2",
+            "-c:a",
+            "pcm_s16le",
+        ])
+        .arg(&path1)
+        .status()
+        .unwrap();
+    assert!(s1.success());
+
+    let s2 = std::process::Command::new(&ffmpeg)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:duration=2",
+            "-c:a",
+            "pcm_s16le",
+        ])
+        .arg(&path2)
+        .status()
+        .unwrap();
+    assert!(s2.success());
+
+    let doc = studio_artifacts::timeline::TimelineDoc {
+        version: 1,
+        width: 1280,
+        height: 720,
+        fps: 30.0,
+        loudness_lufs: Some(-14.0),
+        tracks: vec![
+            studio_artifacts::timeline::Track {
+                id: "v".into(),
+                kind: studio_artifacts::timeline::TrackKind::Video,
+                style: None,
+                clips: vec![studio_artifacts::timeline::Clip {
+                    id: "v1".into(),
+                    source: "color:000000".into(),
+                    in_point: 0.0,
+                    out_point: None,
+                    start: 0.0,
+                    duration: 2.0,
+                    transition: studio_artifacts::timeline::Transition::None,
+                    transition_duration: None,
+                    motion: None,
+                    motion_strength: None,
+                    width: None,
+                    height: None,
+                    x: None,
+                    y: None,
+                    opacity: None,
+                }],
+            },
+            studio_artifacts::timeline::Track {
+                id: "a".into(),
+                kind: studio_artifacts::timeline::TrackKind::Audio,
+                style: None,
+                clips: vec![
+                    studio_artifacts::timeline::Clip {
+                        id: "a1".into(),
+                        source: path1.to_string_lossy().to_string(),
+                        in_point: 0.0,
+                        out_point: None,
+                        start: 0.0,
+                        duration: 2.0,
+                        transition: studio_artifacts::timeline::Transition::None,
+                        transition_duration: None,
+                        motion: None,
+                        motion_strength: None,
+                        width: None,
+                        height: None,
+                        x: None,
+                        y: None,
+                        opacity: None,
+                    },
+                    studio_artifacts::timeline::Clip {
+                        id: "a2".into(),
+                        source: path2.to_string_lossy().to_string(),
+                        in_point: 0.0,
+                        out_point: None,
+                        start: 0.5,
+                        duration: 1.5,
+                        transition: studio_artifacts::timeline::Transition::None,
+                        transition_duration: None,
+                        motion: None,
+                        motion_strength: None,
+                        width: None,
+                        height: None,
+                        x: None,
+                        y: None,
+                        opacity: None,
+                    },
+                ],
+            },
+        ],
+    };
+
+    let norm = measure_audio_normalization(&ffmpeg, &doc, tmp_dir.path()).expect("measure norm");
+    let (args, _) = build_timeline_ffmpeg_args_measured(&doc, &out_mp4, Some(&norm)).unwrap();
+    let st = std::process::Command::new(&ffmpeg)
+        .args(&args)
+        .current_dir(tmp_dir.path())
+        .status()
+        .unwrap();
+    assert!(st.success());
+
+    // Measure peak on rendered MP4
+    let measure = std::process::Command::new(&ffmpeg)
+        .args(["-hide_banner", "-i"])
+        .arg(&out_mp4)
+        .args(["-af", "ebur128=peak=true", "-f", "null", "-"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&measure.stderr);
+    let peak = parse_ebur128_peak(&stderr).expect("parse peak");
+    println!("Overlapping clips output peak: {peak} dBFS");
+    assert!(
+        peak <= -1.0,
+        "Overlapping audio peak {peak} dBFS exceeded -1.0 dBFS limit"
+    );
+}
+
+#[test]
+fn test_iterative_loudness_normalization_synthetic_two_clips() {
+    let ffmpeg_report = probe_ffmpeg();
+    if !ffmpeg_report.available {
+        println!(
+            "SKIP: test_iterative_loudness_normalization_synthetic_two_clips — FFmpeg missing"
+        );
+        return;
+    }
+    let ffmpeg = which_ffmpeg();
+    let tmp_dir = tempfile::tempdir().unwrap();
+    let clip_quiet = tmp_dir.path().join("quiet_24lufs.wav");
+    let clip_loud = tmp_dir.path().join("loud_16lufs.wav");
+    let out_mp4 = tmp_dir.path().join("synthetic_out.mp4");
+
+    // Generate clip 1: ~ -24 LUFS sine wave
+    let s1 = std::process::Command::new(&ffmpeg)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=4",
+            "-af",
+            "volume=-2.2dB",
+            "-c:a",
+            "pcm_s16le",
+        ])
+        .arg(&clip_quiet)
+        .status()
+        .unwrap();
+    assert!(s1.success());
+
+    // Generate clip 2: ~ -16 LUFS sine wave
+    let s2 = std::process::Command::new(&ffmpeg)
+        .args([
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:duration=4",
+            "-af",
+            "volume=5.8dB",
+            "-c:a",
+            "pcm_s16le",
+        ])
+        .arg(&clip_loud)
+        .status()
+        .unwrap();
+    assert!(s2.success());
+
+    let doc = studio_artifacts::timeline::TimelineDoc {
+        version: 1,
+        width: 1280,
+        height: 720,
+        fps: 30.0,
+        loudness_lufs: Some(-14.0),
+        tracks: vec![
+            studio_artifacts::timeline::Track {
+                id: "v".into(),
+                kind: studio_artifacts::timeline::TrackKind::Video,
+                style: None,
+                clips: vec![studio_artifacts::timeline::Clip {
+                    id: "v1".into(),
+                    source: "color:000000".into(),
+                    in_point: 0.0,
+                    out_point: None,
+                    start: 0.0,
+                    duration: 8.0,
+                    transition: studio_artifacts::timeline::Transition::None,
+                    transition_duration: None,
+                    motion: None,
+                    motion_strength: None,
+                    width: None,
+                    height: None,
+                    x: None,
+                    y: None,
+                    opacity: None,
+                }],
+            },
+            studio_artifacts::timeline::Track {
+                id: "a".into(),
+                kind: studio_artifacts::timeline::TrackKind::Audio,
+                style: None,
+                clips: vec![
+                    studio_artifacts::timeline::Clip {
+                        id: "a1".into(),
+                        source: clip_quiet.to_string_lossy().to_string(),
+                        in_point: 0.0,
+                        out_point: None,
+                        start: 0.0,
+                        duration: 4.0,
+                        transition: studio_artifacts::timeline::Transition::None,
+                        transition_duration: None,
+                        motion: None,
+                        motion_strength: None,
+                        width: None,
+                        height: None,
+                        x: None,
+                        y: None,
+                        opacity: None,
+                    },
+                    studio_artifacts::timeline::Clip {
+                        id: "a2".into(),
+                        source: clip_loud.to_string_lossy().to_string(),
+                        in_point: 0.0,
+                        out_point: None,
+                        start: 4.0,
+                        duration: 4.0,
+                        transition: studio_artifacts::timeline::Transition::None,
+                        transition_duration: None,
+                        motion: None,
+                        motion_strength: None,
+                        width: None,
+                        height: None,
+                        x: None,
+                        y: None,
+                        opacity: None,
+                    },
+                ],
+            },
+        ],
+    };
+
+    let norm = measure_audio_normalization(&ffmpeg, &doc, tmp_dir.path()).expect("measure norm");
+    println!("Synthetic timeline normalization result: {:?}", norm);
+    let (args, _) = build_timeline_ffmpeg_args_measured(&doc, &out_mp4, Some(&norm)).unwrap();
+    let st = std::process::Command::new(&ffmpeg)
+        .args(&args)
+        .current_dir(tmp_dir.path())
+        .status()
+        .unwrap();
+    assert!(st.success());
+
+    // Measure ebur128 on the final MP4
+    let measure = std::process::Command::new(&ffmpeg)
+        .args(["-hide_banner", "-i"])
+        .arg(&out_mp4)
+        .args(["-af", "ebur128=peak=true", "-f", "null", "-"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&measure.stderr);
+    let i_val = parse_measured_loudness_i(&stderr).expect("parse I");
+    let peak_val = parse_ebur128_peak(&stderr).expect("parse peak");
+    println!("Synthetic two clips final MP4 measurement: I={i_val} LUFS, Peak={peak_val} dBFS");
+    assert!(
+        (i_val - (-14.0)).abs() <= 0.5,
+        "Integrated loudness {i_val} LUFS not within -14 +- 0.5"
+    );
+    assert!(peak_val <= -1.0, "Peak {peak_val} dBFS exceeded -1.0 limit");
 }
 
 fn which_ffmpeg() -> PathBuf {

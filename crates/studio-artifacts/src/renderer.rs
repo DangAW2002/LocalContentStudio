@@ -563,6 +563,87 @@ pub fn resolve_caption_font(style_font: Option<&str>) -> Option<String> {
     None
 }
 
+/// Audio loudness normalization mode and parameters for timeline rendering.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum AudioNormalization {
+    /// Iterative gain + limiter: `volume={gain_db:.2}dB,alimiter=limit=0.8:level=false:attack=5:release=50,aresample=48000`
+    IterativeGain { gain_db: f64 },
+    /// Fallback single-pass loudnorm if iterative measurement fails.
+    LoudnormFallback { lufs: f64 },
+}
+
+/// Format the audio normalization filter string for the render pass.
+pub fn format_audio_normalization_filter(norm: &AudioNormalization) -> String {
+    match norm {
+        AudioNormalization::IterativeGain { gain_db } => {
+            format!(
+                "[amix]volume={:.2}dB,alimiter=limit=0.8:level=false:attack=5:release=50,aresample=48000[a]",
+                gain_db
+            )
+        }
+        AudioNormalization::LoudnormFallback { lufs } => {
+            format!("[amix]loudnorm=I={lufs}:TP=-1.5:LRA=11,aresample=48000[a]")
+        }
+    }
+}
+
+/// Parse measured integrated loudness (LUFS) from FFmpeg stderr.
+///
+/// Supports both JSON block from `loudnorm print_format=json` (`"input_i"`)
+/// and summary output from `ebur128` (`I: <val> LUFS`).
+pub fn parse_measured_loudness_i(stderr: &str) -> Option<f64> {
+    // 1. Try parsing loudnorm JSON block
+    for (start, _) in stderr.rmatch_indices('{') {
+        if let Some(end) = stderr[start..].find('}') {
+            let json_str = &stderr[start..=start + end];
+            if json_str.contains("input_i") {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    if let Some(val) = v.get("input_i") {
+                        if let Some(s) = val.as_str() {
+                            if let Ok(num) = s.parse::<f64>() {
+                                return Some(num);
+                            }
+                        } else if let Some(n) = val.as_f64() {
+                            return Some(n);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Try parsing ebur128 summary: "I:         -19.9 LUFS"
+    for line in stderr.lines().rev() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("I:") {
+            let part = rest.trim_start();
+            if let Some((num_str, _)) = part.split_once("LUFS") {
+                if let Ok(num) = num_str.trim().parse::<f64>() {
+                    return Some(num);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Parse measured true peak (dBFS) from FFmpeg ebur128 summary in stderr.
+pub fn parse_ebur128_peak(stderr: &str) -> Option<f64> {
+    for line in stderr.lines().rev() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("Peak:") {
+            let part = rest.trim();
+            if let Some((num_str, _)) = part.split_once("dBFS") {
+                if let Ok(num) = num_str.trim().parse::<f64>() {
+                    return Some(num);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Measurement statistics from FFmpeg loudnorm pass 1 (`print_format=json`).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LoudnormMeasurement {
@@ -625,6 +706,187 @@ pub fn format_loudnorm_filter(lufs: f64, measurement: Option<&LoudnormMeasuremen
     } else {
         format!("[amix]loudnorm=I={lufs}:TP=-1.5:LRA=11,aresample=48000[a]")
     }
+}
+
+/// Build FFmpeg arguments for an audio loudness measurement pass.
+///
+/// If `intermediate_gain_db` is `Some(gain)`, applies `volume={gain:.2}dB,alimiter=limit=0.8:level=false:attack=5:release=50`
+/// before attaching `loudnorm=I={lufs}:print_format=json`.
+pub fn build_audio_measure_ffmpeg_args(
+    timeline_doc: &crate::timeline::TimelineDoc,
+    intermediate_gain_db: Option<f64>,
+) -> Option<Vec<String>> {
+    let _ = timeline_doc.loudness_lufs?;
+
+    let mut audio_clips = Vec::new();
+    for track in timeline_doc
+        .tracks
+        .iter()
+        .filter(|t| t.kind == crate::timeline::TrackKind::Audio)
+    {
+        for clip in &track.clips {
+            audio_clips.push(clip);
+        }
+    }
+
+    if audio_clips.is_empty() {
+        return None;
+    }
+
+    let mut args = vec!["-y".into()];
+    for clip in &audio_clips {
+        args.extend_from_slice(&["-i".into(), strip_verbatim(Path::new(&clip.source))]);
+    }
+
+    let mix_out = "amix";
+    let mut a_filter_parts = Vec::new();
+    for (j, clip) in audio_clips.iter().enumerate() {
+        let atrim = format!(
+            "[{}:a]atrim=start={}:duration={},asetpts=PTS-STARTPTS",
+            j, clip.in_point, clip.duration
+        );
+        let start_ms = (clip.start * 1000.0).round() as u64;
+        if audio_clips.len() == 1 {
+            if start_ms > 0 {
+                a_filter_parts.push(format!(
+                    "{},adelay={}|{}[{}]",
+                    atrim, start_ms, start_ms, mix_out
+                ));
+            } else {
+                a_filter_parts.push(format!("{}[{}]", atrim, mix_out));
+            }
+        } else {
+            if start_ms > 0 {
+                a_filter_parts.push(format!(
+                    "{},adelay={}|{}[a{}]",
+                    atrim, start_ms, start_ms, j
+                ));
+            } else {
+                a_filter_parts.push(format!("{}[a{}]", atrim, j));
+            }
+        }
+    }
+
+    if audio_clips.len() > 1 {
+        let mut mix_inputs = String::new();
+        for j in 0..audio_clips.len() {
+            mix_inputs.push_str(&format!("[a{}]", j));
+        }
+        a_filter_parts.push(format!(
+            "{}amix=inputs={}:duration=longest:dropout_transition=0:normalize=0[{}]",
+            mix_inputs,
+            audio_clips.len(),
+            mix_out
+        ));
+    }
+
+    if let Some(gain) = intermediate_gain_db {
+        let rounded = (gain * 100.0).round() / 100.0;
+        a_filter_parts.push(format!(
+            "[amix]volume={rounded:.2}dB,alimiter=limit=0.8:level=false:attack=5:release=50,ebur128=peak=true"
+        ));
+    } else {
+        a_filter_parts.push("[amix]ebur128=peak=true".into());
+    }
+
+    let filter_graph = a_filter_parts.join(";");
+    args.extend_from_slice(&[
+        "-vn".into(),
+        "-filter_complex".into(),
+        filter_graph,
+        "-f".into(),
+        "null".into(),
+        "-".into(),
+    ]);
+
+    Some(args)
+}
+
+/// Run iterative audio loudness measurement and gain calculation using FFmpeg.
+///
+/// If `loudness_lufs` is declared in `timeline_doc`:
+/// 1. Measures initial mix loudness $I_0$ with `amix ... normalize=0`.
+/// 2. Iteratively adjusts gain: $G \leftarrow G + (T - I)$ with `volume={G}dB,alimiter=limit=0.8:level=false:attack=5:release=50`
+///    up to 3 iterations or until $|T - I| \le 0.3$.
+/// 3. Returns `AudioNormalization::IterativeGain { gain_db }` with gain rounded to 0.01 dB.
+///
+/// If measurement fails at any point, logs a warning and falls back to `AudioNormalization::LoudnormFallback { lufs }`.
+pub fn measure_audio_normalization(
+    ffmpeg_path: &Path,
+    timeline_doc: &crate::timeline::TimelineDoc,
+    cwd: &Path,
+) -> Option<AudioNormalization> {
+    let target_lufs = timeline_doc.loudness_lufs?;
+
+    let run_pass = |gain_opt: Option<f64>| -> Option<f64> {
+        let args = build_audio_measure_ffmpeg_args(timeline_doc, gain_opt)?;
+        let mut cmd = std::process::Command::new(ffmpeg_path);
+        cmd.args(&args).current_dir(cwd);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+        let output = match cmd.output() {
+            Ok(out) => out,
+            Err(e) => {
+                tracing::warn!("Không thể chạy ffmpeg đo âm lượng: {e}");
+                return None;
+            }
+        };
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !output.status.success() {
+            tracing::warn!(
+                "FFmpeg đo âm lượng thất bại (mã lỗi {:?}): {}",
+                output.status.code(),
+                stderr.chars().take(300).collect::<String>()
+            );
+            return None;
+        }
+        parse_measured_loudness_i(&stderr)
+    };
+
+    let i0 = match run_pass(None) {
+        Some(val) => val,
+        None => {
+            tracing::warn!("FFmpeg đo âm lượng pass 0 thất bại, fallback về loudnorm 1 lượt");
+            return Some(AudioNormalization::LoudnormFallback { lufs: target_lufs });
+        }
+    };
+
+    if (target_lufs - i0).abs() <= 0.3 {
+        return Some(AudioNormalization::IterativeGain { gain_db: 0.0 });
+    }
+
+    let mut gain = target_lufs - i0;
+
+    for iter in 0..3 {
+        let rounded_gain = (gain * 100.0).round() / 100.0;
+        let current_i = match run_pass(Some(rounded_gain)) {
+            Some(val) => val,
+            None => {
+                tracing::warn!(
+                    "FFmpeg đo âm lượng vòng lặp {iter} thất bại, sử dụng gain hiện tại {rounded_gain:.2} dB"
+                );
+                return Some(AudioNormalization::IterativeGain {
+                    gain_db: rounded_gain,
+                });
+            }
+        };
+
+        if (target_lufs - current_i).abs() <= 0.3 {
+            gain = rounded_gain;
+            break;
+        }
+
+        let delta = target_lufs - current_i;
+        gain = rounded_gain + delta;
+    }
+
+    let final_gain = (gain * 100.0).round() / 100.0;
+    Some(AudioNormalization::IterativeGain {
+        gain_db: final_gain,
+    })
 }
 
 /// Build FFmpeg arguments for pass 1 audio loudness measurement.
@@ -691,7 +953,7 @@ pub fn build_loudnorm_measure_ffmpeg_args(
             mix_inputs.push_str(&format!("[a{}]", j));
         }
         a_filter_parts.push(format!(
-            "{}amix=inputs={}:duration=longest:dropout_transition=0[{}]",
+            "{}amix=inputs={}:duration=longest:dropout_transition=0:normalize=0[{}]",
             mix_inputs,
             audio_clips.len(),
             mix_out
@@ -771,11 +1033,11 @@ pub fn build_timeline_ffmpeg_args(
 }
 
 /// Build an FFmpeg filtergraph and arguments for rendering a `timeline.json` document to MP4 H.264/AAC,
-/// with optional pass 1 loudnorm measurement for two-pass loudness normalization.
+/// with optional audio normalization for target loudness.
 pub fn build_timeline_ffmpeg_args_measured(
     timeline_doc: &crate::timeline::TimelineDoc,
     output_file: &Path,
-    loudnorm: Option<&LoudnormMeasurement>,
+    audio_norm: Option<&AudioNormalization>,
 ) -> Result<(Vec<String>, String)> {
     // 0. Check for SVG sources: ffmpeg usually cannot decode them — reject with a clear Vietnamese error
     for track in timeline_doc
@@ -1139,7 +1401,7 @@ pub fn build_timeline_ffmpeg_args_measured(
                 mix_inputs.push_str(&format!("[a{}]", j));
             }
             a_filter_parts.push(format!(
-                "{}amix=inputs={}:duration=longest:dropout_transition=0[{}]",
+                "{}amix=inputs={}:duration=longest:dropout_transition=0:normalize=0[{}]",
                 mix_inputs,
                 audio_clips.len(),
                 mix_out
@@ -1147,7 +1409,13 @@ pub fn build_timeline_ffmpeg_args_measured(
         }
 
         if let Some(lufs) = timeline_doc.loudness_lufs {
-            a_filter_parts.push(format_loudnorm_filter(lufs, loudnorm));
+            let filter_str = match audio_norm {
+                Some(norm) => format_audio_normalization_filter(norm),
+                None => format_audio_normalization_filter(&AudioNormalization::LoudnormFallback {
+                    lufs,
+                }),
+            };
+            a_filter_parts.push(filter_str);
         }
 
         filter_graph.push(';');
@@ -1432,12 +1700,12 @@ pub fn build_timeline_concat_ffmpeg_args(
 }
 
 /// Build FFmpeg filtergraph and arguments for assembling base chunks from a concat demuxer file
-/// with optional pass 1 loudnorm measurement for two-pass loudness normalization.
+/// with optional audio normalization for target loudness.
 pub fn build_timeline_concat_ffmpeg_args_measured(
     timeline_doc: &crate::timeline::TimelineDoc,
     concat_list_file: &Path,
     output_file: &Path,
-    loudnorm: Option<&LoudnormMeasurement>,
+    audio_norm: Option<&AudioNormalization>,
 ) -> Result<(Vec<String>, String)> {
     let mut args = vec!["-y".into()];
     args.extend_from_slice(&[
@@ -1687,14 +1955,20 @@ pub fn build_timeline_concat_ffmpeg_args_measured(
                 mix_inputs.push_str(&format!("[a{}]", j));
             }
             a_filter_parts.push(format!(
-                "{}amix=inputs={}:duration=longest:dropout_transition=0[{}]",
+                "{}amix=inputs={}:duration=longest:dropout_transition=0:normalize=0[{}]",
                 mix_inputs,
                 audio_clips.len(),
                 mix_out
             ));
         }
         if let Some(lufs) = timeline_doc.loudness_lufs {
-            a_filter_parts.push(format_loudnorm_filter(lufs, loudnorm));
+            let filter_str = match audio_norm {
+                Some(norm) => format_audio_normalization_filter(norm),
+                None => format_audio_normalization_filter(&AudioNormalization::LoudnormFallback {
+                    lufs,
+                }),
+            };
+            a_filter_parts.push(filter_str);
         }
         if !filter_graph.is_empty() {
             filter_graph.push(';');
@@ -1763,8 +2037,8 @@ pub fn build_timeline_render_job(
         )
     })?;
 
-    let measured_loudnorm = if timeline_doc.loudness_lufs.is_some() {
-        measure_audio_loudnorm(ffmpeg_path, timeline_doc, cwd)
+    let measured_norm = if timeline_doc.loudness_lufs.is_some() {
+        measure_audio_normalization(ffmpeg_path, timeline_doc, cwd)
     } else {
         None
     };
@@ -1801,15 +2075,12 @@ pub fn build_timeline_render_job(
             timeline_doc,
             &concat_list_file,
             output_file,
-            measured_loudnorm.as_ref(),
+            measured_norm.as_ref(),
         )?;
         concat_args
     } else {
-        let (direct_args, _) = build_timeline_ffmpeg_args_measured(
-            timeline_doc,
-            output_file,
-            measured_loudnorm.as_ref(),
-        )?;
+        let (direct_args, _) =
+            build_timeline_ffmpeg_args_measured(timeline_doc, output_file, measured_norm.as_ref())?;
         direct_args
     };
 
@@ -2012,5 +2283,48 @@ size=N/A time=00:01:11.30 bitrate=N/A speed=104x elapsed=0:00:00.68"#;
             tracks: vec![],
         };
         assert!(build_loudnorm_measure_ffmpeg_args(&doc_no_audio).is_none());
+        assert!(build_audio_measure_ffmpeg_args(&doc_no_audio, None).is_none());
+    }
+
+    #[test]
+    fn format_audio_normalization_filter_iterative_gain() {
+        let norm = AudioNormalization::IterativeGain { gain_db: 7.214 };
+        let filter = format_audio_normalization_filter(&norm);
+        assert_eq!(
+            filter,
+            "[amix]volume=7.21dB,alimiter=limit=0.8:level=false:attack=5:release=50,aresample=48000[a]"
+        );
+    }
+
+    #[test]
+    fn format_audio_normalization_filter_fallback() {
+        let norm = AudioNormalization::LoudnormFallback { lufs: -14.0 };
+        let filter = format_audio_normalization_filter(&norm);
+        assert_eq!(
+            filter,
+            "[amix]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[a]"
+        );
+    }
+
+    #[test]
+    fn parse_measured_loudness_i_and_peak() {
+        let json_stderr = r#"[Parsed_loudnorm_0 @ 00000168075009c0] 
+{
+	"input_i" : "-19.87",
+	"input_tp" : "-1.90"
+}"#;
+        assert_eq!(parse_measured_loudness_i(json_stderr), Some(-19.87));
+
+        let ebur128_stderr = r#"
+Summary:
+  Integrated loudness:
+    I:         -14.3 LUFS
+    Threshold: -24.7 LUFS
+
+  True peak:
+    Peak:       -1.8 dBFS
+"#;
+        assert_eq!(parse_measured_loudness_i(ebur128_stderr), Some(-14.3));
+        assert_eq!(parse_ebur128_peak(ebur128_stderr), Some(-1.8));
     }
 }
