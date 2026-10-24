@@ -175,6 +175,26 @@ impl PermissionBroker for UiBroker {
                     Decision::Deny("Người dùng đã từ chối.".into())
                 }
                 Ok(Ok(BrokerAnswer::Question(answers))) => {
+                    // AskUserQuestion takes `answers` as question → string; multi-select joins with ", ".
+                    let answers = match answers {
+                        Value::Object(m) => Value::Object(
+                            m.into_iter()
+                                .map(|(k, v)| match v {
+                                    Value::Array(items) => {
+                                        let parts: Vec<String> = items
+                                            .iter()
+                                            .map(|i| {
+                                                i.as_str().map_or(i.to_string(), str::to_string)
+                                            })
+                                            .collect();
+                                        (k, Value::String(parts.join(", ")))
+                                    }
+                                    other => (k, other),
+                                })
+                                .collect(),
+                        ),
+                        other => other,
+                    };
                     let mut updated = input.clone();
                     if let Value::Object(ref mut map) = updated {
                         map.insert("answers".to_string(), answers);
