@@ -646,6 +646,10 @@ pub async fn dispatch_invoke(
             let res = commands::dialog_pick_folder_impl().await?;
             Ok(serde_json::to_value(res)?)
         }
+        "fs_list_dirs" => {
+            let path: Option<String> = args.get("path").and_then(|v| v.as_str()).map(String::from);
+            commands::fs_list_dirs_impl(path)
+        }
         unhandled => Err(CmdError::msg(format!(
             "Lệnh '{unhandled}' chưa được định tuyến trong bộ điều phối web."
         ))),

@@ -5,6 +5,7 @@ import { cleanDisplayPath } from "../utils/path";
 import type { WorkspaceSummary } from "../api/types";
 import { studioApi } from "../api/client";
 import { isTauri } from "../api/tauri-bridge";
+import { FolderBrowser } from "./FolderBrowser";
 
 export interface WorkspaceSwitcherModalProps {
   open: boolean;
@@ -14,6 +15,18 @@ export interface WorkspaceSwitcherModalProps {
   onOpenWorkspace: (path: string) => Promise<void>;
   onCreateWorkspace: (path: string, name: string) => Promise<void>;
 }
+
+/** Folder-safe slug of a workspace name ("Kênh Công Nghệ" → "kenh-cong-nghe"). */
+export const slugifyName = (name: string) =>
+  name
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+const joinPath = (dir: string, child: string) => `${dir.replace(/[\/]+$/, "")}/${child}`;
 
 export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
   open,
@@ -30,6 +43,27 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [browsing, setBrowsing] = React.useState<"open" | "create" | null>(null);
+  const [home, setHome] = React.useState<string | null>(null);
+  const [createPathEdited, setCreatePathEdited] = React.useState(false);
+  const web = !isTauri();
+
+  // Web: the server has no native picker; learn its home folder to suggest workspace paths.
+  React.useEffect(() => {
+    if (!open || !web || home) return;
+    studioApi
+      .listDirs()
+      .then((l) => setHome(l.home))
+      .catch(() => {});
+  }, [open, web, home]);
+
+  const suggestedCreatePath = (name: string) =>
+    home ? joinPath(joinPath(home, "Studio"), slugifyName(name) || "workspace-moi") : "";
+
+  const handleCreateNameChange = (name: string) => {
+    setCreateName(name);
+    if (web && !createPathEdited) setCreatePath(suggestedCreatePath(name));
+  };
   const prevActiveElementRef = React.useRef<HTMLElement | null>(null);
 
   React.useEffect(() => {
@@ -98,8 +132,8 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
   };
 
   const handleBrowseOpen = async () => {
-    if (!isTauri()) {
-      setError("Hộp thoại chọn thư mục chỉ hỗ trợ trên ứng dụng desktop. Vui lòng nhập đường dẫn thư mục trực tiếp.");
+    if (web) {
+      setBrowsing("open");
       return;
     }
     try {
@@ -113,8 +147,8 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
   };
 
   const handleBrowseCreate = async () => {
-    if (!isTauri()) {
-      setError("Hộp thoại chọn thư mục chỉ hỗ trợ trên ứng dụng desktop. Vui lòng nhập đường dẫn thư mục trực tiếp.");
+    if (web) {
+      setBrowsing("create");
       return;
     }
     try {
@@ -321,7 +355,7 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
                 <div style={{ flex: 1 }}>
                   <Input
                     label="Đường dẫn thư mục workspace"
-                    placeholder="Ví dụ: D:/Studio/ca-nhan/kenh-review"
+                    placeholder={web && home ? `Ví dụ: ${joinPath(home, "Studio/kenh-review")}` : "Ví dụ: D:/Studio/ca-nhan/kenh-review"}
                     value={openPath}
                     onChange={(e) => setOpenPath(e.target.value)}
                   />
@@ -331,11 +365,23 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
                   variant="secondary"
                   onClick={handleBrowseOpen}
                   leftIcon={<Icon name="folder" size={14} />}
-                  style={{ flexShrink: 0, height: "var(--cs-control-height)", display: isTauri() ? undefined : "none" }}
+                  style={{ flexShrink: 0, height: "var(--cs-control-height)" }}
                 >
                   Chọn thư mục...
                 </Button>
               </div>
+              {browsing === "open" && (
+                <FolderBrowser
+                  initialPath={openPath || undefined}
+                  selectLabel="Mở thư mục này"
+                  onCancel={() => setBrowsing(null)}
+                  onSelect={(path) => {
+                    setBrowsing(null);
+                    setOpenPath(path);
+                    void handleOpen(path);
+                  }}
+                />
+              )}
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--cs-space-2)" }}>
                 <Button variant="secondary" onClick={onClose}>
                   Hủy
@@ -358,15 +404,18 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
                 label="Tên Workspace"
                 placeholder="Ví dụ: Kênh Công Nghệ"
                 value={createName}
-                onChange={(e) => setCreateName(e.target.value)}
+                onChange={(e) => handleCreateNameChange(e.target.value)}
               />
               <div style={{ display: "flex", gap: "var(--cs-space-2)", alignItems: "flex-end" }}>
                 <div style={{ flex: 1 }}>
                   <Input
                     label="Đường dẫn thư mục"
-                    placeholder="Ví dụ: D:/Studio/cong-nghe"
+                    placeholder={web && home ? `Ví dụ: ${joinPath(home, "Studio/cong-nghe")}` : "Ví dụ: D:/Studio/cong-nghe"}
                     value={createPath}
-                    onChange={(e) => setCreatePath(e.target.value)}
+                    onChange={(e) => {
+                      setCreatePath(e.target.value);
+                      setCreatePathEdited(true);
+                    }}
                   />
                 </div>
                 <Button
@@ -374,11 +423,23 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
                   variant="secondary"
                   onClick={handleBrowseCreate}
                   leftIcon={<Icon name="folder" size={14} />}
-                  style={{ flexShrink: 0, height: "var(--cs-control-height)", display: isTauri() ? undefined : "none" }}
+                  style={{ flexShrink: 0, height: "var(--cs-control-height)" }}
                 >
                   Chọn thư mục...
                 </Button>
               </div>
+              {browsing === "create" && (
+                <FolderBrowser
+                  initialPath={home ?? undefined}
+                  selectLabel="Tạo trong thư mục này"
+                  onCancel={() => setBrowsing(null)}
+                  onSelect={(dir) => {
+                    setBrowsing(null);
+                    setCreatePath(joinPath(dir, slugifyName(createName) || "workspace-moi"));
+                    setCreatePathEdited(true);
+                  }}
+                />
+              )}
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--cs-space-2)" }}>
                 <Button variant="secondary" onClick={onClose}>
                   Hủy

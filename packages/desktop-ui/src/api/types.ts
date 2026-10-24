@@ -94,6 +94,23 @@ export interface WorkspaceCreateRequest {
   name: string;
 }
 
+/** One sub-directory in the server-side folder browser (`fs_list_dirs`). */
+export interface DirEntry {
+  name: string;
+  path: string;
+  /** Contains `studio.yaml` */
+  isWorkspace: boolean;
+}
+
+/** Result of `fs_list_dirs`: a directory on the machine running Studio. */
+export interface DirListing {
+  path: string;
+  parent: string | null;
+  home: string;
+  isWorkspace: boolean;
+  entries: DirEntry[];
+}
+
 export interface WorkspaceOpenRequest {
   /** Target filesystem path */
   path: string;
