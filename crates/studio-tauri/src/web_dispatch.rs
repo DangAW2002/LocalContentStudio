@@ -250,6 +250,12 @@ pub async fn dispatch_invoke(
             let allow: bool = get_arg(&args, "allow")?;
             commands::permission_respond_impl(state, request_id, allow)
         }
+        "question_respond" => {
+            let request_id: String =
+                get_arg(&args, "requestId").or_else(|_| get_arg(&args, "request_id"))?;
+            let answers: Value = get_arg(&args, "answers")?;
+            commands::question_respond_impl(state, request_id, answers)
+        }
         "checkpoint_list" => {
             let res = commands::checkpoint_list_impl(state)?;
             Ok(serde_json::to_value(res)?)

@@ -63,6 +63,8 @@ import type {
   TurnUndoResponse,
   PermissionRespondRequest,
   PermissionRespondResponse,
+  QuestionRespondRequest,
+  QuestionRespondResponse,
   PendingPermission,
   CheckpointSummary,
   CheckpointRestoreRequest,
@@ -313,6 +315,14 @@ export class StudioApiClient {
    */
   async respondPermission(req: PermissionRespondRequest): Promise<PermissionRespondResponse> {
     return invoke<PermissionRespondResponse>("permission_respond", { ...req });
+  }
+
+  /**
+   * Respond to an AskUserQuestion prompt with chosen answers.
+   * Command: `question_respond`
+   */
+  async respondQuestion(req: QuestionRespondRequest): Promise<QuestionRespondResponse> {
+    return invoke<QuestionRespondResponse>("question_respond", { ...req });
   }
 
   // ==========================================

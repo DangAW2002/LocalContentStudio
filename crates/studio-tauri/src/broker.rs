@@ -12,14 +12,23 @@ use tokio::sync::oneshot;
 /// How long a permission dialog waits before denying.
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(600);
 
+/// The answer delivered by the user to a pending broker request.
+#[derive(Debug)]
+pub enum BrokerAnswer {
+    /// Permission decision (allow/deny).
+    Permission(bool),
+    /// Answer map for questions (`AskUserQuestion`).
+    Question(Value),
+}
+
 /// A permission request still waiting for the user.
 struct Pending {
-    tx: oneshot::Sender<bool>,
+    tx: oneshot::Sender<BrokerAnswer>,
     /// What the UI needs to redraw the dialog (`requestId`, `threadId`, `turnId`, `tool`, `input`).
     info: Value,
 }
 
-/// Routes engine permission requests to a UI dialog and waits for `permission_respond`.
+/// Routes engine permission requests to a UI dialog and waits for `permission_respond` or `question_respond`.
 ///
 /// The `turn-event` it emits is transient, so open requests are also kept here and listed by
 /// `permission_pending`: a Thread pane mounted later (or another view) can still show them.
@@ -51,14 +60,24 @@ impl UiBroker {
         }
     }
 
-    /// Deliver the user's answer. Returns false when the request is unknown or expired.
+    /// Deliver the user's permission answer. Returns false when the request is unknown or expired.
     pub fn respond(&self, request_id: &str, allow: bool) -> bool {
         let sender = self
             .pending
             .lock()
             .ok()
             .and_then(|mut m| m.remove(request_id));
-        sender.is_some_and(|p| p.tx.send(allow).is_ok())
+        sender.is_some_and(|p| p.tx.send(BrokerAnswer::Permission(allow)).is_ok())
+    }
+
+    /// Deliver the user's answer to a question prompt. Returns false when the request is unknown or expired.
+    pub fn respond_question(&self, request_id: &str, answers: Value) -> bool {
+        let sender = self
+            .pending
+            .lock()
+            .ok()
+            .and_then(|mut m| m.remove(request_id));
+        sender.is_some_and(|p| p.tx.send(BrokerAnswer::Question(answers)).is_ok())
     }
 
     /// Open requests, oldest first, optionally for one thread.
@@ -87,6 +106,27 @@ impl UiBroker {
         if let Ok(mut m) = self.pending.lock() {
             m.insert(request_id.to_string(), Pending { tx, info });
         }
+    }
+
+    /// Inserts a pending request with a receiver channel for unit tests.
+    #[cfg(test)]
+    pub fn insert_pending_with_rx_for_test(
+        &self,
+        request_id: &str,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> oneshot::Receiver<BrokerAnswer> {
+        let (tx, rx) = oneshot::channel();
+        let info = json!({
+            "requestId": request_id,
+            "threadId": thread_id,
+            "turnId": turn_id,
+            "createdAt": chrono::Utc::now().to_rfc3339(),
+        });
+        if let Ok(mut m) = self.pending.lock() {
+            m.insert(request_id.to_string(), Pending { tx, info });
+        }
+        rx
     }
 }
 
@@ -130,15 +170,90 @@ impl PermissionBroker for UiBroker {
                 json!({ "threadId": thread_id, "turnId": ctx.turn_id, "event": event }),
             );
             match tokio::time::timeout(ANSWER_TIMEOUT, rx).await {
-                Ok(Ok(true)) => Decision::Allow(input.clone()),
-                Ok(Ok(false)) => Decision::Deny("Người dùng đã từ chối.".into()),
+                Ok(Ok(BrokerAnswer::Permission(true))) => Decision::Allow(input.clone()),
+                Ok(Ok(BrokerAnswer::Permission(false))) => {
+                    Decision::Deny("Người dùng đã từ chối.".into())
+                }
+                Ok(Ok(BrokerAnswer::Question(answers))) => {
+                    // AskUserQuestion takes `answers` as question → string; multi-select joins with ", ".
+                    let answers = match answers {
+                        Value::Object(m) => Value::Object(
+                            m.into_iter()
+                                .map(|(k, v)| match v {
+                                    Value::Array(items) => {
+                                        let parts: Vec<String> = items
+                                            .iter()
+                                            .map(|i| {
+                                                i.as_str().map_or(i.to_string(), str::to_string)
+                                            })
+                                            .collect();
+                                        (k, Value::String(parts.join(", ")))
+                                    }
+                                    other => (k, other),
+                                })
+                                .collect(),
+                        ),
+                        other => other,
+                    };
+                    let mut updated = input.clone();
+                    if let Value::Object(ref mut map) = updated {
+                        map.insert("answers".to_string(), answers);
+                    }
+                    Decision::Allow(updated)
+                }
                 _ => {
                     if let Ok(mut m) = self.pending.lock() {
                         m.remove(&request_id);
                     }
-                    Decision::Deny("Hết thời gian chờ người dùng cấp quyền.".into())
+                    Decision::Deny("Hết thời gian chờ người dùng phản hồi.".into())
                 }
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_broker_permission_respond() {
+        let broker = UiBroker::default();
+        let rx = broker.insert_pending_with_rx_for_test("req-1", "th-1", "turn-1");
+        assert_eq!(broker.list_pending(None).len(), 1);
+
+        assert!(broker.respond("req-1", true));
+        let answer = rx.blocking_recv().expect("must receive answer");
+        match answer {
+            BrokerAnswer::Permission(allow) => assert!(allow),
+            _ => panic!("expected Permission"),
+        }
+        assert_eq!(broker.list_pending(None).len(), 0);
+    }
+
+    #[test]
+    fn test_broker_question_respond() {
+        let broker = UiBroker::default();
+        let rx = broker.insert_pending_with_rx_for_test("req-2", "th-1", "turn-1");
+
+        let answers = json!({
+            "Chọn thư viện nào?": "date-fns",
+            "Tính năng bổ sung?": ["Lint", "Prettier"]
+        });
+
+        assert!(broker.respond_question("req-2", answers.clone()));
+        let answer = rx.blocking_recv().expect("must receive answer");
+        match answer {
+            BrokerAnswer::Question(recv_answers) => assert_eq!(recv_answers, answers),
+            _ => panic!("expected Question"),
+        }
+        assert_eq!(broker.list_pending(None).len(), 0);
+    }
+
+    #[test]
+    fn test_broker_respond_unknown() {
+        let broker = UiBroker::default();
+        assert!(!broker.respond("nonexistent", true));
+        assert!(!broker.respond_question("nonexistent", json!({})));
     }
 }

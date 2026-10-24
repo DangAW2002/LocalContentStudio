@@ -380,6 +380,22 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
     }
   };
 
+  const handleQuestionRespond = async (requestId: string, answers: Record<string, string | string[]>) => {
+    try {
+      await studioApi.respondQuestion({ requestId, answers });
+      setMessages((prev) =>
+        prev.map((m) => ({
+          ...m,
+          permissionRequests: m.permissionRequests?.map((pr) =>
+            pr.requestId === requestId ? { ...pr, resolved: true, answers } : pr
+          ),
+        }))
+      );
+    } catch (err: any) {
+      setError(err?.message || "Không thể gửi câu trả lời.");
+    }
+  };
+
   const toggleToolCallExpanded = (messageIndex: number, toolCallId: string) => {
     setMessages((prev) =>
       prev.map((msg, i) =>
@@ -576,6 +592,7 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
                 toggleToolCallExpanded={toggleToolCallExpanded}
                 onSelectFile={onSelectFile}
                 onPermissionRespond={handlePermissionRespond}
+                onQuestionRespond={handleQuestionRespond}
                 onRerunPrompt={(p) => setInputPrompt(p)}
                 onRetryTurn={handleRetryTurn}
                 onOpenPublishDraft={async () => {

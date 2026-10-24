@@ -23,7 +23,7 @@ export interface ThreadMessage {
     expanded?: boolean;
   }>;
   fileChanges?: Array<{ path: string; op: "create" | "modify" | "delete" }>;
-  permissionRequests?: Array<{ requestId: string; tool: string; input: unknown; resolved?: boolean }>;
+  permissionRequests?: Array<{ requestId: string; tool: string; input: unknown; resolved?: boolean; answers?: Record<string, string | string[]> }>;
   deniedActions?: Array<{ tool: string; input: unknown }>;
   usage?: {
     inputTokens: number;
@@ -154,7 +154,13 @@ export function applyTurnEvent(prev: ThreadMessage[], payload: EngineTurnEvent, 
       next = { ...msg, fileChanges: [...(msg.fileChanges || []), { path: event.path, op: event.op }] };
       break;
     case "PermissionRequest":
-      next = { ...msg, permissionRequests: [...(msg.permissionRequests || []), { requestId: event.requestId, tool: event.tool, input: event.input }] };
+      next = {
+        ...msg,
+        permissionRequests: [
+          ...(msg.permissionRequests || []).filter((pr) => pr.requestId !== event.requestId),
+          { requestId: event.requestId, tool: event.tool, input: event.input },
+        ],
+      };
       break;
     case "PermissionDenied":
       next = { ...msg, deniedActions: [...(msg.deniedActions || []), { tool: event.tool, input: event.input }] };
