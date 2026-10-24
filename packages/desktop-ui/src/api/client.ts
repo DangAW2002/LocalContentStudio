@@ -665,16 +665,9 @@ export class StudioApiClient {
    * Command: `engine_settings_set`
    */
   async engineSettingsSet(req: EngineSettingsSetRequest): Promise<void> {
-    return invoke<void>("engine_settings_set", { req, ...req });
+    return invoke<void>("engine_settings_set", { req });
   }
 
-  async getEngineSettings(): Promise<EngineSettingsResponse> {
-    return this.engineSettingsGet();
-  }
-
-  async setEngineSettings(req: EngineSettingsSetRequest): Promise<void> {
-    return this.engineSettingsSet(req);
-  }
 
   // ==========================================
   // Secrets & Provider Endpoints

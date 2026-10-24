@@ -59,7 +59,6 @@ pub const ALLOWED_WEB_COMMANDS: &[&str] = &[
     "engines_probe",
     "engine_models",
     "engine_settings_get",
-    "engine_settings_set",
     "catalog_kits",
     "catalog_modules",
     "catalog_suggest",
@@ -139,6 +138,8 @@ mod tests {
         assert!(is_command_allowed("turn_start"));
         assert!(is_command_allowed("publish_confirm"));
         assert!(is_command_allowed("secret_set"));
+        // Granting agy unattended shell access stays desktop-only.
+        assert!(!is_command_allowed("engine_settings_set"));
         for c in [
             "web_configure",
             "workspace_open",

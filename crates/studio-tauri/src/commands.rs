@@ -3407,21 +3407,10 @@ pub struct EngineSettingsSetRequest {
 
 /// Get stored engine settings (`engine:agy_full_access`).
 pub fn engine_settings_get_impl(state: &AppState) -> CmdResult<EngineSettingsResponse> {
-    let mut raw = None;
-
-    if let Ok(db) = state.app_paths.open_app_db() {
-        raw = db.get_setting("engine:agy_full_access").ok().flatten();
-    }
-    if raw.is_none() {
-        if let Ok(ws) = state.workspace() {
-            if let Ok(ws_db) = WorkspaceDb::open(&ws) {
-                raw = crate::turns::get_setting(&ws_db, "engine:agy_full_access")
-                    .ok()
-                    .flatten();
-            }
-        }
-    }
-
+    let raw = state
+        .app_paths
+        .open_app_db()?
+        .get_setting("engine:agy_full_access")?;
     Ok(EngineSettingsResponse {
         agy_full_access: raw.as_deref() == Some("true"),
     })
@@ -3436,13 +3425,10 @@ pub fn engine_settings_get(state: State<'_, AppState>) -> CmdResult<EngineSettin
 /// Save engine settings (`engine:agy_full_access`).
 pub fn engine_settings_set_impl(state: &AppState, req: EngineSettingsSetRequest) -> CmdResult<()> {
     let val = if req.agy_full_access { "true" } else { "false" };
-    let db = state.app_paths.open_app_db()?;
-    db.set_setting("engine:agy_full_access", val)?;
-    if let Ok(ws) = state.workspace() {
-        if let Ok(ws_db) = WorkspaceDb::open(&ws) {
-            let _ = crate::turns::set_setting(&ws_db, "engine:agy_full_access", val);
-        }
-    }
+    state
+        .app_paths
+        .open_app_db()?
+        .set_setting("engine:agy_full_access", val)?;
     Ok(())
 }
 
@@ -3450,13 +3436,9 @@ pub fn engine_settings_set_impl(state: &AppState, req: EngineSettingsSetRequest)
 #[tauri::command]
 pub fn engine_settings_set(
     state: State<'_, AppState>,
-    req: Option<EngineSettingsSetRequest>,
-    agy_full_access: Option<bool>,
+    req: EngineSettingsSetRequest,
 ) -> CmdResult<()> {
-    let resolved = req.unwrap_or(EngineSettingsSetRequest {
-        agy_full_access: agy_full_access.unwrap_or(false),
-    });
-    engine_settings_set_impl(&state, resolved)
+    engine_settings_set_impl(&state, req)
 }
 
 /// Native folder picker dialog. Returns the selected directory path, or None if cancelled.

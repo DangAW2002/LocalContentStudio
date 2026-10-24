@@ -408,8 +408,7 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
         .app_paths
         .open_app_db()
         .ok()
-        .and_then(|adb| adb.get_setting("engine:agy_full_access").ok().flatten())
-        .or_else(|| get_setting(&db, "engine:agy_full_access").ok().flatten());
+        .and_then(|adb| adb.get_setting("engine:agy_full_access").ok().flatten());
     let skip_permissions = !is_claude && agy_setting.as_deref() == Some("true");
     let context = build_context(
         &ws,
