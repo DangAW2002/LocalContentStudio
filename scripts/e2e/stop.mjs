@@ -18,8 +18,11 @@ function findRunJson(runArg) {
   return null;
 }
 
-/** Dedicated build dir for E2E runs, separate from the owner's `target/debug`. */
-export const E2E_TARGET_DIR = path.resolve("target/e2e");
+/**
+ * Dedicated build dir for E2E runs, separate from the owner's `target/debug`.
+ * `STUDIO_E2E_TARGET_DIR` lets a second session build and smoke-test while another E2E app runs.
+ */
+export const E2E_TARGET_DIR = path.resolve(process.env.STUDIO_E2E_TARGET_DIR || "target/e2e");
 export const E2E_EXE = path.join(
   E2E_TARGET_DIR,
   "debug",
