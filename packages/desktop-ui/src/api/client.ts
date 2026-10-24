@@ -42,6 +42,7 @@ import type {
   WorkspaceSummary,
   WorkspaceCreateRequest,
   WorkspaceOpenRequest,
+  DirListing,
   WorkspaceCurrentResponse,
   BudgetStatus,
   ProjectSummary,
@@ -180,6 +181,14 @@ export class StudioApiClient {
    */
   async pickFolder(): Promise<string | null> {
     return invoke<string | null>("dialog_pick_folder");
+  }
+
+  /**
+   * List sub-directories on the machine running Studio (web folder browser).
+   * Command: `fs_list_dirs`
+   */
+  async listDirs(path?: string): Promise<DirListing> {
+    return invoke<DirListing>("fs_list_dirs", { path: path ?? null });
   }
 
   // ==========================================

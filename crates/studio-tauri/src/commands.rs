@@ -3473,9 +3473,93 @@ pub async fn dialog_pick_folder() -> CmdResult<Option<String>> {
     dialog_pick_folder_impl().await
 }
 
+/// Home directory of the user running Studio (the server user in web mode).
+fn user_home_dir() -> PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/"))
+}
+
+/// Folder browser listing for the web workspace picker (no native dialog in a browser).
+/// Lists sub-directories of `path` (default: home), hiding dot-folders, and flags workspaces.
+pub fn fs_list_dirs_impl(path: Option<String>) -> CmdResult<Value> {
+    let home = user_home_dir();
+    let dir = match path.as_deref().map(str::trim) {
+        Some(p) if !p.is_empty() => PathBuf::from(p),
+        _ => home.clone(),
+    };
+    let dir = dir
+        .canonicalize()
+        .map_err(|e| CmdError::msg(format!("Không mở được thư mục {}: {e}", dir.display())))?;
+    if !dir.is_dir() {
+        return Err(CmdError::msg(format!(
+            "{} không phải thư mục.",
+            dir.display()
+        )));
+    }
+
+    let mut entries = Vec::new();
+    for entry in std::fs::read_dir(&dir)?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') {
+            continue;
+        }
+        let p = entry.path();
+        if !p.is_dir() {
+            continue;
+        }
+        entries.push(json!({
+            "name": name,
+            "path": strip_verbatim(&p),
+            "isWorkspace": p.join("studio.yaml").is_file(),
+        }));
+    }
+    entries.sort_by_key(|e| e["name"].as_str().unwrap_or_default().to_lowercase());
+
+    Ok(json!({
+        "path": strip_verbatim(&dir),
+        "parent": dir.parent().map(strip_verbatim),
+        "home": strip_verbatim(&home),
+        "isWorkspace": dir.join("studio.yaml").is_file(),
+        "entries": entries,
+    }))
+}
+
+/// Folder browser listing command.
+#[tauri::command]
+pub fn fs_list_dirs(path: Option<String>) -> CmdResult<Value> {
+    fs_list_dirs_impl(path)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn test_fs_list_dirs_lists_subdirs_and_flags_workspaces() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::create_dir(root.join("beta")).unwrap();
+        std::fs::create_dir(root.join(".hidden")).unwrap();
+        std::fs::write(root.join("file.txt"), "x").unwrap();
+        Workspace::create(root.join("Alpha"), "Alpha").unwrap();
+
+        let res = fs_list_dirs_impl(Some(strip_verbatim(root))).unwrap();
+        let entries = res["entries"].as_array().unwrap();
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|e| e["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["Alpha", "beta"]);
+        assert_eq!(entries[0]["isWorkspace"], true);
+        assert_eq!(entries[1]["isWorkspace"], false);
+        assert_eq!(res["isWorkspace"], false);
+        assert!(res["parent"].is_string());
+
+        assert!(fs_list_dirs_impl(Some(strip_verbatim(&root.join("missing")))).is_err());
+        assert!(fs_list_dirs_impl(Some(strip_verbatim(&root.join("file.txt")))).is_err());
+    }
 
     #[tokio::test]
     async fn test_engine_settings_get_set_default_false() {
