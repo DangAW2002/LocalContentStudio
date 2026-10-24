@@ -188,6 +188,9 @@ pub fn agy_command(
     }
 
     // agy requires -p= form when prompt is streamed through stdin
+    if req.skip_permissions {
+        args.push("--dangerously-skip-permissions".to_string());
+    }
     args.push("-p=".to_string());
 
     let effective_prompt = if let Some(sys) = &req.append_system_prompt {
@@ -236,6 +239,7 @@ mod tests {
             permission_prompt_tool: Some("mcp__studio__approve".to_string()),
             append_system_prompt: Some("You are studio".to_string()),
             max_budget_usd: Some(1.5),
+            skip_permissions: false,
         };
 
         let spec = claude_command(&req, tmp.path(), None).unwrap();
@@ -277,6 +281,7 @@ mod tests {
             permission_prompt_tool: None,
             append_system_prompt: None,
             max_budget_usd: None,
+            skip_permissions: false,
         };
 
         let spec = claude_command(&req, tmp.path(), None).unwrap();
@@ -302,6 +307,7 @@ mod tests {
             permission_prompt_tool: None,
             append_system_prompt: Some("System instructions".to_string()),
             max_budget_usd: None,
+            skip_permissions: false,
         };
 
         let spec = agy_command(&req, tmp.path(), None).unwrap();
@@ -337,10 +343,48 @@ mod tests {
             permission_prompt_tool: None,
             append_system_prompt: None,
             max_budget_usd: None,
+            skip_permissions: false,
         };
 
         let spec = agy_command(&req, tmp.path(), None).unwrap();
         assert!(spec.args.contains(&"--conversation".to_string()));
         assert!(spec.args.contains(&"conv-123".to_string()));
+    }
+
+    #[test]
+    fn test_agy_and_claude_skip_permissions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut req = TurnRequest {
+            workspace_dir: PathBuf::from("D:/workspace"),
+            prompt: "Run shell".to_string(),
+            session: SessionRef::New(Uuid::new_v4()),
+            model: None,
+            mcp: None,
+            plugin_dir: None,
+            permission_prompt_tool: None,
+            append_system_prompt: None,
+            max_budget_usd: None,
+            skip_permissions: false,
+        };
+
+        let agy_default = agy_command(&req, tmp.path(), None).unwrap();
+        assert!(agy_default.args.contains(&"--mode".to_string()));
+        assert!(agy_default.args.contains(&"accept-edits".to_string()));
+        assert!(!agy_default
+            .args
+            .contains(&"--dangerously-skip-permissions".to_string()));
+
+        req.skip_permissions = true;
+        let agy_full = agy_command(&req, tmp.path(), None).unwrap();
+        assert!(agy_full.args.contains(&"--mode".to_string()));
+        assert!(agy_full.args.contains(&"accept-edits".to_string()));
+        assert!(agy_full
+            .args
+            .contains(&"--dangerously-skip-permissions".to_string()));
+
+        let claude_spec = claude_command(&req, tmp.path(), None).unwrap();
+        assert!(!claude_spec
+            .args
+            .contains(&"--dangerously-skip-permissions".to_string()));
     }
 }

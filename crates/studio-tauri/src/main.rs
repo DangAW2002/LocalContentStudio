@@ -168,6 +168,8 @@ fn main() {
             commands::tts_synthesize_preview,
             commands::tts_get_config,
             commands::tts_set_config,
+            commands::engine_settings_get,
+            commands::engine_settings_set,
             commands::dialog_pick_folder,
             commands::series_list,
             commands::series_get,

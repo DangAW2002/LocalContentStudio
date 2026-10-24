@@ -632,6 +632,10 @@ pub async fn dispatch_invoke(
             commands::tts_set_config_impl(state, req)?;
             Ok(json!({ "ok": true }))
         }
+        "engine_settings_get" => {
+            let res = commands::engine_settings_get_impl(state)?;
+            Ok(serde_json::to_value(res)?)
+        }
         "dialog_pick_folder" => {
             let res = commands::dialog_pick_folder_impl().await?;
             Ok(serde_json::to_value(res)?)

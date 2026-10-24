@@ -356,6 +356,14 @@ export interface EngineProbeResult {
   notes?: string;
 }
 
+export interface EngineSettingsResponse {
+  agyFullAccess: boolean;
+}
+
+export interface EngineSettingsSetRequest {
+  agyFullAccess: boolean;
+}
+
 export interface CatalogKit {
   /** Kit identifier e.g. youtube-video, shorts, carousel */
   id: string;

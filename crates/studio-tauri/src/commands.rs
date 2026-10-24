@@ -3390,6 +3390,57 @@ pub fn tts_set_config(state: State<'_, AppState>, req: TtsSetConfigRequest) -> C
     tts_set_config_impl(&state, req)
 }
 
+/// Engine configuration response.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineSettingsResponse {
+    pub agy_full_access: bool,
+}
+
+/// Engine configuration update request.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineSettingsSetRequest {
+    #[serde(default)]
+    pub agy_full_access: bool,
+}
+
+/// Get stored engine settings (`engine:agy_full_access`).
+pub fn engine_settings_get_impl(state: &AppState) -> CmdResult<EngineSettingsResponse> {
+    let raw = state
+        .app_paths
+        .open_app_db()?
+        .get_setting("engine:agy_full_access")?;
+    Ok(EngineSettingsResponse {
+        agy_full_access: raw.as_deref() == Some("true"),
+    })
+}
+
+/// Get stored engine settings (`engine:agy_full_access`).
+#[tauri::command]
+pub fn engine_settings_get(state: State<'_, AppState>) -> CmdResult<EngineSettingsResponse> {
+    engine_settings_get_impl(&state)
+}
+
+/// Save engine settings (`engine:agy_full_access`).
+pub fn engine_settings_set_impl(state: &AppState, req: EngineSettingsSetRequest) -> CmdResult<()> {
+    let val = if req.agy_full_access { "true" } else { "false" };
+    state
+        .app_paths
+        .open_app_db()?
+        .set_setting("engine:agy_full_access", val)?;
+    Ok(())
+}
+
+/// Save engine settings (`engine:agy_full_access`).
+#[tauri::command]
+pub fn engine_settings_set(
+    state: State<'_, AppState>,
+    req: EngineSettingsSetRequest,
+) -> CmdResult<()> {
+    engine_settings_set_impl(&state, req)
+}
+
 /// Native folder picker dialog. Returns the selected directory path, or None if cancelled.
 pub async fn dialog_pick_folder_impl() -> CmdResult<Option<String>> {
     let handle = rfd::AsyncFileDialog::new()
@@ -3408,6 +3459,38 @@ pub async fn dialog_pick_folder() -> CmdResult<Option<String>> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn test_engine_settings_get_set_default_false() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join("app_data");
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
+        let state = AppState::new();
+
+        let initial = engine_settings_get_impl(&state).unwrap();
+        assert!(!initial.agy_full_access);
+
+        engine_settings_set_impl(
+            &state,
+            EngineSettingsSetRequest {
+                agy_full_access: true,
+            },
+        )
+        .unwrap();
+        let after_enable = engine_settings_get_impl(&state).unwrap();
+        assert!(after_enable.agy_full_access);
+
+        engine_settings_set_impl(
+            &state,
+            EngineSettingsSetRequest {
+                agy_full_access: false,
+            },
+        )
+        .unwrap();
+        let after_disable = engine_settings_get_impl(&state).unwrap();
+        assert!(!after_disable.agy_full_access);
+    }
 
     #[test]
     fn test_strip_verbatim() {

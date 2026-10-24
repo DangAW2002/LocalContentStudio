@@ -131,6 +131,8 @@ import type {
   TtsPreviewResponse,
   TtsConfigResponse,
   TtsSetConfigRequest,
+  EngineSettingsResponse,
+  EngineSettingsSetRequest,
 } from "./types";
 
 export class StudioApiClient {
@@ -649,6 +651,23 @@ export class StudioApiClient {
   async agyDisconnect(): Promise<{ connected: boolean }> {
     return invoke<{ connected: boolean }>("agy_disconnect");
   }
+
+  /**
+   * Get engine settings (`engine:agy_full_access`).
+   * Command: `engine_settings_get`
+   */
+  async engineSettingsGet(): Promise<EngineSettingsResponse> {
+    return invoke<EngineSettingsResponse>("engine_settings_get");
+  }
+
+  /**
+   * Save engine settings (`engine:agy_full_access`).
+   * Command: `engine_settings_set`
+   */
+  async engineSettingsSet(req: EngineSettingsSetRequest): Promise<void> {
+    return invoke<void>("engine_settings_set", { req });
+  }
+
 
   // ==========================================
   // Secrets & Provider Endpoints
