@@ -94,7 +94,7 @@ pub fn render_cache_key(
         if let Some(lufs) = options.loudness_lufs {
             use sha2::{Digest, Sha256};
             full_hash = hex::encode(Sha256::digest(
-                format!("{full_hash}|loudness={lufs}").as_bytes(),
+                format!("{full_hash}|audio_norm=iterative_gain_v1|loudness={lufs}").as_bytes(),
             ));
         }
     }
