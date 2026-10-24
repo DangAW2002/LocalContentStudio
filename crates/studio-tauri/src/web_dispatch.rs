@@ -655,3 +655,49 @@ pub async fn dispatch_invoke(
         ))),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// Routed but deliberately unreachable from a browser.
+    const DESKTOP_ONLY: &[&str] = &[
+        // Native OS dialog; a headless server has no screen. The web uses `fs_list_dirs`.
+        "dialog_pick_folder",
+    ];
+
+    /// Every command the web dispatcher routes must be allowlisted (or listed as desktop-only),
+    /// otherwise the browser gets COMMAND_NOT_ALLOWED for a feature that works on desktop.
+    #[test]
+    fn routed_commands_are_allowlisted_for_web() {
+        let src = include_str!("web_dispatch.rs");
+        let body = src
+            .split("pub async fn dispatch_invoke")
+            .nth(1)
+            .expect("dispatch_invoke not found");
+        let mut missing = Vec::new();
+        let mut routed = 0;
+        for line in body.lines() {
+            let t = line.trim_start();
+            let Some(rest) = t.strip_prefix('"') else {
+                continue;
+            };
+            let Some((cmd, tail)) = rest.split_once('"') else {
+                continue;
+            };
+            if !tail.trim_start().starts_with("=>") {
+                continue;
+            }
+            routed += 1;
+            if !studio_web::allowlist::is_command_allowed(cmd) && !DESKTOP_ONLY.contains(&cmd) {
+                missing.push(cmd.to_string());
+            }
+        }
+        assert!(
+            routed > 50,
+            "parsed only {routed} routes; parser out of date?"
+        );
+        assert!(
+            missing.is_empty(),
+            "routed but not allowlisted for web: {missing:?}"
+        );
+    }
+}

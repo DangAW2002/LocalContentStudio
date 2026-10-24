@@ -23,6 +23,10 @@ pub const SUDO_COMMANDS: &[&str] = &[
     "web_configure",
     // TTS model/binary download executes binary downloads
     "tts_model_install",
+    // Deletes a library/project asset file.
+    "asset_delete",
+    // Overwrites a pinned artifact with a checkpoint copy.
+    "restore_pinned_artifact",
 ];
 
 /// Commands allowed to be invoked via `POST /api/invoke/<command>`.
@@ -33,6 +37,30 @@ pub const ALLOWED_WEB_COMMANDS: &[&str] = &[
     "workspace_create",
     "workspace_open",
     "workspace_current",
+    // Read-only folder listing for the web workspace picker (no native dialog in a browser).
+    "fs_list_dirs",
+    // Content graph (ADR-011), series and reference profiles
+    "graph_get",
+    "graph_link",
+    "graph_unlink",
+    "graph_set_pinned",
+    "graph_set_notes",
+    "graph_create_variant",
+    "graph_make_reference",
+    "graph_update_downstream_plan",
+    "graph_update_downstream_run",
+    "restore_pinned_artifact",
+    "series_list",
+    "series_get",
+    "series_create",
+    "series_create_episode",
+    // Brand / channel / playbook scopes
+    "scope_create",
+    "scope_override",
+    "scope_remove_override",
+    "scope_validate",
+    // Library
+    "asset_delete",
     // Projects and file operations
     "project_list",
     "project_create",
@@ -141,6 +169,9 @@ mod tests {
         assert!(is_command_allowed("secret_set"));
         // Granting agy unattended shell access stays desktop-only.
         assert!(!is_command_allowed("engine_settings_set"));
+        // The web workspace picker browses server folders; listing is read-only.
+        assert!(is_command_allowed("fs_list_dirs"));
+        assert!(!requires_sudo("fs_list_dirs"));
         for c in [
             "web_configure",
             "workspace_open",
