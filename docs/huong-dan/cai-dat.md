@@ -65,6 +65,8 @@ Studio hỗ trợ phối hợp làm việc với Claude Code hoặc agy CLI:
   npm install -g @anthropic-ai/claude-code
   ```
 - **agy (Google Antigravity CLI)**: Cài đặt và cấu hình theo hướng dẫn của Antigravity.
+  - Mặc định khi chạy trong Studio, lệnh shell của `agy` bị chặn để bảo đảm an toàn (agent dùng công cụ đọc/ghi tệp và MCP `studio` thay thế).
+  - Nếu cần cho phép `agy` chạy lệnh shell trong workspace, vào **Tools & Cài đặt → Engines** và bật công tắc **Cho agy toàn quyền (chạy lệnh shell không cần duyệt)** (lưu ý: `agy` có thể chạy mọi lệnh trên máy, chỉ bật khi tin tưởng).
 
 ### b. Xử lý Đa phương tiện (FFmpeg)
 FFmpeg là công cụ bắt buộc để Studio dựng video, cắt ghép âm thanh và chuẩn hóa âm lượng chuẩn YouTube (-14 LUFS):

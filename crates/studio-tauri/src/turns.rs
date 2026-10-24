@@ -134,6 +134,7 @@ fn build_context(
     modules: &[String],
     note: Option<String>,
     is_claude: bool,
+    agy_full_access: bool,
 ) -> String {
     let mut lines = vec![format!(
         "Bạn đang làm việc trong Local Content Studio, workspace \"{}\" (thư mục hiện tại).",
@@ -238,6 +239,14 @@ fn build_context(
     if !is_claude {
         lines.push(
             "Các công cụ Studio nằm trên MCP server \"studio\" (gọi qua call_mcp_tool với ServerName \"studio\"): brand_get, channel_get, playbook_get, capability_search, capability_run, check_run, artifact_render. Chỉ thao tác bên trong thư mục workspace hiện tại. Nếu MCP server \"studio\" không tải được hoặc báo lỗi, phải dừng lại và báo lỗi ngay, không đọc tệp ở nơi khác."
+                .into(),
+        );
+        lines.push(
+            if agy_full_access {
+                "Bạn được chạy lệnh shell nhưng chỉ trong thư mục workspace hiện tại, không xoá/sửa tệp ngoài workspace."
+            } else {
+                "Mặc định lệnh shell bị chặn, dùng công cụ đọc/ghi tệp và MCP \"studio\" thay thế."
+            }
                 .into(),
         );
     } else {
@@ -395,7 +404,21 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
     let note_key = format!("thread.note.{thread_id}");
     let note = get_setting(&db, &note_key)?;
     del_setting(&db, &note_key)?;
-    let context = build_context(&ws, project.as_ref(), &modules, note, is_claude);
+    let agy_setting = state
+        .app_paths
+        .open_app_db()
+        .ok()
+        .and_then(|adb| adb.get_setting("engine:agy_full_access").ok().flatten())
+        .or_else(|| get_setting(&db, "engine:agy_full_access").ok().flatten());
+    let skip_permissions = !is_claude && agy_setting.as_deref() == Some("true");
+    let context = build_context(
+        &ws,
+        project.as_ref(),
+        &modules,
+        note,
+        is_claude,
+        skip_permissions,
+    );
 
     let turn_budget = crate::budget::calculate_turn_budget(&ws);
     let token = state.tokens.issue(TurnContext {
@@ -437,6 +460,7 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
         permission_prompt_tool: is_claude.then(|| "mcp__studio__approve".to_string()),
         append_system_prompt: Some(context),
         max_budget_usd: None,
+        skip_permissions,
     };
 
     let started = if is_claude {
@@ -963,7 +987,12 @@ mod tests {
         std::env::set_var("STUDIO_APP_DIR", &app_dir);
         let ws = Workspace::create(tmp.path().join("ws"), "Test Workspace").unwrap();
 
-        let agy_ctx = build_context(&ws, None, &[], None, false);
+        let agy_ctx = build_context(&ws, None, &[], None, false, false);
+        assert!(agy_ctx.contains("lệnh shell bị chặn"));
+        assert!(agy_ctx.contains("dùng công cụ đọc/ghi tệp và MCP \"studio\" thay thế"));
+        let agy_full_ctx = build_context(&ws, None, &[], None, false, true);
+        assert!(agy_full_ctx.contains("được chạy lệnh shell nhưng chỉ trong thư mục workspace hiện tại, không xoá/sửa tệp ngoài workspace"));
+        assert!(!agy_full_ctx.contains("lệnh shell bị chặn"));
         assert!(agy_ctx.contains("MCP server \"studio\""));
         assert!(agy_ctx.contains("call_mcp_tool"));
         assert!(agy_ctx.contains("ServerName \"studio\""));
@@ -971,7 +1000,7 @@ mod tests {
         assert!(agy_ctx.contains("Nếu MCP server \"studio\" không tải được hoặc báo lỗi, phải dừng lại và báo lỗi ngay, không đọc tệp ở nơi khác."));
         assert!(agy_ctx.contains("artifact_render"));
 
-        let claude_ctx = build_context(&ws, None, &[], None, true);
+        let claude_ctx = build_context(&ws, None, &[], None, true, false);
         assert!(claude_ctx.contains("Dùng các tool MCP của server \"studio\""));
         assert!(claude_ctx.contains("Tạo/sửa tệp bằng tool Write/Edit"));
         assert!(!claude_ctx.contains("call_mcp_tool"));
@@ -1600,7 +1629,7 @@ mod tests {
         art.notes = vec!["Giữ nguyên font chữ và màu logo".to_string()];
         art.save(&proj).unwrap();
 
-        let ctx = build_context(&ws, Some(&proj), &[], None, false);
+        let ctx = build_context(&ws, Some(&proj), &[], None, false, false);
         assert!(ctx.contains("Sơ đồ nội dung:"));
         assert!(ctx.contains("Đã khóa: hero"));
         assert!(ctx.contains("hero: \"Giữ nguyên font chữ và màu logo\""));

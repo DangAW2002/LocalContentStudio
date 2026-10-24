@@ -160,6 +160,9 @@ pub struct TurnRequest {
     pub append_system_prompt: Option<String>,
     /// Optional maximum spending budget in USD.
     pub max_budget_usd: Option<f64>,
+    /// Whether to skip permission prompts (passes `--dangerously-skip-permissions` to `agy`).
+    #[serde(default)]
+    pub skip_permissions: bool,
 }
 
 /// Engine installation and compatibility probe result.

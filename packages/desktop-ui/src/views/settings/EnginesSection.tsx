@@ -12,6 +12,8 @@ export const EnginesSection: React.FC = () => {
   const [loading, setLoading] = React.useState(cachedEngines === null);
   const [error, setError] = React.useState<string | null>(null);
   const [agyBusy, setAgyBusy] = React.useState(false);
+  const [agyFullAccess, setAgyFullAccess] = React.useState(false);
+  const [agyPermBusy, setAgyPermBusy] = React.useState(false);
   const [agyStatus, setAgyStatus] = React.useState<{ type: "success" | "danger"; message: string } | null>(null);
 
   const loadEngines = React.useCallback(async (force = false) => {
@@ -38,6 +40,39 @@ export const EnginesSection: React.FC = () => {
       loadEngines();
     }
   }, [loadEngines]);
+
+  React.useEffect(() => {
+    let active = true;
+    studioApi
+      .engineSettingsGet()
+      .then((res) => {
+        if (active && res && typeof res.agyFullAccess === "boolean") {
+          setAgyFullAccess(res.agyFullAccess);
+        }
+      })
+      .catch(() => {
+        // Default false if backend unavailable
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleToggleAgyFullAccess = async (next: boolean) => {
+    setAgyPermBusy(true);
+    setAgyStatus(null);
+    try {
+      await studioApi.engineSettingsSet({ agyFullAccess: next });
+      setAgyFullAccess(next);
+    } catch (err: any) {
+      setAgyStatus({
+        type: "danger",
+        message: err?.message || "Không thể lưu cài đặt quyền của agy.",
+      });
+    } finally {
+      setAgyPermBusy(false);
+    }
+  };
 
   const handleAgyConnect = async () => {
     setAgyBusy(true);
@@ -227,6 +262,44 @@ export const EnginesSection: React.FC = () => {
                             </Callout>
                           </div>
                         )}
+                        <div
+                          style={{
+                            marginTop: 12,
+                            paddingTop: 12,
+                            borderTop: "1px solid var(--cs-border-subtle)",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 8,
+                          }}
+                        >
+                          <label
+                            htmlFor="agy-full-access-toggle"
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                              cursor: agyPermBusy ? "not-allowed" : "pointer",
+                              fontSize: "var(--cs-text-xs)",
+                              fontWeight: 600,
+                              userSelect: "none",
+                            }}
+                          >
+                            <input
+                              id="agy-full-access-toggle"
+                              type="checkbox"
+                              role="switch"
+                              aria-checked={agyFullAccess}
+                              checked={agyFullAccess}
+                              disabled={agyPermBusy}
+                              onChange={(e) => handleToggleAgyFullAccess(e.target.checked)}
+                              style={{ cursor: agyPermBusy ? "not-allowed" : "pointer", margin: 0 }}
+                            />
+                            Cho agy toàn quyền (chạy lệnh shell không cần duyệt)
+                          </label>
+                          <Callout variant="warning">
+                            Cảnh báo: agy có thể chạy mọi lệnh trên máy, chỉ bật khi tin tưởng.
+                          </Callout>
+                        </div>
                       </div>
                     )}
                   </div>

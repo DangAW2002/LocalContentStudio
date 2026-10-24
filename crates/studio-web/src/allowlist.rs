@@ -58,6 +58,8 @@ pub const ALLOWED_WEB_COMMANDS: &[&str] = &[
     // Engine models and catalog
     "engines_probe",
     "engine_models",
+    "engine_settings_get",
+    "engine_settings_set",
     "catalog_kits",
     "catalog_modules",
     "catalog_suggest",

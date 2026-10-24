@@ -280,6 +280,7 @@ async fn test_live_claude_probe_and_turn() {
             permission_prompt_tool: None,
             append_system_prompt: None,
             max_budget_usd: Some(0.1),
+            skip_permissions: false,
         };
 
         let mut turn = engine.start_turn(req).await.unwrap();
@@ -308,6 +309,7 @@ async fn test_live_agy_probe_and_turn() {
             permission_prompt_tool: None,
             append_system_prompt: None,
             max_budget_usd: None,
+            skip_permissions: false,
         };
 
         let mut turn = engine.start_turn(req).await.unwrap();
