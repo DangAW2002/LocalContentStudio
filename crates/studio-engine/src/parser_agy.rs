@@ -111,8 +111,9 @@ impl AgyParser {
                             // File change detection
                             if let Some(op) = file_op_for_agy_tool(tool_name) {
                                 if let Some(target) = extract_agy_target_file(&parameters) {
+                                    let clean = target.replace('\\', "/");
                                     events.push(Event::FileChange {
-                                        path: PathBuf::from(target),
+                                        path: PathBuf::from(clean),
                                         op,
                                     });
                                 }

@@ -148,8 +148,9 @@ impl ClaudeParser {
                                         if let Some(file_path) =
                                             input.get("file_path").and_then(|v| v.as_str())
                                         {
+                                            let clean = file_path.replace('\\', "/");
                                             events.push(Event::FileChange {
-                                                path: PathBuf::from(file_path),
+                                                path: PathBuf::from(clean),
                                                 op,
                                             });
                                         }

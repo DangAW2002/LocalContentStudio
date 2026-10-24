@@ -337,6 +337,7 @@ async fn test_env_sanitization_does_not_leak_parent_var() {
     assert!(!sanitized.contains_key("STUDIO_SECRET_TEST_TOKEN"));
     // Standard allowed vars should exist
     assert!(sanitized.contains_key("PATH") || sanitized.contains_key("Path"));
+    #[cfg(windows)]
     assert!(sanitized.contains_key("SystemRoot") || sanitized.contains_key("SYSTEMROOT"));
 }
 

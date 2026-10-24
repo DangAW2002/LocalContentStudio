@@ -256,7 +256,14 @@ impl Registry {
 
         for (i, content) in builtin_tools.iter().enumerate() {
             match serde_yaml::from_str::<ToolManifest>(content) {
-                Ok(tool) => {
+                Ok(mut tool) => {
+                    #[cfg(not(windows))]
+                    if tool.id == "echo" {
+                        tool.run.command = "cat".into();
+                        tool.run.args.clear();
+                    }
+                    #[cfg(windows)]
+                    let _ = &mut tool;
                     self.tools.insert(tool.id.clone(), tool);
                 }
                 Err(err) => self.problems.push(ManifestProblem {
