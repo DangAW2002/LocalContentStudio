@@ -240,14 +240,29 @@ pub async fn render_with(
             let out_file = output_dir.join("output.mp4");
             expected_outputs.push(out_file.clone());
 
-            build_timeline_render_job(
-                &job_id,
-                &ws_id,
-                &ffmpeg,
-                &timeline_doc,
-                &artifact.dir(project),
-                &out_file,
-            )?
+            // Pre-rendering scene chunks runs ffmpeg synchronously: keep it off the async runtime
+            // (the Studio MCP server shares it).
+            let (job_id_c, ws_id_c, ffmpeg_c, art_dir) = (
+                job_id.clone(),
+                ws_id.clone(),
+                ffmpeg.clone(),
+                artifact.dir(project),
+            );
+            tokio::task::spawn_blocking(move || {
+                build_timeline_render_job(
+                    &job_id_c,
+                    &ws_id_c,
+                    &ffmpeg_c,
+                    &timeline_doc,
+                    &art_dir,
+                    &out_file,
+                )
+            })
+            .await
+            .map_err(|e| ArtifactError::ExecutionFailed {
+                message: format!("Lỗi luồng render cảnh: {e}"),
+                details: None,
+            })??
         }
         _ => {
             return Err(ArtifactError::UnsupportedKind(format!(

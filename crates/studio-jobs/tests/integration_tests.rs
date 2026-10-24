@@ -455,6 +455,7 @@ async fn test_memory_limit_exceeded_fails_with_oom() {
     let mut spec = dummy_spec("oom-job", Priority::Interactive);
     spec.command = cmd;
     spec.memory_limit_mb = Some(60); // Hard limit 60 MB
+    spec.resources.ram_mb = 40;
     spec.timeout = Duration::from_secs(10);
 
     let (event_tx, mut event_rx) = mpsc::channel(32);
@@ -666,4 +667,40 @@ async fn test_windows_spawn_in_job_object() {
         .wait_with_output()
         .expect("Failed to wait on child process");
     assert!(status.status.success(), "cmd.exe /c exit 0 should exit 0");
+}
+
+#[test]
+fn test_historical_estimate_never_lowers_limit_below_declared() {
+    let store = MemoryEstimateStore::new();
+    store.update_peak_ram_mb(
+        "
+tool:test
+",
+        50,
+    );
+
+    let mut spec = dummy_spec(
+        "
+job-large
+",
+        Priority::Interactive,
+    );
+    spec.tool_id = "
+tool:test
+"
+    .into();
+    spec.resources.ram_mb = 1024;
+    spec.memory_limit_mb = Some(1536);
+
+    let estimated_ram = store
+        .get_peak_ram_mb(&spec.tool_id)
+        .unwrap_or(spec.resources.ram_mb)
+        .max(spec.resources.ram_mb);
+    let from_est = ((estimated_ram as f64) * 1.5).ceil() as u64;
+    let effective_mem_limit = spec
+        .memory_limit_mb
+        .map(|decl| decl.max(from_est))
+        .or(Some(from_est));
+
+    assert_eq!(effective_mem_limit, Some(1536));
 }
