@@ -123,5 +123,14 @@ jobs:
       - name: Run Cargo tests
         run: cargo test --workspace
 
+      - name: Build Design System
+        run: pnpm --filter @studio/design-system build
+
+      - name: Typecheck Desktop UI
+        run: pnpm --filter @studio/desktop-ui typecheck
+
       - name: Test Desktop UI
         run: pnpm --filter @studio/desktop-ui test
+
+      - name: Build Desktop UI
+        run: pnpm --filter @studio/desktop-ui build
