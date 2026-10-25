@@ -131,8 +131,12 @@ export const App: React.FC = () => {
       setDiskUsage(disk);
       setProjectList(projs);
       setBudgetStatus(bgt);
-      if (!activeProjectSlug && projs.length > 0) {
-        setActiveProjectSlug(projs[0].slug);
+      if (projs.length > 0) {
+        if (!activeProjectSlug || !projs.some((p) => p.slug === activeProjectSlug)) {
+          setActiveProjectSlug(projs[0].slug);
+        }
+      } else {
+        setActiveProjectSlug("");
       }
     } catch {
       // Disconnected state
@@ -567,12 +571,14 @@ export const App: React.FC = () => {
   const handleOpenWorkspace = async (path: string) => {
     const ws = await studioApi.openWorkspace({ path });
     setCurrentWorkspace(ws);
+    window.dispatchEvent(new CustomEvent("studio:workspace-changed", { detail: ws }));
     await loadWorkspaceAndCore();
   };
 
   const handleCreateWorkspace = async (path: string, name: string) => {
-    const ws = await studioApi.createWorkspace({ path, name });
+    const ws = await studioApi.createWorkspace({ path: path || undefined, name });
     setCurrentWorkspace(ws);
+    window.dispatchEvent(new CustomEvent("studio:workspace-changed", { detail: ws }));
     await loadWorkspaceAndCore();
   };
 
@@ -604,10 +610,13 @@ export const App: React.FC = () => {
   );
 
   const renderActiveView = () => {
+    const wsKey = currentWorkspace?.path || "no-workspace";
     switch (activeArea) {
       case "home":
         return (
           <HomeView
+            key={wsKey}
+            currentWorkspace={currentWorkspace}
             onOpenProject={handleOpenProjectFromHome}
             onNavigateSettings={() => handleNavigateSettings("engines")}
             onLoginSuccess={loadWorkspaceAndCore}
@@ -616,15 +625,16 @@ export const App: React.FC = () => {
       case "projects":
         return (
           <ProjectView
+            key={wsKey}
             initialSlug={activeProjectSlug}
             initialThreadId={activeThreadId}
             onNavigateSettings={handleNavigateSettings}
           />
         );
       case "brand":
-        return <BrandView />;
+        return <BrandView key={wsKey} />;
       case "library":
-        return <LibraryView onUseInThread={handleUseInThread} />;
+        return <LibraryView key={wsKey} onUseInThread={handleUseInThread} />;
       case "settings":
         return <SettingsView initialTab={settingsTab} />;
     }

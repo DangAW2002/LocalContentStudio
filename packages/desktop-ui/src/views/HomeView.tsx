@@ -9,9 +9,11 @@ import type {
   EngineType,
   EngineModelOption,
   ScopeItem,
+  WorkspaceSummary,
 } from "../api/types";
 
 export interface HomeViewProps {
+  currentWorkspace?: WorkspaceSummary;
   onOpenProject: (slug: string, threadId?: string) => void;
   onNavigateSettings: () => void;
   onLoginSuccess?: () => void;
@@ -30,6 +32,7 @@ function slugify(text: string): string {
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
+  currentWorkspace,
   onOpenProject,
   onNavigateSettings,
   onLoginSuccess,
@@ -89,10 +92,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
         studioApi.getScopeItems("brands").catch(() => []),
         studioApi.getScopeItems("playbooks").catch(() => []),
       ]);
-      setProjects(projList);
-      setJobs(jobList);
-      setBrands(brandList);
-      setPlaybooks(pbList);
+      setProjects(Array.isArray(projList) ? projList : []);
+      setJobs(Array.isArray(jobList) ? jobList : []);
+      setBrands(Array.isArray(brandList) ? brandList : []);
+      setPlaybooks(Array.isArray(pbList) ? pbList : []);
     } catch (err: any) {
       setError(err?.message || "Chưa kết nối Studio core");
     } finally {
@@ -103,6 +106,23 @@ export const HomeView: React.FC<HomeViewProps> = ({
   React.useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Reload data immediately when workspace changes or event is dispatched
+  React.useEffect(() => {
+    const handleWorkspaceChanged = () => {
+      setError(null);
+      void loadData();
+    };
+    window.addEventListener("studio:workspace-changed", handleWorkspaceChanged);
+    return () => window.removeEventListener("studio:workspace-changed", handleWorkspaceChanged);
+  }, [loadData]);
+
+  React.useEffect(() => {
+    if (currentWorkspace?.path) {
+      setError(null);
+      void loadData();
+    }
+  }, [currentWorkspace?.path, loadData]);
 
   // Unified login success handler: clear core error state, reload data and engine models
   const handleLoginSuccess = React.useCallback(async () => {
@@ -313,7 +333,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   onChange={(e) => setSelectedBrand(e.target.value)}
                   options={[
                     { value: "", label: "Mặc định (Không chọn)" },
-                    ...brands.map((b) => ({ value: b.id, label: b.name })),
+                    ...(brands || []).map((b) => ({ value: b.id, label: b.name })),
                   ]}
                 />
               </div>
@@ -326,7 +346,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   onChange={(e) => setSelectedPlaybook(e.target.value)}
                   options={[
                     { value: "", label: "Không áp dụng" },
-                    ...playbooks.map((pb) => ({ value: pb.name, label: pb.name })),
+                    ...(playbooks || []).map((pb) => ({ value: pb.name, label: pb.name })),
                   ]}
                 />
               </div>

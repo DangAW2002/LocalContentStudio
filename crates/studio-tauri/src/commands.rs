@@ -3834,6 +3834,7 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_workspaces_root_get_and_create() {
+        let _lock = ENV_LOCK.lock().unwrap();
         let temp = tempfile::tempdir().unwrap();
         let app_dir = temp.path().join("app_data");
         let ws_root = temp.path().join("StudioRoot");
@@ -3858,6 +3859,9 @@ pub(crate) mod tests {
         assert_eq!(list[0]["slug"], "kenh-review");
         assert_eq!(list[0]["name"], "Kênh Review");
         assert_eq!(list[0]["isCurrent"], true);
+
+        std::env::remove_var("STUDIO_APP_DIR");
+        std::env::remove_var("STUDIO_WORKSPACES_ROOT");
     }
 
     #[test]
