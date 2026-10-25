@@ -642,6 +642,21 @@ pub async fn dispatch_invoke(
             let res = commands::engine_settings_get_impl(state)?;
             Ok(serde_json::to_value(res)?)
         }
+        "engine_settings_set" => {
+            let req: commands::EngineSettingsSetRequest = get_arg(&args, "req").or_else(|_| {
+                serde_json::from_value(args.clone()).map_err(|e| CmdError::msg(e.to_string()))
+            })?;
+            commands::engine_settings_set_impl(state, req)?;
+            Ok(json!({ "ok": true }))
+        }
+        "agy_connect" => {
+            let res = commands::agy_connect()?;
+            Ok(res)
+        }
+        "agy_disconnect" => {
+            let res = commands::agy_disconnect()?;
+            Ok(res)
+        }
         "dialog_pick_folder" => {
             let res = commands::dialog_pick_folder_impl().await?;
             Ok(serde_json::to_value(res)?)
