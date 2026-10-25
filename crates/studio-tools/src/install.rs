@@ -710,11 +710,7 @@ mod tests {
             "bin:powershell",
         );
         #[cfg(not(windows))]
-        let (cmd, args, need) = (
-            "sh",
-            r#"["-c", "echo 1"]"#,
-            "bin:sh",
-        );
+        let (cmd, args, need) = ("sh", r#"["-c", "echo 1"]"#, "bin:sh");
         let tool_yaml = format!(
             r#"
 id: test-tool
