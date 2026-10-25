@@ -703,7 +703,20 @@ mod tests {
         let tool_dir = temp.path().join("my-test-tool");
         fs::create_dir_all(&tool_dir).unwrap();
 
-        let tool_yaml = r#"
+        #[cfg(windows)]
+        let (cmd, args, need) = (
+            "powershell",
+            r#"["-NoProfile", "-Command", "echo 1"]"#,
+            "bin:powershell",
+        );
+        #[cfg(not(windows))]
+        let (cmd, args, need) = (
+            "sh",
+            r#"["-c", "echo 1"]"#,
+            "bin:sh",
+        );
+        let tool_yaml = format!(
+            r#"
 id: test-tool
 version: "1.2.3"
 kind: generator
@@ -712,12 +725,13 @@ provides:
   - "echo@1"
 run:
   type: cli
-  command: "powershell"
-  args: ["-NoProfile", "-Command", "echo 1"]
+  command: "{cmd}"
+  args: {args}
 needs:
-  - "bin:powershell"
+  - "{need}"
 side_effect: none
-"#;
+"#
+        );
         fs::write(tool_dir.join("tool.yaml"), tool_yaml).unwrap();
 
         let app_paths = AppPaths::new(temp.path().join("app-data"));
@@ -734,7 +748,7 @@ side_effect: none
 
         assert_eq!(preview.tool_id, "test-tool");
         assert_eq!(preview.version, "1.2.3");
-        assert_eq!(preview.command, "powershell");
+        assert_eq!(preview.command, cmd);
         assert!(!preview.is_reinstall);
 
         let secrets = MemoryStore::new();
