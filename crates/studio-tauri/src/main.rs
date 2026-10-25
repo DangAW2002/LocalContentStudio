@@ -173,6 +173,7 @@ fn main() {
             commands::engine_settings_set,
             commands::dialog_pick_folder,
             commands::fs_list_dirs,
+            commands::fs_create_dir,
             commands::series_list,
             commands::series_get,
             commands::series_create,

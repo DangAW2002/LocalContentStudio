@@ -191,6 +191,14 @@ export class StudioApiClient {
     return invoke<DirListing>("fs_list_dirs", { path: path ?? null });
   }
 
+  /**
+   * Create a new sub-directory on the machine running Studio.
+   * Command: `fs_create_dir`
+   */
+  async createDir(parent: string, name: string): Promise<DirListing> {
+    return invoke<DirListing>("fs_create_dir", { parent, name });
+  }
+
   // ==========================================
   // Project & File Commands
   // ==========================================

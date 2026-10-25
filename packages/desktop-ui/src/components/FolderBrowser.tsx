@@ -26,6 +26,9 @@ export const FolderBrowser: React.FC<FolderBrowserProps> = ({
   const [listing, setListing] = React.useState<DirListing | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [showNewDir, setShowNewDir] = React.useState(false);
+  const [newDirName, setNewDirName] = React.useState("");
+  const [creatingDir, setCreatingDir] = React.useState(false);
 
   const load = React.useCallback(async (path?: string) => {
     setLoading(true);
@@ -42,6 +45,22 @@ export const FolderBrowser: React.FC<FolderBrowserProps> = ({
   React.useEffect(() => {
     void load(initialPath?.trim() || undefined);
   }, [load, initialPath]);
+
+  const handleCreateDir = async () => {
+    if (!listing || !newDirName.trim()) return;
+    setCreatingDir(true);
+    setError(null);
+    try {
+      const updated = await studioApi.createDir(listing.path, newDirName.trim());
+      setListing(updated);
+      setShowNewDir(false);
+      setNewDirName("");
+    } catch (err: any) {
+      setError(err?.message || "Không tạo được thư mục mới.");
+    } finally {
+      setCreatingDir(false);
+    }
+  };
 
   const rowStyle: React.CSSProperties = {
     display: "flex",
@@ -71,7 +90,7 @@ export const FolderBrowser: React.FC<FolderBrowserProps> = ({
         backgroundColor: "var(--cs-bg-raised)",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <Button
           size="sm"
           variant="secondary"
@@ -89,11 +108,20 @@ export const FolderBrowser: React.FC<FolderBrowserProps> = ({
         >
           Home
         </Button>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={!listing || loading || showNewDir}
+          onClick={() => setShowNewDir(true)}
+          leftIcon={<Icon name="plus" size={12} />}
+        >
+          Thư mục mới
+        </Button>
         <span
           title={listing?.path}
           style={{
             flex: 1,
-            minWidth: 0,
+            minWidth: 120,
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -105,6 +133,67 @@ export const FolderBrowser: React.FC<FolderBrowserProps> = ({
           {listing?.path ?? "…"}
         </span>
       </div>
+
+      {showNewDir && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "6px 8px",
+            backgroundColor: "var(--cs-bg-panel)",
+            border: "1px solid var(--cs-border-subtle)",
+            borderRadius: "var(--cs-radius-control)",
+          }}
+        >
+          <Icon name="folder" size={14} color="var(--cs-accent)" />
+          <input
+            autoFocus
+            type="text"
+            placeholder="Tên thư mục mới..."
+            value={newDirName}
+            onChange={(e) => setNewDirName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void handleCreateDir();
+              } else if (e.key === "Escape") {
+                setShowNewDir(false);
+                setNewDirName("");
+              }
+            }}
+            style={{
+              flex: 1,
+              padding: "4px 8px",
+              backgroundColor: "var(--cs-bg-subtle)",
+              border: "1px solid var(--cs-border-subtle)",
+              borderRadius: "var(--cs-radius-control)",
+              color: "var(--cs-fg-primary)",
+              fontSize: "var(--cs-text-sm)",
+              outline: "none",
+            }}
+          />
+          <Button
+            size="sm"
+            variant="primary"
+            busy={creatingDir}
+            disabled={!newDirName.trim()}
+            onClick={() => void handleCreateDir()}
+          >
+            Tạo
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              setShowNewDir(false);
+              setNewDirName("");
+            }}
+          >
+            Hủy
+          </Button>
+        </div>
+      )}
 
       {error && (
         <Callout variant="danger" title="Không đọc được thư mục">

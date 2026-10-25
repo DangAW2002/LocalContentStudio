@@ -96,4 +96,48 @@ describe("WorkspaceSwitcherModal (web)", () => {
 
     await waitFor(() => expect(props.onOpenWorkspace).toHaveBeenCalledWith("/home/dang/src"));
   });
+
+  it("offers quick 1-click default workspace creation when recents is empty", async () => {
+    const props = renderModal();
+    fireEvent.click(screen.getByText("Tạo mới..."));
+    await waitFor(() => expect(screen.getByText("Tạo nhanh Cá Nhân")).toBeTruthy());
+    fireEvent.click(screen.getByText("Tạo nhanh Cá Nhân"));
+    await waitFor(() =>
+      expect(props.onCreateWorkspace).toHaveBeenCalledWith("/home/dang/Studio/ca-nhan", "Studio Cá Nhân"),
+    );
+  });
+
+  it("creates a new subfolder in FolderBrowser", async () => {
+    vi.spyOn(tauriBridge, "invoke").mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "fs_list_dirs") return listings[args?.path ?? ""];
+      if (cmd === "fs_create_dir") {
+        return {
+          path: args.parent,
+          parent: "/home",
+          home: "/home/dang",
+          isWorkspace: false,
+          entries: [{ name: args.name, path: `${args.parent}/${args.name}`, isWorkspace: false }],
+        };
+      }
+      return null;
+    });
+
+    renderModal();
+    fireEvent.click(screen.getByText("Mở thư mục..."));
+    fireEvent.click(screen.getByText("Chọn thư mục..."));
+    await waitFor(() => expect(screen.getByText("Thư mục mới")).toBeTruthy());
+
+    fireEvent.click(screen.getByText("Thư mục mới"));
+    const input = screen.getByPlaceholderText("Tên thư mục mới...");
+    fireEvent.change(input, { target: { value: "thu-muc-moi" } });
+    fireEvent.click(screen.getByText("Tạo"));
+
+    await waitFor(() => {
+      expect(tauriBridge.invoke).toHaveBeenCalledWith("fs_create_dir", {
+        parent: "/home/dang",
+        name: "thu-muc-moi",
+      });
+      expect(screen.getByText("thu-muc-moi")).toBeTruthy();
+    });
+  });
 });

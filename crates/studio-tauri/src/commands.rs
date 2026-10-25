@@ -3533,9 +3533,63 @@ pub fn fs_list_dirs(path: Option<String>) -> CmdResult<Value> {
     fs_list_dirs_impl(path)
 }
 
+/// Create a new directory inside `parent`.
+pub fn fs_create_dir_impl(parent: String, name: String) -> CmdResult<Value> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(CmdError::msg("Tên thư mục không được để trống."));
+    }
+    if name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err(CmdError::msg("Tên thư mục không hợp lệ."));
+    }
+    let parent_path = PathBuf::from(parent.trim());
+    let canonical_parent = parent_path.canonicalize().map_err(|e| {
+        CmdError::msg(format!(
+            "Không tìm thấy thư mục {}: {e}",
+            parent_path.display()
+        ))
+    })?;
+    if !canonical_parent.is_dir() {
+        return Err(CmdError::msg(format!(
+            "{} không phải là thư mục.",
+            canonical_parent.display()
+        )));
+    }
+    let target = canonical_parent.join(name);
+    if target.exists() {
+        return Err(CmdError::msg(format!("Thư mục '{}' đã tồn tại.", name)));
+    }
+    std::fs::create_dir_all(&target)
+        .map_err(|e| CmdError::msg(format!("Không thể tạo thư mục {}: {e}", target.display())))?;
+
+    // Return updated directory listing of parent
+    fs_list_dirs_impl(Some(strip_verbatim(&canonical_parent)))
+}
+
+/// Create a directory command.
+#[tauri::command]
+pub fn fs_create_dir(parent: String, name: String) -> CmdResult<Value> {
+    fs_create_dir_impl(parent, name)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn test_fs_create_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let parent_str = strip_verbatim(root);
+        let res = fs_create_dir_impl(parent_str.clone(), "my_new_dir".to_string()).unwrap();
+        assert!(root.join("my_new_dir").is_dir());
+        let entries = res["entries"].as_array().unwrap();
+        assert!(entries.iter().any(|e| e["name"] == "my_new_dir"));
+
+        // Invalid names
+        assert!(fs_create_dir_impl(parent_str.clone(), "".to_string()).is_err());
+        assert!(fs_create_dir_impl(parent_str, "../hack".to_string()).is_err());
+    }
 
     #[test]
     fn test_fs_list_dirs_lists_subdirs_and_flags_workspaces() {

@@ -48,21 +48,48 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
   const [createPathEdited, setCreatePathEdited] = React.useState(false);
   const web = !isTauri();
 
-  // Web: the server has no native picker; learn its home folder to suggest workspace paths.
+  // Learn the home folder to suggest standard workspace paths.
   React.useEffect(() => {
-    if (!open || !web || home) return;
+    if (!open || home) return;
     studioApi
       .listDirs()
       .then((l) => setHome(l.home))
       .catch(() => {});
-  }, [open, web, home]);
+  }, [open, home]);
 
-  const suggestedCreatePath = (name: string) =>
-    home ? joinPath(joinPath(home, "Studio"), slugifyName(name) || "workspace-moi") : "";
+  const suggestedCreatePath = React.useCallback(
+    (name: string) =>
+      home ? joinPath(joinPath(home, "Studio"), slugifyName(name) || "workspace-moi") : "",
+    [home]
+  );
+
+  // Automatically keep createPath in sync with createName and home unless manually edited
+  React.useEffect(() => {
+    if (!createPathEdited && home) {
+      setCreatePath(suggestedCreatePath(createName));
+    }
+  }, [home, createName, createPathEdited, suggestedCreatePath]);
 
   const handleCreateNameChange = (name: string) => {
     setCreateName(name);
-    if (web && !createPathEdited) setCreatePath(suggestedCreatePath(name));
+    if (!createPathEdited && home) {
+      setCreatePath(suggestedCreatePath(name));
+    }
+  };
+
+  const handleQuickCreateDefault = async () => {
+    const defaultName = "Studio Cá Nhân";
+    const defaultPath = home ? joinPath(joinPath(home, "Studio"), "ca-nhan") : "Studio/ca-nhan";
+    try {
+      setBusy(true);
+      setError(null);
+      await onCreateWorkspace(defaultPath, defaultName);
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || "Không thể khởi tạo workspace mặc định.");
+    } finally {
+      setBusy(false);
+    }
   };
   const prevActiveElementRef = React.useRef<HTMLElement | null>(null);
 
@@ -400,17 +427,51 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
 
           {tab === "create" && (
             <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-3)" }}>
+              {recentWorkspaces.length === 0 && (
+                <div
+                  style={{
+                    padding: "10px 12px",
+                    backgroundColor: "var(--cs-bg-raised)",
+                    border: "1px solid var(--cs-border-strong)",
+                    borderRadius: "var(--cs-radius-control)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "var(--cs-space-2)",
+                  }}
+                >
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span style={{ fontWeight: 600, fontSize: "var(--cs-text-sm)", color: "var(--cs-fg-primary)" }}>
+                      Bắt đầu nhanh với 1 Click
+                    </span>
+                    <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
+                      Tự động tạo & mở workspace mặc định tại: {cleanDisplayPath(home ? joinPath(joinPath(home, "Studio"), "ca-nhan") : "Studio/ca-nhan")}
+                    </span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    busy={busy}
+                    onClick={handleQuickCreateDefault}
+                    style={{ flexShrink: 0 }}
+                  >
+                    Tạo nhanh Cá Nhân
+                  </Button>
+                </div>
+              )}
+
               <Input
                 label="Tên Workspace"
                 placeholder="Ví dụ: Kênh Công Nghệ"
                 value={createName}
+                autoFocus
                 onChange={(e) => handleCreateNameChange(e.target.value)}
               />
               <div style={{ display: "flex", gap: "var(--cs-space-2)", alignItems: "flex-end" }}>
                 <div style={{ flex: 1 }}>
                   <Input
                     label="Đường dẫn thư mục"
-                    placeholder={web && home ? `Ví dụ: ${joinPath(home, "Studio/cong-nghe")}` : "Ví dụ: D:/Studio/cong-nghe"}
+                    placeholder={home ? `Ví dụ: ${joinPath(home, "Studio/cong-nghe")}` : "Ví dụ: D:/Studio/cong-nghe"}
                     value={createPath}
                     onChange={(e) => {
                       setCreatePath(e.target.value);
@@ -428,6 +489,13 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
                   Chọn thư mục...
                 </Button>
               </div>
+
+              <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)", marginTop: -4 }}>
+                {createPathEdited
+                  ? "Đã tùy chỉnh đường dẫn riêng. Thư mục và các cấu trúc cần thiết sẽ được khởi tạo tự động."
+                  : "Mặc định Studio lưu vào thư mục `Studio/` của bạn. Bạn chỉ cần nhập tên rồi bấm 'Tạo và mở'."}
+              </div>
+
               {browsing === "create" && (
                 <FolderBrowser
                   initialPath={home ?? undefined}

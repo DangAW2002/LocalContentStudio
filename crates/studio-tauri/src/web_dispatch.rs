@@ -665,6 +665,11 @@ pub async fn dispatch_invoke(
             let path: Option<String> = args.get("path").and_then(|v| v.as_str()).map(String::from);
             commands::fs_list_dirs_impl(path)
         }
+        "fs_create_dir" => {
+            let parent: String = get_arg(&args, "parent")?;
+            let name: String = get_arg(&args, "name")?;
+            commands::fs_create_dir_impl(parent, name)
+        }
         unhandled => Err(CmdError::msg(format!(
             "Lệnh '{unhandled}' chưa được định tuyến trong bộ điều phối web."
         ))),

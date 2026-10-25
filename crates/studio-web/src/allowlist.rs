@@ -37,8 +37,9 @@ pub const ALLOWED_WEB_COMMANDS: &[&str] = &[
     "workspace_create",
     "workspace_open",
     "workspace_current",
-    // Read-only folder listing for the web workspace picker (no native dialog in a browser).
+    // Folder listing and creation for the web workspace picker (no native dialog in a browser).
     "fs_list_dirs",
+    "fs_create_dir",
     // Content graph (ADR-011), series and reference profiles
     "graph_get",
     "graph_link",
@@ -173,9 +174,11 @@ mod tests {
         assert!(is_command_allowed("engine_settings_set"));
         assert!(is_command_allowed("agy_connect"));
         assert!(is_command_allowed("agy_disconnect"));
-        // The web workspace picker browses server folders; listing is read-only.
+        // The web workspace picker browses server folders; listing and sub-dir creation.
         assert!(is_command_allowed("fs_list_dirs"));
         assert!(!requires_sudo("fs_list_dirs"));
+        assert!(is_command_allowed("fs_create_dir"));
+        assert!(!requires_sudo("fs_create_dir"));
         for c in [
             "web_configure",
             "workspace_open",
