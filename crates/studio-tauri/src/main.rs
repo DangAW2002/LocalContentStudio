@@ -94,6 +94,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_recent_workspaces,
+            commands::workspaces_root_get,
+            commands::workspaces_root_set,
             commands::workspace_create,
             commands::workspace_open,
             commands::workspace_current,

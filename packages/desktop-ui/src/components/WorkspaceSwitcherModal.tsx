@@ -2,10 +2,8 @@ import React from "react";
 import { Icon } from "./Icon";
 import { Button, Input, Callout } from "@studio/design-system";
 import { cleanDisplayPath } from "../utils/path";
-import type { WorkspaceSummary } from "../api/types";
+import type { WorkspaceSummary, WorkspaceItem } from "../api/types";
 import { studioApi } from "../api/client";
-import { isTauri } from "../api/tauri-bridge";
-import { FolderBrowser } from "./FolderBrowser";
 
 export interface WorkspaceSwitcherModalProps {
   open: boolean;
@@ -26,8 +24,6 @@ export const slugifyName = (name: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
-const joinPath = (dir: string, child: string) => `${dir.replace(/[\/]+$/, "")}/${child}`;
-
 export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
   open,
   onClose,
@@ -36,61 +32,53 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
   onOpenWorkspace,
   onCreateWorkspace,
 }) => {
-  const [tab, setTab] = React.useState<"recent" | "create" | "open">("recent");
-  const [openPath, setOpenPath] = React.useState("");
-  const [createPath, setCreatePath] = React.useState("");
+  const [rootPath, setRootPath] = React.useState<string>("");
+  const [workspaces, setWorkspaces] = React.useState<WorkspaceItem[]>([]);
+  const [loading, setLoading] = React.useState(true);
   const [createName, setCreateName] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
-  const [busy, setBusy] = React.useState(false);
-  const [browsing, setBrowsing] = React.useState<"open" | "create" | null>(null);
-  const [home, setHome] = React.useState<string | null>(null);
-  const [createPathEdited, setCreatePathEdited] = React.useState(false);
-  const web = !isTauri();
 
-  // Learn the home folder to suggest standard workspace paths.
-  React.useEffect(() => {
-    if (!open || home) return;
-    studioApi
-      .listDirs()
-      .then((l) => setHome(l.home))
-      .catch(() => {});
-  }, [open, home]);
+  // Advanced: open external folder or change root storage
+  const [showOtherFolder, setShowOtherFolder] = React.useState(false);
+  const [otherPath, setOtherPath] = React.useState("");
+  const [editingRoot, setEditingRoot] = React.useState(false);
+  const [customRootInput, setCustomRootInput] = React.useState("");
 
-  const suggestedCreatePath = React.useCallback(
-    (name: string) =>
-      home ? joinPath(joinPath(home, "Studio"), slugifyName(name) || "workspace-moi") : "",
-    [home]
-  );
-
-  // Automatically keep createPath in sync with createName and home unless manually edited
-  React.useEffect(() => {
-    if (!createPathEdited && home) {
-      setCreatePath(suggestedCreatePath(createName));
-    }
-  }, [home, createName, createPathEdited, suggestedCreatePath]);
-
-  const handleCreateNameChange = (name: string) => {
-    setCreateName(name);
-    if (!createPathEdited && home) {
-      setCreatePath(suggestedCreatePath(name));
-    }
-  };
-
-  const handleQuickCreateDefault = async () => {
-    const defaultName = "Studio Cá Nhân";
-    const defaultPath = home ? joinPath(joinPath(home, "Studio"), "ca-nhan") : "Studio/ca-nhan";
+  const refreshWorkspaces = React.useCallback(async () => {
+    setLoading(true);
     try {
-      setBusy(true);
-      setError(null);
-      await onCreateWorkspace(defaultPath, defaultName);
-      onClose();
-    } catch (err: any) {
-      setError(err?.message || "Không thể khởi tạo workspace mặc định.");
+      const res = await studioApi.getWorkspacesRoot();
+      setRootPath(res.root);
+      setWorkspaces(res.workspaces);
+    } catch {
+      // Fallback to recentWorkspaces if workspaces_root_get fails
+      const fallbackList: WorkspaceItem[] = recentWorkspaces.map((ws) => ({
+        slug: slugifyName(ws.name) || "workspace",
+        name: ws.name,
+        path: ws.path,
+        isWorkspace: true,
+        isCurrent: Boolean(ws.isCurrent || (currentWorkspace && currentWorkspace.path === ws.path)),
+        lastOpenedAt: ws.lastOpenedAt ?? null,
+      }));
+      setWorkspaces(fallbackList);
     } finally {
-      setBusy(false);
+      setLoading(false);
     }
-  };
+  }, [recentWorkspaces, currentWorkspace]);
+
+  React.useEffect(() => {
+    if (open) {
+      void refreshWorkspaces();
+      setCreateName("");
+      setError(null);
+      setNotice(null);
+      setShowOtherFolder(false);
+      setEditingRoot(false);
+    }
+  }, [open, refreshWorkspaces]);
+
   const prevActiveElementRef = React.useRef<HTMLElement | null>(null);
 
   React.useEffect(() => {
@@ -113,11 +101,6 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
 
   if (!open) return null;
 
-  const folderName = (path: string) => {
-    const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
-    return parts[parts.length - 1] ?? "";
-  };
-
   const handleOpen = async (path: string) => {
     try {
       setBusy(true);
@@ -126,30 +109,23 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
       await onOpenWorkspace(path);
       onClose();
     } catch (err: any) {
-      const message: string = err?.message || "";
-      if (message.includes("Workspace not found")) {
-        // Folder exists (or not) but has no studio.yaml: offer to initialise it.
-        setCreatePath(path);
-        if (!createName.trim()) setCreateName(folderName(path));
-        setTab("create");
-        setNotice("Thư mục này chưa phải workspace. Đặt tên rồi bấm \"Tạo và mở\" để khởi tạo workspace tại đây.");
-      } else {
-        setError(message || "Không thể mở workspace.");
-      }
+      setError(err?.message || "Không thể mở workspace.");
     } finally {
       setBusy(false);
     }
   };
 
-  const handleCreate = async () => {
-    if (!createPath.trim() || !createName.trim()) {
-      setError("Vui lòng nhập đầy đủ đường dẫn thư mục và tên workspace.");
+  const handleCreate = async (name: string, customPath?: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setError("Vui lòng nhập tên Workspace.");
       return;
     }
     try {
       setBusy(true);
       setError(null);
-      await onCreateWorkspace(createPath.trim(), createName.trim());
+      // Empty path triggers the backend to create directly under the sandboxed workspaces root
+      await onCreateWorkspace(customPath || "", trimmed);
       onClose();
     } catch (err: any) {
       setError(err?.message || "Không thể tạo workspace mới.");
@@ -158,39 +134,19 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
     }
   };
 
-  const handleBrowseOpen = async () => {
-    if (web) {
-      setBrowsing("open");
-      return;
-    }
+  const handleSaveCustomRoot = async () => {
+    if (!customRootInput.trim()) return;
     try {
-      const picked = await studioApi.pickFolder();
-      if (picked) {
-        setOpenPath(picked);
-      }
+      setBusy(true);
+      setError(null);
+      const res = await studioApi.setWorkspacesRoot(customRootInput.trim());
+      setRootPath(res.root);
+      setWorkspaces(res.workspaces);
+      setEditingRoot(false);
     } catch (err: any) {
-      setError(err?.message || "Không thể mở hộp thoại chọn thư mục.");
-    }
-  };
-
-  const handleBrowseCreate = async () => {
-    if (web) {
-      setBrowsing("create");
-      return;
-    }
-    try {
-      const picked = await studioApi.pickFolder();
-      if (picked) {
-        setCreatePath(picked);
-        if (!createName.trim()) {
-          const last = folderName(picked);
-          if (last) {
-            setCreateName(last);
-          }
-        }
-      }
-    } catch (err: any) {
-      setError(err?.message || "Không thể mở hộp thoại chọn thư mục.");
+      setError(err?.message || "Không thể thay đổi thư mục lưu trữ.");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -198,7 +154,7 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Chuyển đổi Workspace"
+      aria-label="Quản lý Workspace"
       onClick={onClose}
       style={{
         position: "fixed",
@@ -213,8 +169,8 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: 580,
-          maxWidth: "92vw",
+          width: 600,
+          maxWidth: "94vw",
           backgroundColor: "var(--cs-bg-panel)",
           border: "1px solid var(--cs-border-strong)",
           boxShadow: "var(--cs-shadow-overlay)",
@@ -237,7 +193,7 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: "var(--cs-text-md)" }}>
             <Icon name="folder" size={18} color="var(--cs-accent)" />
-            <span>Quản lý & Chuyển đổi Workspace</span>
+            <span>Không gian làm việc (Workspaces)</span>
           </div>
           <button
             type="button"
@@ -256,66 +212,56 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
           </button>
         </div>
 
-        {/* Tab Buttons */}
+        {/* Quick Create Section */}
         <div
           style={{
-            display: "flex",
+            padding: "var(--cs-space-3) var(--cs-space-4)",
+            backgroundColor: "var(--cs-bg-raised)",
             borderBottom: "1px solid var(--cs-border-subtle)",
-            padding: "0 var(--cs-space-4)",
-            gap: "var(--cs-space-3)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--cs-space-2)",
           }}
         >
-          <button
-            type="button"
-            onClick={() => setTab("recent")}
-            style={{
-              padding: "10px 4px",
-              background: "none",
-              border: "none",
-              borderBottom: tab === "recent" ? "2px solid var(--cs-accent)" : "2px solid transparent",
-              color: tab === "recent" ? "var(--cs-accent)" : "var(--cs-fg-secondary)",
-              fontWeight: tab === "recent" ? 600 : 500,
-              cursor: "pointer",
-              fontSize: "var(--cs-text-sm)",
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: "var(--cs-text-xs)", fontWeight: 600, color: "var(--cs-fg-secondary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Tạo Workspace Mới
+            </span>
+            <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
+              Lưu tự động vào kho Studio
+            </span>
+          </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (createName.trim() && !busy) {
+                void handleCreate(createName);
+              }
             }}
+            style={{ display: "flex", gap: "var(--cs-space-2)", alignItems: "flex-end" }}
           >
-            Gần đây
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("open")}
-            style={{
-              padding: "10px 4px",
-              background: "none",
-              border: "none",
-              borderBottom: tab === "open" ? "2px solid var(--cs-accent)" : "2px solid transparent",
-              color: tab === "open" ? "var(--cs-accent)" : "var(--cs-fg-secondary)",
-              fontWeight: tab === "open" ? 600 : 500,
-              cursor: "pointer",
-              fontSize: "var(--cs-text-sm)",
-            }}
-          >
-            Mở thư mục...
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("create")}
-            style={{
-              padding: "10px 4px",
-              background: "none",
-              border: "none",
-              borderBottom: tab === "create" ? "2px solid var(--cs-accent)" : "2px solid transparent",
-              color: tab === "create" ? "var(--cs-accent)" : "var(--cs-fg-secondary)",
-              fontWeight: tab === "create" ? 600 : 500,
-              cursor: "pointer",
-              fontSize: "var(--cs-text-sm)",
-            }}
-          >
-            Tạo mới...
-          </button>
+            <div style={{ flex: 1 }}>
+              <Input
+                placeholder="Nhập tên workspace (ví dụ: Kênh Công Nghệ, Studio Vlog)..."
+                value={createName}
+                autoFocus
+                onChange={(e) => setCreateName(e.target.value)}
+              />
+            </div>
+            <Button
+              type="submit"
+              variant="primary"
+              busy={busy}
+              disabled={!createName.trim()}
+              leftIcon={<Icon name="plus" size={14} />}
+              style={{ flexShrink: 0, height: "var(--cs-control-height)" }}
+            >
+              Tạo Workspace
+            </Button>
+          </form>
         </div>
 
-        {/* Content */}
+        {/* Content & Workspaces List */}
         <div style={{ padding: "var(--cs-space-4)", display: "flex", flexDirection: "column", gap: "var(--cs-space-3)" }}>
           {error && (
             <Callout variant="danger" title="Không thành công">
@@ -323,206 +269,271 @@ export const WorkspaceSwitcherModal: React.FC<WorkspaceSwitcherModalProps> = ({
             </Callout>
           )}
           {notice && !error && (
-            <Callout variant="info" title="Chưa có workspace">
+            <Callout variant="info" title="Thông báo">
               {notice}
             </Callout>
           )}
 
-          {tab === "recent" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 280, overflowY: "auto" }}>
-              {recentWorkspaces.length === 0 ? (
-                <div style={{ padding: "var(--cs-space-4)", textAlign: "center", color: "var(--cs-fg-muted)", fontSize: "var(--cs-text-sm)" }}>
-                  Chưa có workspace nào trong danh sách gần đây.
+          {/* Workspaces List Header */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: "var(--cs-text-xs)", fontWeight: 600, color: "var(--cs-fg-secondary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Danh sách Workspace ({workspaces.length})
+            </span>
+            {loading && (
+              <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
+                Đang quét kho lưu trữ...
+              </span>
+            )}
+          </div>
+
+          {/* Workspaces List Container */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 300, overflowY: "auto", paddingRight: 2 }}>
+            {workspaces.length === 0 && !loading ? (
+              <div
+                style={{
+                  padding: "var(--cs-space-5) var(--cs-space-4)",
+                  textAlign: "center",
+                  backgroundColor: "var(--cs-bg-raised)",
+                  border: "1px dashed var(--cs-border-subtle)",
+                  borderRadius: "var(--cs-radius-control)",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: "var(--cs-space-2)",
+                }}
+              >
+                <Icon name="folder" size={32} color="var(--cs-fg-muted)" />
+                <div style={{ fontWeight: 600, color: "var(--cs-fg-primary)", fontSize: "var(--cs-text-sm)" }}>
+                  Chưa có workspace nào trong kho Studio.
                 </div>
-              ) : (
-                recentWorkspaces.map((ws) => {
-                  const isCurrent = currentWorkspace?.path === ws.path;
-                  return (
-                    <div
-                      key={ws.path}
-                      onClick={() => !isCurrent && handleOpen(ws.path)}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "8px 12px",
-                        backgroundColor: isCurrent ? "var(--cs-selection)" : "var(--cs-bg-raised)",
-                        border: "1px solid var(--cs-border-subtle)",
-                        borderRadius: "var(--cs-radius-control)",
-                        cursor: isCurrent ? "default" : "pointer",
-                      }}
-                    >
+                <div style={{ color: "var(--cs-fg-muted)", fontSize: "var(--cs-text-xs)", maxWidth: 320 }}>
+                  Gõ tên vào ô phía trên hoặc bấm nút bên dưới để tạo nhanh workspace cá nhân đầu tiên.
+                </div>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  busy={busy}
+                  onClick={() => void handleCreate("Studio Cá Nhân")}
+                  leftIcon={<Icon name="sparkles" size={14} />}
+                  style={{ marginTop: 6 }}
+                >
+                  Tạo nhanh "Studio Cá Nhân"
+                </Button>
+              </div>
+            ) : (
+              workspaces.map((ws) => {
+                const isCurrent = ws.isCurrent || currentWorkspace?.path === ws.path;
+                return (
+                  <div
+                    key={ws.path}
+                    onClick={() => !isCurrent && void handleOpen(ws.path)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "10px 14px",
+                      backgroundColor: isCurrent ? "var(--cs-selection)" : "var(--cs-bg-raised)",
+                      border: "1px solid",
+                      borderColor: isCurrent ? "var(--cs-accent)" : "var(--cs-border-subtle)",
+                      borderRadius: "var(--cs-radius-control)",
+                      cursor: isCurrent ? "default" : "pointer",
+                      transition: "background-color 0.15s ease, border-color 0.15s ease",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div
+                        style={{
+                          width: 32,
+                          height: 32,
+                          borderRadius: "var(--cs-radius-control)",
+                          backgroundColor: isCurrent ? "var(--cs-accent)" : "var(--cs-bg-panel)",
+                          border: isCurrent ? "none" : "1px solid var(--cs-border-subtle)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: isCurrent ? "white" : "var(--cs-fg-secondary)",
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Icon name={isCurrent ? "sparkles" : "folder"} size={16} />
+                      </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                         <span style={{ fontWeight: 600, color: "var(--cs-fg-primary)", fontSize: "var(--cs-text-sm)" }}>
                           {ws.name}
                         </span>
                         <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)", fontFamily: "var(--cs-font-mono)" }}>
-                          {cleanDisplayPath(ws.path)}
+                          {ws.slug || cleanDisplayPath(ws.path)}
                         </span>
                       </div>
+                    </div>
+                    <div>
                       {isCurrent ? (
-                        <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-accent)", fontWeight: 600 }}>
-                          Hiện tại
+                        <span
+                          style={{
+                            fontSize: "var(--cs-text-xs)",
+                            color: "var(--cs-accent)",
+                            fontWeight: 600,
+                            backgroundColor: "var(--cs-bg-panel)",
+                            border: "1px solid var(--cs-accent)",
+                            padding: "3px 8px",
+                            borderRadius: 4,
+                          }}
+                        >
+                          Đang mở
                         </span>
                       ) : (
-                        <Button size="sm" variant="secondary" onClick={() => handleOpen(ws.path)}>
-                          Mở
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleOpen(ws.path);
+                          }}
+                        >
+                          Chuyển đến
                         </Button>
                       )}
                     </div>
-                  );
-                })
-              )}
-            </div>
-          )}
-
-          {tab === "open" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-3)" }}>
-              <div style={{ display: "flex", gap: "var(--cs-space-2)", alignItems: "flex-end" }}>
-                <div style={{ flex: 1 }}>
-                  <Input
-                    label="Đường dẫn thư mục workspace"
-                    placeholder={web && home ? `Ví dụ: ${joinPath(home, "Studio/kenh-review")}` : "Ví dụ: D:/Studio/ca-nhan/kenh-review"}
-                    value={openPath}
-                    onChange={(e) => setOpenPath(e.target.value)}
-                  />
-                </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={handleBrowseOpen}
-                  leftIcon={<Icon name="folder" size={14} />}
-                  style={{ flexShrink: 0, height: "var(--cs-control-height)" }}
-                >
-                  Chọn thư mục...
-                </Button>
-              </div>
-              {browsing === "open" && (
-                <FolderBrowser
-                  initialPath={openPath || undefined}
-                  selectLabel="Mở thư mục này"
-                  onCancel={() => setBrowsing(null)}
-                  onSelect={(path) => {
-                    setBrowsing(null);
-                    setOpenPath(path);
-                    void handleOpen(path);
-                  }}
-                />
-              )}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--cs-space-2)" }}>
-                <Button variant="secondary" onClick={onClose}>
-                  Hủy
-                </Button>
-                <Button
-                  variant="primary"
-                  busy={busy}
-                  disabled={!openPath.trim()}
-                  onClick={() => handleOpen(openPath.trim())}
-                >
-                  Mở workspace
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {tab === "create" && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "var(--cs-space-3)" }}>
-              {recentWorkspaces.length === 0 && (
-                <div
-                  style={{
-                    padding: "10px 12px",
-                    backgroundColor: "var(--cs-bg-raised)",
-                    border: "1px solid var(--cs-border-strong)",
-                    borderRadius: "var(--cs-radius-control)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: "var(--cs-space-2)",
-                  }}
-                >
-                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                    <span style={{ fontWeight: 600, fontSize: "var(--cs-text-sm)", color: "var(--cs-fg-primary)" }}>
-                      Bắt đầu nhanh với 1 Click
-                    </span>
-                    <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
-                      Tự động tạo & mở workspace mặc định tại: {cleanDisplayPath(home ? joinPath(joinPath(home, "Studio"), "ca-nhan") : "Studio/ca-nhan")}
-                    </span>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    busy={busy}
-                    onClick={handleQuickCreateDefault}
-                    style={{ flexShrink: 0 }}
-                  >
-                    Tạo nhanh Cá Nhân
-                  </Button>
-                </div>
-              )}
+                );
+              })
+            )}
+          </div>
 
-              <Input
-                label="Tên Workspace"
-                placeholder="Ví dụ: Kênh Công Nghệ"
-                value={createName}
-                autoFocus
-                onChange={(e) => handleCreateNameChange(e.target.value)}
-              />
+          {/* Optional: Open custom directory fallback */}
+          {showOtherFolder && (
+            <div
+              style={{
+                marginTop: "var(--cs-space-2)",
+                padding: "var(--cs-space-3)",
+                backgroundColor: "var(--cs-bg-raised)",
+                border: "1px dashed var(--cs-border-subtle)",
+                borderRadius: "var(--cs-radius-control)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--cs-space-2)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: "var(--cs-text-xs)", fontWeight: 600, color: "var(--cs-fg-secondary)" }}>
+                  Mở workspace từ đường dẫn riêng ngoài kho Studio
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowOtherFolder(false)}
+                  style={{ background: "none", border: "none", color: "var(--cs-fg-muted)", cursor: "pointer", fontSize: "var(--cs-text-xs)" }}
+                >
+                  Đóng
+                </button>
+              </div>
               <div style={{ display: "flex", gap: "var(--cs-space-2)", alignItems: "flex-end" }}>
                 <div style={{ flex: 1 }}>
                   <Input
-                    label="Đường dẫn thư mục"
-                    placeholder={home ? `Ví dụ: ${joinPath(home, "Studio/cong-nghe")}` : "Ví dụ: D:/Studio/cong-nghe"}
-                    value={createPath}
-                    onChange={(e) => {
-                      setCreatePath(e.target.value);
-                      setCreatePathEdited(true);
-                    }}
+                    placeholder="Đường dẫn thư mục..."
+                    value={otherPath}
+                    onChange={(e) => setOtherPath(e.target.value)}
                   />
                 </div>
                 <Button
-                  type="button"
+                  size="sm"
                   variant="secondary"
-                  onClick={handleBrowseCreate}
-                  leftIcon={<Icon name="folder" size={14} />}
-                  style={{ flexShrink: 0, height: "var(--cs-control-height)" }}
-                >
-                  Chọn thư mục...
-                </Button>
-              </div>
-
-              <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)", marginTop: -4 }}>
-                {createPathEdited
-                  ? "Đã tùy chỉnh đường dẫn riêng. Thư mục và các cấu trúc cần thiết sẽ được khởi tạo tự động."
-                  : "Mặc định Studio lưu vào thư mục `Studio/` của bạn. Bạn chỉ cần nhập tên rồi bấm 'Tạo và mở'."}
-              </div>
-
-              {browsing === "create" && (
-                <FolderBrowser
-                  initialPath={home ?? undefined}
-                  selectLabel="Tạo trong thư mục này"
-                  onCancel={() => setBrowsing(null)}
-                  onSelect={(dir) => {
-                    setBrowsing(null);
-                    setCreatePath(joinPath(dir, slugifyName(createName) || "workspace-moi"));
-                    setCreatePathEdited(true);
-                  }}
-                />
-              )}
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "var(--cs-space-2)" }}>
-                <Button variant="secondary" onClick={onClose}>
-                  Hủy
-                </Button>
-                <Button
-                  variant="primary"
+                  disabled={!otherPath.trim()}
                   busy={busy}
-                  disabled={!createName.trim() || !createPath.trim()}
-                  onClick={handleCreate}
+                  onClick={() => void handleOpen(otherPath.trim())}
                 >
-                  Tạo và mở
+                  Mở
                 </Button>
               </div>
             </div>
           )}
+        </div>
+
+        {/* Footer: Isolated Studio Storage Info */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "10px var(--cs-space-4)",
+            borderTop: "1px solid var(--cs-border-subtle)",
+            backgroundColor: "var(--cs-bg-raised)",
+            fontSize: "var(--cs-text-xs)",
+            color: "var(--cs-fg-muted)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Icon name="folder" size={12} color="var(--cs-fg-secondary)" />
+            <span>Kho lưu trữ Studio:</span>
+            {!editingRoot ? (
+              <>
+                <span style={{ fontFamily: "var(--cs-font-mono)", color: "var(--cs-fg-primary)", fontWeight: 500 }}>
+                  {cleanDisplayPath(rootPath || "~/Studio")}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomRootInput(rootPath);
+                    setEditingRoot(true);
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--cs-accent)",
+                    cursor: "pointer",
+                    textDecoration: "underline",
+                    padding: 0,
+                    fontSize: "var(--cs-text-xs)",
+                  }}
+                >
+                  Đổi kho...
+                </button>
+              </>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <input
+                  type="text"
+                  value={customRootInput}
+                  onChange={(e) => setCustomRootInput(e.target.value)}
+                  placeholder="Đường dẫn kho Studio mới..."
+                  style={{
+                    padding: "2px 6px",
+                    fontSize: "var(--cs-text-xs)",
+                    backgroundColor: "var(--cs-bg-subtle)",
+                    border: "1px solid var(--cs-border-subtle)",
+                    borderRadius: 4,
+                    color: "var(--cs-fg-primary)",
+                  }}
+                />
+                <Button size="sm" variant="primary" onClick={() => void handleSaveCustomRoot()} busy={busy}>
+                  Lưu
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => setEditingRoot(false)}>
+                  Hủy
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {!showOtherFolder && (
+              <button
+                type="button"
+                onClick={() => setShowOtherFolder(true)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--cs-fg-secondary)",
+                  cursor: "pointer",
+                  fontSize: "var(--cs-text-xs)",
+                }}
+              >
+                Mở thư mục khác...
+              </button>
+            )}
+            <Button size="sm" variant="secondary" onClick={onClose}>
+              Đóng
+            </Button>
+          </div>
         </div>
       </div>
     </div>

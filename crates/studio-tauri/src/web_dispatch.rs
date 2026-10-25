@@ -148,8 +148,13 @@ pub async fn dispatch_invoke(
             let res = commands::app_recent_workspaces_impl(state)?;
             Ok(serde_json::to_value(res)?)
         }
-        "workspace_create" => {
+        "workspaces_root_get" => commands::workspaces_root_get_impl(state),
+        "workspaces_root_set" => {
             let path: String = get_arg(&args, "path")?;
+            commands::workspaces_root_set_impl(state, path)
+        }
+        "workspace_create" => {
+            let path: Option<String> = get_arg(&args, "path").ok();
             let name: String = get_arg(&args, "name")?;
             commands::workspace_create_impl(state, path, name)
         }

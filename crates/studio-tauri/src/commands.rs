@@ -240,8 +240,256 @@ pub fn app_recent_workspaces(state: State<'_, AppState>) -> CmdResult<Vec<Value>
     app_recent_workspaces_impl(&state)
 }
 
-pub fn workspace_create_impl(state: &AppState, path: String, name: String) -> CmdResult<Value> {
-    let ws = Workspace::create(&path, name)?;
+/// Convert a human-readable title into a URL/filesystem safe slug.
+pub fn slugify_name(name: &str) -> String {
+    let mut slug = String::new();
+    let mut prev_dash = false;
+    for c in name.chars() {
+        let mapped = match c {
+            'a' | 'á' | 'à' | 'ả' | 'ã' | 'ạ' | 'ă' | 'ắ' | 'ằ' | 'ẳ' | 'ẵ' | 'ặ' | 'â' | 'ấ'
+            | 'ầ' | 'ẩ' | 'ẫ' | 'ậ' | 'A' | 'Á' | 'À' | 'Ả' | 'Ã' | 'Ạ' | 'Ă' | 'Ắ' | 'Ằ' | 'Ẳ'
+            | 'Ẵ' | 'Ặ' | 'Â' | 'Ấ' | 'Ầ' | 'Ẩ' | 'Ẫ' | 'Ậ' => Some('a'),
+            'd' | 'đ' | 'D' | 'Đ' => Some('d'),
+            'e' | 'é' | 'è' | 'ẻ' | 'ẽ' | 'ẹ' | 'ê' | 'ế' | 'ề' | 'ể' | 'ễ' | 'ệ' | 'E' | 'É'
+            | 'È' | 'Ẻ' | 'Ẽ' | 'Ẹ' | 'Ê' | 'Ế' | 'Ề' | 'Ể' | 'Ễ' | 'Ệ' => {
+                Some('e')
+            }
+            'i' | 'í' | 'ì' | 'ỉ' | 'ĩ' | 'ị' | 'I' | 'Í' | 'Ì' | 'Ỉ' | 'Ĩ' | 'Ị' => {
+                Some('i')
+            }
+            'o' | 'ó' | 'ò' | 'ỏ' | 'õ' | 'ọ' | 'ô' | 'ố' | 'ồ' | 'ổ' | 'ỗ' | 'ộ' | 'ơ' | 'ớ'
+            | 'ờ' | 'ở' | 'ỡ' | 'ợ' | 'O' | 'Ó' | 'Ò' | 'Ỏ' | 'Õ' | 'Ọ' | 'Ô' | 'Ố' | 'Ồ' | 'Ổ'
+            | 'Ỗ' | 'Ộ' | 'Ơ' | 'Ớ' | 'Ờ' | 'Ở' | 'Ỡ' | 'Ợ' => Some('o'),
+            'u' | 'ú' | 'ù' | 'ủ' | 'ũ' | 'ụ' | 'ư' | 'ứ' | 'ừ' | 'ử' | 'ữ' | 'ự' | 'U' | 'Ú'
+            | 'Ù' | 'Ủ' | 'Ũ' | 'Ụ' | 'Ư' | 'Ứ' | 'Ừ' | 'Ử' | 'Ữ' | 'Ự' => {
+                Some('u')
+            }
+            'y' | 'ý' | 'ỳ' | 'ỷ' | 'ỹ' | 'ỵ' | 'Y' | 'Ý' | 'Ỳ' | 'Ỷ' | 'Ỹ' | 'Ỵ' => {
+                Some('y')
+            }
+            ch if ch.is_ascii_alphanumeric() => Some(ch.to_ascii_lowercase()),
+            _ => None,
+        };
+
+        if let Some(ch) = mapped {
+            slug.push(ch);
+            prev_dash = false;
+        } else if !prev_dash && !slug.is_empty() {
+            slug.push('-');
+            prev_dash = true;
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        "workspace".to_string()
+    } else {
+        slug
+    }
+}
+
+/// Helper to determine the default fixed root directory for Studio workspaces.
+pub fn default_workspaces_root() -> PathBuf {
+    if let Ok(custom) = std::env::var("STUDIO_WORKSPACES_ROOT") {
+        let p = PathBuf::from(custom.trim());
+        if !p.as_os_str().is_empty() {
+            return p;
+        }
+    }
+    user_home_dir().join("Studio")
+}
+
+/// Get the configured or default workspaces root folder.
+pub fn get_workspaces_root(state: &AppState) -> PathBuf {
+    if let Ok(db) = state.app_paths.open_app_db() {
+        if let Ok(Some(val)) = db.get_setting("studio:workspaces_root") {
+            let p = PathBuf::from(val.trim());
+            if !p.as_os_str().is_empty() {
+                return p;
+            }
+        }
+    }
+    default_workspaces_root()
+}
+
+/// Retrieve the isolated workspaces root directory and scan all child workspaces.
+pub fn workspaces_root_get_impl(state: &AppState) -> CmdResult<Value> {
+    let root = get_workspaces_root(state);
+    let _ = std::fs::create_dir_all(&root);
+    let current = state.current.lock().ok().and_then(|c| c.clone());
+    let current_clean = current.as_deref().map(normalize_workspace_path);
+
+    let mut workspaces = Vec::new();
+    let mut seen_paths = std::collections::HashSet::new();
+
+    // 1. Scan child folders inside the fixed Studio workspaces root
+    if let Ok(entries) = std::fs::read_dir(&root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name_os = entry.file_name();
+            let slug = name_os.to_string_lossy().to_string();
+            if slug.starts_with('.') {
+                continue;
+            }
+
+            let clean_path = normalize_workspace_path(&path);
+            let key = if cfg!(windows) {
+                clean_path.to_lowercase()
+            } else {
+                clean_path.clone()
+            };
+            seen_paths.insert(key);
+
+            let (ws_name, is_valid_ws) = if let Ok(ws) = Workspace::open(&path) {
+                (ws.name().to_string(), true)
+            } else {
+                (slug.clone(), false)
+            };
+
+            let is_current = current_clean.as_deref().is_some_and(|c| {
+                if cfg!(windows) {
+                    c.eq_ignore_ascii_case(&clean_path)
+                } else {
+                    c == clean_path
+                }
+            });
+
+            workspaces.push(json!({
+                "slug": slug,
+                "name": ws_name,
+                "path": clean_path,
+                "isWorkspace": is_valid_ws,
+                "isCurrent": is_current,
+                "lastOpenedAt": serde_json::Value::Null,
+            }));
+        }
+    }
+
+    // 2. Include any recent workspaces from app.db
+    if let Ok(db) = state.app_paths.open_app_db() {
+        if let Ok(recents) = db.list_recent_workspaces() {
+            for r in recents {
+                let clean_path = normalize_workspace_path(Path::new(&r.path));
+                let key = if cfg!(windows) {
+                    clean_path.to_lowercase()
+                } else {
+                    clean_path.clone()
+                };
+
+                if let Some(existing) = workspaces.iter_mut().find(|w| {
+                    let w_path = w["path"].as_str().unwrap_or_default();
+                    if cfg!(windows) {
+                        w_path.eq_ignore_ascii_case(&clean_path)
+                    } else {
+                        w_path == clean_path
+                    }
+                }) {
+                    existing["lastOpenedAt"] = json!(r.last_opened);
+                } else {
+                    let path = PathBuf::from(&clean_path);
+                    if let Ok(ws) = Workspace::open(&path) {
+                        let is_current = current_clean.as_deref().is_some_and(|c| {
+                            if cfg!(windows) {
+                                c.eq_ignore_ascii_case(&clean_path)
+                            } else {
+                                c == clean_path
+                            }
+                        });
+                        let slug = path
+                            .file_name()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "workspace".to_string());
+
+                        seen_paths.insert(key);
+                        workspaces.push(json!({
+                            "slug": slug,
+                            "name": ws.name(),
+                            "path": clean_path,
+                            "isWorkspace": true,
+                            "isCurrent": is_current,
+                            "lastOpenedAt": json!(r.last_opened),
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort: current workspace first, then lastOpenedAt desc, then name asc
+    workspaces.sort_by(|a, b| {
+        let a_curr = a["isCurrent"].as_bool().unwrap_or(false);
+        let b_curr = b["isCurrent"].as_bool().unwrap_or(false);
+        if a_curr != b_curr {
+            return b_curr.cmp(&a_curr);
+        }
+        let a_time = a["lastOpenedAt"].as_str().unwrap_or("");
+        let b_time = b["lastOpenedAt"].as_str().unwrap_or("");
+        if !a_time.is_empty() || !b_time.is_empty() {
+            return b_time.cmp(a_time);
+        }
+        let a_name = a["name"].as_str().unwrap_or("");
+        let b_name = b["name"].as_str().unwrap_or("");
+        a_name.cmp(b_name)
+    });
+
+    Ok(json!({
+        "root": strip_verbatim(&root),
+        "workspaces": workspaces,
+    }))
+}
+
+/// Set custom workspaces root directory.
+pub fn workspaces_root_set_impl(state: &AppState, path: String) -> CmdResult<Value> {
+    let p = PathBuf::from(path.trim());
+    if !p.is_dir() {
+        std::fs::create_dir_all(&p)
+            .map_err(|e| CmdError::msg(format!("Không thể tạo thư mục {}: {e}", p.display())))?;
+    }
+    let db = state.app_paths.open_app_db()?;
+    db.set_setting("studio:workspaces_root", &strip_verbatim(&p))?;
+    workspaces_root_get_impl(state)
+}
+
+#[tauri::command]
+pub fn workspaces_root_get(state: State<'_, AppState>) -> CmdResult<Value> {
+    workspaces_root_get_impl(&state)
+}
+
+#[tauri::command]
+pub fn workspaces_root_set(state: State<'_, AppState>, path: String) -> CmdResult<Value> {
+    workspaces_root_set_impl(&state, path)
+}
+
+pub fn workspace_create_impl(
+    state: &AppState,
+    path: Option<String>,
+    name: String,
+) -> CmdResult<Value> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(CmdError::msg("Tên workspace không được để trống."));
+    }
+
+    let target_path = match path.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(p) => PathBuf::from(p),
+        None => {
+            let root = get_workspaces_root(state);
+            let slug = slugify_name(name);
+            let mut candidate = root.join(&slug);
+            let mut counter = 2;
+            while candidate.exists() {
+                candidate = root.join(format!("{slug}-{counter}"));
+                counter += 1;
+            }
+            candidate
+        }
+    };
+
+    let ws = Workspace::create(&target_path, name)?;
     activate(state, &ws)?;
     Ok(ws_summary(&ws, true))
 }
@@ -250,7 +498,7 @@ pub fn workspace_create_impl(state: &AppState, path: String, name: String) -> Cm
 pub fn workspace_create(
     _app: AppHandle,
     state: State<'_, AppState>,
-    path: String,
+    path: Option<String>,
     name: String,
 ) -> CmdResult<Value> {
     workspace_create_impl(&state, path, name)
@@ -3575,6 +3823,42 @@ pub fn fs_create_dir(parent: String, name: String) -> CmdResult<Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn test_slugify_name() {
+        assert_eq!(slugify_name("Kênh Công Nghệ"), "kenh-cong-nghe");
+        assert_eq!(slugify_name("Studio Vlog 2026!"), "studio-vlog-2026");
+        assert_eq!(slugify_name("Đời Sống & AI"), "doi-song-ai");
+        assert_eq!(slugify_name(""), "workspace");
+    }
+
+    #[tokio::test]
+    async fn test_workspaces_root_get_and_create() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_dir = temp.path().join("app_data");
+        let ws_root = temp.path().join("StudioRoot");
+        std::fs::create_dir_all(&ws_root).unwrap();
+
+        std::env::set_var("STUDIO_APP_DIR", &app_dir);
+        std::env::set_var("STUDIO_WORKSPACES_ROOT", &ws_root);
+
+        let state = AppState::new();
+        let root_info = workspaces_root_get_impl(&state).unwrap();
+        assert_eq!(root_info["workspaces"].as_array().unwrap().len(), 0);
+
+        // Create workspace without providing path (uses workspaces_root)
+        let ws_summary = workspace_create_impl(&state, None, "Kênh Review".to_string()).unwrap();
+        assert_eq!(ws_summary["name"], "Kênh Review");
+        assert!(ws_root.join("kenh-review").join("studio.yaml").is_file());
+
+        // Re-query workspaces_root
+        let updated = workspaces_root_get_impl(&state).unwrap();
+        let list = updated["workspaces"].as_array().unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0]["slug"], "kenh-review");
+        assert_eq!(list[0]["name"], "Kênh Review");
+        assert_eq!(list[0]["isCurrent"], true);
+    }
 
     #[test]
     fn test_fs_create_dir() {

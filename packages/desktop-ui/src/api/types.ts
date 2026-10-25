@@ -88,10 +88,24 @@ export interface WorkspaceSummary {
 }
 
 export interface WorkspaceCreateRequest {
-  /** Target filesystem directory */
-  path: string;
+  /** Target filesystem directory (optional: defaults to workspaces root/slug) */
+  path?: string;
   /** Friendly name */
   name: string;
+}
+
+export interface WorkspaceItem {
+  slug: string;
+  name: string;
+  path: string;
+  isWorkspace: boolean;
+  isCurrent: boolean;
+  lastOpenedAt?: string | null;
+}
+
+export interface WorkspacesRootResponse {
+  root: string;
+  workspaces: WorkspaceItem[];
 }
 
 /** One sub-directory in the server-side folder browser (`fs_list_dirs`). */

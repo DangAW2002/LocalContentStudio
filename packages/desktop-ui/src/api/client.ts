@@ -42,6 +42,7 @@ import type {
   WorkspaceSummary,
   WorkspaceCreateRequest,
   WorkspaceOpenRequest,
+  WorkspacesRootResponse,
   DirListing,
   WorkspaceCurrentResponse,
   BudgetStatus,
@@ -149,6 +150,22 @@ export class StudioApiClient {
    */
   async getRecentWorkspaces(): Promise<WorkspaceSummary[]> {
     return invoke<WorkspaceSummary[]>("app_recent_workspaces");
+  }
+
+  /**
+   * Get the fixed workspaces root and list all sandboxed workspaces.
+   * Command: `workspaces_root_get`
+   */
+  async getWorkspacesRoot(): Promise<WorkspacesRootResponse> {
+    return invoke<WorkspacesRootResponse>("workspaces_root_get");
+  }
+
+  /**
+   * Set custom fixed workspaces root.
+   * Command: `workspaces_root_set`
+   */
+  async setWorkspacesRoot(path: string): Promise<WorkspacesRootResponse> {
+    return invoke<WorkspacesRootResponse>("workspaces_root_set", { path });
   }
 
   /**

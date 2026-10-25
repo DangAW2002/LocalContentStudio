@@ -4,33 +4,28 @@ import { describe, expect, it, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react";
 import * as tauriBridge from "../../src/api/tauri-bridge";
 import { WorkspaceSwitcherModal, slugifyName } from "../../src/components/WorkspaceSwitcherModal";
+import { FolderBrowser } from "../../src/components/FolderBrowser";
 
-const listings: Record<string, unknown> = {
-  "": {
-    path: "/home/dang",
-    parent: "/home",
-    home: "/home/dang",
-    isWorkspace: false,
-    entries: [
-      { name: "kenh-a", path: "/home/dang/kenh-a", isWorkspace: true },
-      { name: "src", path: "/home/dang/src", isWorkspace: false },
-    ],
-  },
-  "/home/dang/src": {
-    path: "/home/dang/src",
-    parent: "/home/dang",
-    home: "/home/dang",
-    isWorkspace: false,
-    entries: [],
-  },
+const mockRootResponse = {
+  root: "/home/dang/Studio",
+  workspaces: [
+    { slug: "kenh-a", name: "Kênh A", path: "/home/dang/Studio/kenh-a", isWorkspace: true, isCurrent: false },
+    { slug: "ca-nhan", name: "Studio Cá Nhân", path: "/home/dang/Studio/ca-nhan", isWorkspace: true, isCurrent: true },
+  ],
 };
 
-describe("WorkspaceSwitcherModal (web)", () => {
+describe("WorkspaceSwitcherModal (Sandboxed)", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(tauriBridge, "isTauri").mockReturnValue(false);
     vi.spyOn(tauriBridge, "invoke").mockImplementation(async (cmd: string, args?: any) => {
-      if (cmd === "fs_list_dirs") return listings[args?.path ?? ""];
+      if (cmd === "workspaces_root_get") return mockRootResponse;
+      if (cmd === "workspaces_root_set") {
+        return {
+          root: args.path,
+          workspaces: [],
+        };
+      }
       return null;
     });
   });
@@ -56,60 +51,71 @@ describe("WorkspaceSwitcherModal (web)", () => {
     expect(slugifyName("!!!")).toBe("");
   });
 
-  it("suggests a path under the server home when typing a name", async () => {
+  it("creates a new workspace directly without exposing system paths", async () => {
     const props = renderModal();
-    fireEvent.click(screen.getByText("Tạo mới..."));
-    await waitFor(() => expect(tauriBridge.invoke).toHaveBeenCalledWith("fs_list_dirs", { path: null }));
-    await waitFor(() => expect(screen.getByPlaceholderText(/\/home\/dang\/Studio/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByPlaceholderText(/Nhập tên workspace/)).toBeTruthy());
 
-    fireEvent.change(screen.getByLabelText("Tên Workspace"), { target: { value: "Kênh Công Nghệ" } });
-    const pathInput = screen.getByLabelText("Đường dẫn thư mục") as HTMLInputElement;
-    expect(pathInput.value).toBe("/home/dang/Studio/kenh-cong-nghe");
+    const input = screen.getByPlaceholderText(/Nhập tên workspace/);
+    fireEvent.change(input, { target: { value: "Kênh Công Nghệ" } });
 
-    fireEvent.click(screen.getByText("Tạo và mở"));
+    fireEvent.click(screen.getByText("Tạo Workspace"));
     await waitFor(() =>
-      expect(props.onCreateWorkspace).toHaveBeenCalledWith("/home/dang/Studio/kenh-cong-nghe", "Kênh Công Nghệ"),
+      expect(props.onCreateWorkspace).toHaveBeenCalledWith("", "Kênh Công Nghệ"),
     );
   });
 
-  it("keeps a manually edited path when the name changes", async () => {
+  it("lists sandboxed workspaces from Studio root and opens the chosen one", async () => {
+    const props = renderModal();
+    await waitFor(() => expect(screen.getByText("Kênh A")).toBeTruthy());
+    expect(screen.getByText("Studio Cá Nhân")).toBeTruthy();
+    expect(screen.getByText("Đang mở")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Chuyển đến"));
+    await waitFor(() => expect(props.onOpenWorkspace).toHaveBeenCalledWith("/home/dang/Studio/kenh-a"));
+  });
+
+  it("offers 1-click quick create when workspaces list is empty", async () => {
+    vi.spyOn(tauriBridge, "invoke").mockImplementation(async (cmd: string) => {
+      if (cmd === "workspaces_root_get") {
+        return { root: "/home/dang/Studio", workspaces: [] };
+      }
+      return null;
+    });
+
+    const props = renderModal();
+    await waitFor(() => expect(screen.getByText('Tạo nhanh "Studio Cá Nhân"')).toBeTruthy());
+
+    fireEvent.click(screen.getByText('Tạo nhanh "Studio Cá Nhân"'));
+    await waitFor(() =>
+      expect(props.onCreateWorkspace).toHaveBeenCalledWith("", "Studio Cá Nhân"),
+    );
+  });
+
+  it("allows customizing the Studio root storage", async () => {
     renderModal();
-    fireEvent.click(screen.getByText("Tạo mới..."));
-    await waitFor(() => expect(screen.getByPlaceholderText(/\/home\/dang\/Studio/)).toBeTruthy());
-    const pathInput = screen.getByLabelText("Đường dẫn thư mục") as HTMLInputElement;
-    fireEvent.change(pathInput, { target: { value: "/srv/ws" } });
-    fireEvent.change(screen.getByLabelText("Tên Workspace"), { target: { value: "Khác" } });
-    expect(pathInput.value).toBe("/srv/ws");
+    await waitFor(() => expect(screen.getByText("Đổi kho...")).toBeTruthy());
+
+    fireEvent.click(screen.getByText("Đổi kho..."));
+    const rootInput = screen.getByPlaceholderText("Đường dẫn kho Studio mới...");
+    fireEvent.change(rootInput, { target: { value: "/data/Studio" } });
+    fireEvent.click(screen.getByText("Lưu"));
+
+    await waitFor(() => {
+      expect(tauriBridge.invoke).toHaveBeenCalledWith("workspaces_root_set", { path: "/data/Studio" });
+    });
   });
 
-  it("browses server folders and opens the chosen one", async () => {
-    const props = renderModal();
-    fireEvent.click(screen.getByText("Mở thư mục..."));
-    fireEvent.click(screen.getByText("Chọn thư mục..."));
-
-    await waitFor(() => expect(screen.getByText("kenh-a")).toBeTruthy());
-    expect(screen.getByText("Workspace")).toBeTruthy();
-
-    fireEvent.click(screen.getByText("src"));
-    await waitFor(() => expect(screen.getByText("Không có thư mục con.")).toBeTruthy());
-    fireEvent.click(screen.getByText("Mở thư mục này"));
-
-    await waitFor(() => expect(props.onOpenWorkspace).toHaveBeenCalledWith("/home/dang/src"));
-  });
-
-  it("offers quick 1-click default workspace creation when recents is empty", async () => {
-    const props = renderModal();
-    fireEvent.click(screen.getByText("Tạo mới..."));
-    await waitFor(() => expect(screen.getByText("Tạo nhanh Cá Nhân")).toBeTruthy());
-    fireEvent.click(screen.getByText("Tạo nhanh Cá Nhân"));
-    await waitFor(() =>
-      expect(props.onCreateWorkspace).toHaveBeenCalledWith("/home/dang/Studio/ca-nhan", "Studio Cá Nhân"),
-    );
-  });
-
-  it("creates a new subfolder in FolderBrowser", async () => {
+  it("creates a new subfolder in FolderBrowser component", async () => {
     vi.spyOn(tauriBridge, "invoke").mockImplementation(async (cmd: string, args?: any) => {
-      if (cmd === "fs_list_dirs") return listings[args?.path ?? ""];
+      if (cmd === "fs_list_dirs") {
+        return {
+          path: "/home/dang",
+          parent: "/home",
+          home: "/home/dang",
+          isWorkspace: false,
+          entries: [{ name: "src", path: "/home/dang/src", isWorkspace: false }],
+        };
+      }
       if (cmd === "fs_create_dir") {
         return {
           path: args.parent,
@@ -122,12 +128,13 @@ describe("WorkspaceSwitcherModal (web)", () => {
       return null;
     });
 
-    renderModal();
-    fireEvent.click(screen.getByText("Mở thư mục..."));
-    fireEvent.click(screen.getByText("Chọn thư mục..."));
-    await waitFor(() => expect(screen.getByText("Thư mục mới")).toBeTruthy());
+    const onSelect = vi.fn();
+    const onCancel = vi.fn();
+    render(<FolderBrowser onSelect={onSelect} onCancel={onCancel} />);
 
+    await waitFor(() => expect(screen.getByText("Thư mục mới")).toBeTruthy());
     fireEvent.click(screen.getByText("Thư mục mới"));
+
     const input = screen.getByPlaceholderText("Tên thư mục mới...");
     fireEvent.change(input, { target: { value: "thu-muc-moi" } });
     fireEvent.click(screen.getByText("Tạo"));

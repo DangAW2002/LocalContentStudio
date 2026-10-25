@@ -34,6 +34,8 @@ pub const SUDO_COMMANDS: &[&str] = &[
 pub const ALLOWED_WEB_COMMANDS: &[&str] = &[
     // Workspace management
     "app_recent_workspaces",
+    "workspaces_root_get",
+    "workspaces_root_set",
     "workspace_create",
     "workspace_open",
     "workspace_current",
@@ -174,6 +176,8 @@ mod tests {
         assert!(is_command_allowed("engine_settings_set"));
         assert!(is_command_allowed("agy_connect"));
         assert!(is_command_allowed("agy_disconnect"));
+        assert!(is_command_allowed("workspaces_root_get"));
+        assert!(is_command_allowed("workspaces_root_set"));
         // The web workspace picker browses server folders; listing and sub-dir creation.
         assert!(is_command_allowed("fs_list_dirs"));
         assert!(!requires_sudo("fs_list_dirs"));
