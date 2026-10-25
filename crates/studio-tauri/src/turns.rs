@@ -1027,6 +1027,16 @@ mod tests {
 
     #[cfg(not(windows))]
     fn is_process_running(pid: u32) -> bool {
+        let status_path = format!("/proc/{}/status", pid);
+        if let Ok(content) = std::fs::read_to_string(&status_path) {
+            for line in content.lines() {
+                if let Some(rest) = line.strip_prefix("State:") {
+                    let state = rest.trim();
+                    // Z (zombie) means process has exited and terminated
+                    return !state.starts_with('Z');
+                }
+            }
+        }
         let output = std::process::Command::new("kill")
             .args(["-0", &pid.to_string()])
             .output();

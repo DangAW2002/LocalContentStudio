@@ -19,7 +19,7 @@ cost:
   estimate: 0.0
 side_effect: none
 resources:
-  ram_mb: 128
+  ram_mb: 512
   cpu: light
   gpu_vram_mb: 0
   exclusive: []

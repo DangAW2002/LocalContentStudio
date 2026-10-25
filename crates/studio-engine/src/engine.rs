@@ -115,6 +115,13 @@ pub async fn kill_process_tree(pid: u32) -> Result<(), EngineError> {
 
     #[cfg(not(windows))]
     {
+        let _ = Command::new("kill")
+            .args(["-9", &format!("-{}", pid)])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+
         let status = Command::new("kill")
             .args(["-9", &pid.to_string()])
             .stdout(Stdio::null())
