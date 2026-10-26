@@ -31,6 +31,128 @@ function slugify(text: string): string {
     .slice(0, 36) || "du-an-moi";
 }
 
+/**
+ * Strips leading `/<playbook>` and `[Áp dụng Brand: …]` prefixes from a prompt.
+ * If multiple prefixes or repeated prefixes exist at the start, all of them are removed.
+ */
+export function stripPromptPrefixes(
+  prompt: string,
+  playbookNames?: string | string[]
+): string {
+  let text = prompt.trim();
+  const names: string[] = [];
+  if (typeof playbookNames === "string" && playbookNames) {
+    names.push(playbookNames);
+  } else if (Array.isArray(playbookNames)) {
+    names.push(...playbookNames.filter(Boolean));
+  }
+
+  // Sort longest first to avoid partial prefix collisions
+  names.sort((a, b) => b.length - a.length);
+
+  let changed = true;
+  while (changed && text.length > 0) {
+    changed = false;
+
+    // 1. Strip `[Áp dụng Brand: …]` prefix
+    const brandMatch = text.match(/^\[Áp dụng Brand:[^\]]*\]\s*/i);
+    if (brandMatch) {
+      text = text.slice(brandMatch[0].length).trim();
+      changed = true;
+      continue;
+    }
+
+    // 2. Strip `/<playbook>` if matching any known playbook name
+    for (const name of names) {
+      const prefix = `/${name}`;
+      if (text.startsWith(prefix)) {
+        const rest = text.slice(prefix.length);
+        if (rest.length === 0 || /^\s/.test(rest)) {
+          text = rest.trim();
+          changed = true;
+          break;
+        }
+      }
+    }
+
+    if (changed) continue;
+
+    // 3. Fallback: if text starts with a slash command `/name `, strip it
+    const genericCmdMatch = text.match(/^\/[\w\u00C0-\u024F\u1EA0-\u1EF9-]+\s+/);
+    if (genericCmdMatch) {
+      text = text.slice(genericCmdMatch[0].length).trim();
+      changed = true;
+      continue;
+    }
+
+    // 4. Exact slash command with no trailing text
+    if (/^\/[\w\u00C0-\u024F\u1EA0-\u1EF9-]+$/.test(text)) {
+      text = "";
+      changed = true;
+      break;
+    }
+  }
+
+  return text;
+}
+
+/**
+ * Derives a clean project title from a prompt by stripping leading playbook and brand prefixes.
+ * If the resulting title is empty, falls back to the playbook name or a default title.
+ */
+export function cleanProjectTitle(
+  prompt: string,
+  playbookNames?: string | string[],
+  fallbackTitle?: string
+): string {
+  const stripped = stripPromptPrefixes(prompt, playbookNames);
+  if (!stripped) {
+    const fallback =
+      fallbackTitle ||
+      (typeof playbookNames === "string"
+        ? playbookNames
+        : Array.isArray(playbookNames) && playbookNames[0]
+        ? playbookNames[0]
+        : "Dự án mới");
+    return fallback.trim().slice(0, 60);
+  }
+  return stripped.slice(0, 60);
+}
+
+/**
+ * Composes the initial prompt for the first turn without repeating playbook or brand tags.
+ * If `prompt` already starts with or contains `/${selectedPlaybook}`, the playbook tag is not added.
+ */
+export function buildInitialPrompt(
+  prompt: string,
+  selectedPlaybook?: string,
+  selectedBrand?: string,
+  brandName?: string
+): string {
+  const trimmed = prompt.trim();
+  const contextPrefixes: string[] = [];
+
+  if (selectedPlaybook) {
+    const playbookTag = `/${selectedPlaybook}`;
+    // Do not add if prompt already starts with or contains the exact tag
+    if (!trimmed.startsWith(playbookTag) && !trimmed.includes(playbookTag)) {
+      contextPrefixes.push(playbookTag);
+    }
+  }
+
+  if (selectedBrand) {
+    const bName = brandName || selectedBrand;
+    const brandTag = `[Áp dụng Brand: ${bName} (id: ${selectedBrand})]`;
+    if (!trimmed.includes(brandTag) && !trimmed.includes(`(id: ${selectedBrand})`)) {
+      contextPrefixes.push(brandTag);
+    }
+  }
+
+  return contextPrefixes.length > 0
+    ? `${contextPrefixes.join(" ")} ${trimmed}`
+    : trimmed;
+}
+
 export const HomeView: React.FC<HomeViewProps> = ({
   currentWorkspace,
   onOpenProject,
@@ -172,8 +294,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
     setSubmitting(true);
     setError(null);
     try {
-      const slug = `${slugify(prompt)}-${Date.now().toString(36).slice(-4)}`;
-      const title = prompt.trim().slice(0, 60);
+      const allPlaybooks = selectedPlaybook
+        ? [selectedPlaybook, ...playbooks.map((p) => p.name)]
+        : playbooks.map((p) => p.name);
+      const title = cleanProjectTitle(prompt, allPlaybooks, selectedPlaybook);
+      const slug = `${slugify(title)}-${Date.now().toString(36).slice(-4)}`;
 
       // 1. Create project
       const proj = await studioApi.createProject({
@@ -190,18 +315,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
       });
 
       // 3. Compose initial turn prompt with brand/playbook context if selected
-      const contextPrefixes: string[] = [];
-      if (selectedPlaybook) {
-        contextPrefixes.push(`/${selectedPlaybook}`);
-      }
-      if (selectedBrand) {
-        const brandName = brands.find((b) => b.id === selectedBrand)?.name ?? selectedBrand;
-        contextPrefixes.push(`[Áp dụng Brand: ${brandName} (id: ${selectedBrand})]`);
-      }
-      const initialPrompt =
-        contextPrefixes.length > 0
-          ? `${contextPrefixes.join(" ")} ${prompt.trim()}`
-          : prompt.trim();
+      const brandName = brands.find((b) => b.id === selectedBrand)?.name;
+      const initialPrompt = buildInitialPrompt(
+        prompt,
+        selectedPlaybook,
+        selectedBrand,
+        brandName
+      );
 
       // Start first turn
       await studioApi.startTurn({

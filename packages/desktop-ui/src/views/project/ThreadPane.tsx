@@ -2,7 +2,7 @@ import React from "react";
 import { useStickToBottom } from "../../runtime/chat/useStickToBottom";
 import { newQueuedSend } from "../../runtime/chat/send-queue";
 import { Icon } from "../../components/Icon";
-import { Button, Badge, Callout, Select, type SelectOption } from "@studio/design-system";
+import { Button, Callout, Select, type SelectOption } from "@studio/design-system";
 import { studioApi } from "../../api/client";
 import type {
   EngineModelOption,
@@ -429,40 +429,46 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
         position: "relative",
       }}
     >
-      {/* Thread Header */}
+      {/* Scoped style for user bubble hover/focus edit button */}
+      <style>{`
+        .cs-user-bubble-container .cs-user-edit-btn {
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 120ms ease;
+        }
+        .cs-user-bubble-container:hover .cs-user-edit-btn,
+        .cs-user-bubble-container:focus-within .cs-user-edit-btn {
+          opacity: 1 !important;
+          pointer-events: auto !important;
+        }
+      `}</style>
+
+      {/* Thread Header: Compact single row with model selector & cancel button */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "var(--cs-space-2) var(--cs-space-4)",
+          padding: "4px var(--cs-space-3)",
           borderBottom: "1px solid var(--cs-border-subtle)",
           backgroundColor: "var(--cs-bg-raised)",
           fontSize: "var(--cs-text-sm)",
+          minHeight: 32,
+          gap: 8,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
-          <span style={{ fontWeight: 600, color: "var(--cs-fg-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {activeThread?.title || "Hội thoại chính"}
-          </span>
-          <Badge variant={activeThread?.engine === "claude" ? "info" : "neutral"}>
-            {activeThread?.engine === "claude" ? "Claude" : "agy"}
-          </Badge>
-          {availableModels.length > 0 && (
-            <div style={{ width: 170, marginLeft: 4 }}>
-              <Select
-                size="sm"
-                value={selectedModel}
-                disabled={Boolean(runningTurnId) || savingModel}
-                options={[
-                  { value: "", label: "(Mặc định của engine)" },
-                  ...availableModels.map((m) => ({ value: m.value, label: m.label })),
-                ]}
-                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleModelChange(e.target.value)}
-                title="Đổi model cho các lượt tiếp theo"
-              />
-            </div>
-          )}
+        <div style={{ width: 170, minWidth: 140 }}>
+          <Select
+            size="sm"
+            value={selectedModel}
+            disabled={Boolean(runningTurnId) || savingModel || availableModels.length === 0}
+            options={[
+              { value: "", label: "(Mặc định của engine)" },
+              ...availableModels.map((m) => ({ value: m.value, label: m.label })),
+            ]}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => handleModelChange(e.target.value)}
+            title={`${activeThread?.engine === "claude" ? "Claude" : "agy"} · Đổi model cho các lượt tiếp theo`}
+          />
         </div>
 
         {runningTurnId && (
@@ -521,51 +527,16 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
             msg.role === "user" ? (
               <div
                 key={msg.id}
+                className="cs-user-bubble-container"
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: 6,
+                  gap: 4,
                   alignSelf: "flex-end",
                   maxWidth: "85%",
+                  position: "relative",
                 }}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    fontSize: "var(--cs-text-xs)",
-                    color: "var(--cs-fg-muted)",
-                  }}
-                >
-                  <span style={{ fontWeight: 600 }}>Bạn</span>
-                  {msgIdx === lastUserMsgIdx && !runningTurnId && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const associatedTurnId = msg.turnId || messages[msgIdx + 1]?.turnId;
-                        handleStartEditResend(msg.text, associatedTurnId);
-                      }}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        color: "var(--cs-fg-secondary)",
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 4,
-                        fontSize: "var(--cs-text-xs)",
-                        padding: "2px 6px",
-                        borderRadius: "var(--cs-radius-control)",
-                      }}
-                      title="Sửa và gửi lại tin nhắn này (hoàn tác lượt agent tương ứng nếu có)"
-                    >
-                      <Icon name="writing" size={11} />
-                      <span>Sửa</span>
-                    </button>
-                  )}
-                </div>
                 <div
                   style={{
                     padding: "var(--cs-space-3)",
@@ -581,6 +552,44 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
                 >
                   {msg.text}
                 </div>
+                {msgIdx === lastUserMsgIdx && !runningTurnId && (
+                  <div
+                    className="cs-user-edit-actions"
+                    style={{
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      height: 0,
+                      overflow: "visible",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="cs-user-edit-btn"
+                      onClick={() => {
+                        const associatedTurnId = msg.turnId || messages[msgIdx + 1]?.turnId;
+                        handleStartEditResend(msg.text, associatedTurnId);
+                      }}
+                      style={{
+                        background: "var(--cs-bg-raised)",
+                        border: "1px solid var(--cs-border-subtle)",
+                        color: "var(--cs-fg-secondary)",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        fontSize: "var(--cs-text-xs)",
+                        padding: "2px 8px",
+                        borderRadius: "var(--cs-radius-control)",
+                        transform: "translateY(-4px)",
+                        boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
+                      }}
+                      title="Sửa và gửi lại tin nhắn này (hoàn tác lượt agent tương ứng nếu có)"
+                    >
+                      <Icon name="writing" size={11} />
+                      <span>Sửa</span>
+                    </button>
+                  </div>
+                )}
               </div>
             ) : (
               <AgentMessage

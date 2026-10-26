@@ -1,6 +1,6 @@
 import React from "react";
 import { Icon } from "../../../components/Icon";
-import { Button, Kbd } from "@studio/design-system";
+import { Button } from "@studio/design-system";
 import { QueuedSendStack } from "../../../components/QueuedSendStack";
 import type { QueuedSend } from "../../../runtime/chat/send-queue";
 import type { PublishRequest } from "../../../api/types";
@@ -44,6 +44,22 @@ export const Composer: React.FC<ComposerProps> = ({
   onMoveQueued,
   onResumeQueue,
 }) => {
+  // Auto-expand textarea from 2 rows up to ~8 rows based on content
+  React.useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const maxHeight = 180; // ~8 lines at ~21px line-height + padding
+    const scrollHeight = el.scrollHeight;
+    if (scrollHeight > maxHeight) {
+      el.style.height = `${maxHeight}px`;
+      el.style.overflowY = "auto";
+    } else {
+      el.style.height = `${Math.max(scrollHeight, 40)}px`;
+      el.style.overflowY = "hidden";
+    }
+  }, [inputPrompt, textareaRef]);
+
   return (
     <>
       {/* Draft Publish Banner */}
@@ -90,27 +106,31 @@ export const Composer: React.FC<ComposerProps> = ({
         />
       )}
 
-      {/* Prompt Input Box */}
+      {/* Prompt Input Box: Single row with auto-expanding textarea and Send button */}
       <div
         style={{
           padding: "var(--cs-space-3)",
           borderTop: "1px solid var(--cs-border-subtle)",
           backgroundColor: "var(--cs-bg-panel)",
+          display: "flex",
+          alignItems: "flex-end",
+          gap: "var(--cs-space-2)",
         }}
       >
-        <div style={{ position: "relative" }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
           <textarea
             ref={textareaRef}
             value={inputPrompt}
             onChange={onInputChange}
             onKeyDown={onKeyDown}
-            placeholder="Yêu cầu agent... Gõ @ chèn tệp, / chèn playbook"
-            rows={3}
+            placeholder="Yêu cầu agent… (@ tệp, / playbook)"
+            rows={2}
             style={{
               width: "100%",
               padding: "var(--cs-space-2) var(--cs-space-3)",
               fontFamily: "var(--cs-font-ui)",
               fontSize: "var(--cs-text-sm)",
+              lineHeight: 1.5,
               backgroundColor: "var(--cs-bg-raised)",
               color: "var(--cs-fg-primary)",
               border: "1px solid var(--cs-border-subtle)",
@@ -118,25 +138,23 @@ export const Composer: React.FC<ComposerProps> = ({
               outline: "none",
               resize: "none",
               boxSizing: "border-box",
+              minHeight: 40,
+              maxHeight: 180,
+              overflowY: "hidden",
             }}
           />
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
-            <Kbd>@</Kbd> <span>Tệp</span>
-            <Kbd>/</Kbd> <span>Playbook</span>
-          </div>
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={!inputPrompt.trim()}
-            onClick={onSend}
-            leftIcon={<Icon name={runningTurnId || sending ? "clock" : "arrow-right"} size={14} />}
-          >
-            {runningTurnId || sending ? "Xếp hàng" : "Gửi"}
-          </Button>
-        </div>
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={!inputPrompt.trim()}
+          onClick={onSend}
+          leftIcon={<Icon name={runningTurnId || sending ? "clock" : "arrow-right"} size={14} />}
+          style={{ flexShrink: 0, height: 36, marginBottom: 2 }}
+        >
+          {runningTurnId || sending ? "Xếp hàng" : "Gửi"}
+        </Button>
       </div>
     </>
   );
