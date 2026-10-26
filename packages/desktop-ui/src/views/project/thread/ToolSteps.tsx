@@ -33,6 +33,7 @@ export const ToolSteps: React.FC<ToolStepsProps> = ({
   toggleToolCallExpanded,
   onNavigateEngines,
 }) => {
+  const [userExpanded, setUserExpanded] = React.useState<boolean | null>(null);
   if (!toolCalls || toolCalls.length === 0) return null;
 
   const stepCount = toolCalls.length;
@@ -42,7 +43,6 @@ export const ToolSteps: React.FC<ToolStepsProps> = ({
   // Auto-expand when the turn is done, the turn errored, and the last tool failed
   const shouldAutoExpand = !isStreaming && Boolean(errorMessage) && Boolean(lastTool?.isError);
 
-  const [userExpanded, setUserExpanded] = React.useState<boolean | null>(null);
   const isOpen = userExpanded !== null ? userExpanded : shouldAutoExpand;
 
   const handleGoToEngines = () => {
@@ -111,45 +111,6 @@ export const ToolSteps: React.FC<ToolStepsProps> = ({
           {isOpen ? "Thu gọn" : "Chi tiết"}
         </span>
       </div>
-
-      {/* When streaming: show only the latest step (1 line) beneath the summary row */}
-      {isStreaming && !isOpen && lastTool && (
-        <div
-          data-testid="tool-steps-latest"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "4px 8px",
-            fontSize: "var(--cs-text-xs)",
-            color: lastTool.isError ? "var(--cs-danger)" : "var(--cs-fg-secondary)",
-            backgroundColor: "var(--cs-bg-panel)",
-            borderRadius: "var(--cs-radius-control)",
-            border: lastTool.isError
-              ? "1px solid var(--cs-danger)"
-              : "1px solid var(--cs-border-subtle)",
-            overflow: "hidden",
-          }}
-        >
-          <Icon
-            name={lastTool.isError ? "x-circle" : "terminal"}
-            size={12}
-            color={lastTool.isError ? "var(--cs-danger)" : "var(--cs-accent)"}
-          />
-          <span
-            style={{
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              fontWeight: 500,
-              flex: 1,
-            }}
-          >
-            {describeStep(lastTool.name, lastTool.input)}
-          </span>
-          {lastTool.isError && <Badge variant="danger">Lỗi</Badge>}
-        </div>
-      )}
 
       {/* Expanded list of grouped tool steps */}
       {isOpen && (
@@ -485,27 +446,28 @@ export const ToolSteps: React.FC<ToolStepsProps> = ({
             );
           })}
 
-          {/* MCP load failure general banner if error present */}
-          {hasMcpErr && (
-            <div style={{ marginTop: 4 }}>
-              <Callout
-                variant="danger"
-                title="Lỗi kết nối Studio MCP"
-                actions={
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    onClick={handleGoToEngines}
-                    leftIcon={<Icon name="settings" size={13} />}
-                  >
-                    Kết nối agy với Studio
-                  </Button>
-                }
+        </div>
+      )}
+
+      {/* MCP load failure general banner if error present */}
+      {hasMcpErr && (
+        <div style={{ marginTop: 4 }}>
+          <Callout
+            variant="danger"
+            title="Lỗi kết nối Studio MCP"
+            actions={
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={handleGoToEngines}
+                leftIcon={<Icon name="settings" size={13} />}
               >
-                agy chưa kết nối được Studio — mở Tools & Cài đặt → Engines → Kết nối agy với Studio
-              </Callout>
-            </div>
-          )}
+                Kết nối agy với Studio
+              </Button>
+            }
+          >
+            agy chưa kết nối được Studio — mở Tools & Cài đặt → Engines → Kết nối agy với Studio
+          </Callout>
         </div>
       )}
     </div>

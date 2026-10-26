@@ -80,8 +80,8 @@ describe("ToolSteps (Task D)", () => {
     expect(summary.textContent).toContain("▸");
   });
 
-  it("shows 1-line latest step underneath during streaming, and hides it when done", () => {
-    const { rerender } = render(
+  it("stays collapsed while streaming: the live activity line already shows the running step", () => {
+    render(
       <ToolSteps
         toolCalls={dummyCalls}
         msgIdx={0}
@@ -91,25 +91,9 @@ describe("ToolSteps (Task D)", () => {
         toggleToolCallExpanded={vi.fn()}
       />
     );
-
-    // Streaming: shows latest step under the summary row
-    const latest = screen.getByTestId("tool-steps-latest");
-    expect(latest).toBeTruthy();
-    expect(latest.textContent).toContain("Chạy lệnh: cargo build");
-
-    // Finished streaming: latest line disappears
-    rerender(
-      <ToolSteps
-        toolCalls={dummyCalls}
-        msgIdx={0}
-        isStreaming={false}
-        expandedToolGroups={new Set()}
-        toggleToolGroup={vi.fn()}
-        toggleToolCallExpanded={vi.fn()}
-      />
-    );
-
+    expect(screen.getByTestId("tool-steps-summary")).toBeTruthy();
     expect(screen.queryByTestId("tool-steps-latest")).toBeNull();
+    expect(screen.queryByTestId("tool-steps-expanded")).toBeNull();
   });
 
   it("auto-expands when the completed turn errored and the last tool failed", () => {
