@@ -53,6 +53,20 @@ pub async fn bootstrap(state: &AppState) -> Result<(), Box<dyn std::error::Error
     // Keep MCP server alive for process lifetime
     std::mem::forget(running);
 
+    // Auto-register Studio MCP shim with agy if studio-mcp executable is found alongside app
+    if let Ok(current) = std::env::current_exe() {
+        let mcp_exe = current.with_file_name(if cfg!(windows) {
+            "studio-mcp.exe"
+        } else {
+            "studio-mcp"
+        });
+        if mcp_exe.exists() {
+            if let Err(e) = studio_tools::setup_agy(&mcp_exe) {
+                eprintln!("[studio-tauri] Không thể tự động kết nối agy với Studio MCP: {e}");
+            }
+        }
+    }
+
     // Reopen the most recent workspace
     let recent = state
         .app_paths

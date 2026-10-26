@@ -22,11 +22,24 @@ pub fn default_agy_settings_path() -> Option<PathBuf> {
     )
 }
 
+fn agy_command() -> Command {
+    if let Ok(home) = env::var("HOME").or_else(|_| env::var("USERPROFILE")) {
+        let local_agy = PathBuf::from(&home)
+            .join(".local")
+            .join("bin")
+            .join(if cfg!(windows) { "agy.cmd" } else { "agy" });
+        if local_agy.is_file() {
+            return Command::new(local_agy);
+        }
+    }
+    Command::new("agy")
+}
+
 /// Setup agy integration with custom settings file path and CLI execution flag (useful for testing).
 pub fn setup_agy_at(settings_path: &Path, studio_mcp_exe: &Path, run_cli: bool) -> Result<()> {
     if run_cli {
         let exe_str = studio_mcp_exe.to_string_lossy();
-        let status = Command::new("agy")
+        let status = agy_command()
             .args(["mcp", "add", "studio", "--", exe_str.as_ref(), "--shim"])
             .status();
 
@@ -100,9 +113,7 @@ pub fn setup_agy_at(settings_path: &Path, studio_mcp_exe: &Path, run_cli: bool) 
 /// Remove agy integration with custom settings file path (useful for testing).
 pub fn remove_agy_at(settings_path: &Path, run_cli: bool) -> Result<()> {
     if run_cli {
-        let _ = Command::new("agy")
-            .args(["mcp", "remove", "studio"])
-            .status();
+        let _ = agy_command().args(["mcp", "remove", "studio"]).status();
     }
 
     if !settings_path.is_file() {
