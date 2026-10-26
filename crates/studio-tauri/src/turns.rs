@@ -933,48 +933,28 @@ pub async fn run_turn_inner<C: Clock + 'static>(
 
     // Synchronize workspace file changes that were not explicitly emitted as events
     // (e.g. files created via Studio MCP, custom tools, or shell commands).
-    let ws = t.state.workspace().or_else(|_| Workspace::open(&t.ws_root));
-    if let Ok(ws) = ws {
-        if let Ok(cps) = CheckpointService::list(&ws) {
-            if let Some(pre_cp) = cps
-                .into_iter()
+    // The turn's own workspace: the user may have switched workspaces meanwhile.
+    if let Ok(ws) = Workspace::open(&t.ws_root) {
+        let pre_cp = CheckpointService::list(&ws).ok().and_then(|cps| {
+            cps.into_iter()
                 .find(|c| c.turn_id.as_deref() == Some(&t.turn_id))
-            {
-                if let Ok(diff) = CheckpointService::changed_since(&ws, &pre_cp.id, turn_started) {
-                    for path in diff.added {
-                        if !path.starts_with(".studio/")
-                            && !path.starts_with(".studio\\")
-                            && !emitted_file_paths.contains(&path)
-                        {
-                            let ev = json!({ "type": "FileChange", "path": path, "op": "create" });
-                            emit(&t.state, &t.thread_id, &t.turn_id, &ev);
-                            save(&ev);
-                            emitted_file_paths.insert(path);
-                        }
-                    }
-                    for path in diff.modified {
-                        if !path.starts_with(".studio/")
-                            && !path.starts_with(".studio\\")
-                            && !emitted_file_paths.contains(&path)
-                        {
-                            let ev = json!({ "type": "FileChange", "path": path, "op": "modify" });
-                            emit(&t.state, &t.thread_id, &t.turn_id, &ev);
-                            save(&ev);
-                            emitted_file_paths.insert(path);
-                        }
-                    }
-                    for path in diff.deleted {
-                        if !path.starts_with(".studio/")
-                            && !path.starts_with(".studio\\")
-                            && !emitted_file_paths.contains(&path)
-                        {
-                            let ev = json!({ "type": "FileChange", "path": path, "op": "delete" });
-                            emit(&t.state, &t.thread_id, &t.turn_id, &ev);
-                            save(&ev);
-                            emitted_file_paths.insert(path);
-                        }
-                    }
+        });
+        if let Some(diff) =
+            pre_cp.and_then(|cp| CheckpointService::changed_since(&ws, &cp.id, turn_started).ok())
+        {
+            let changes = diff
+                .added
+                .into_iter()
+                .map(|p| (p, "create"))
+                .chain(diff.modified.into_iter().map(|p| (p, "modify")))
+                .chain(diff.deleted.into_iter().map(|p| (p, "delete")));
+            for (path, op) in changes {
+                if path.starts_with(".studio/") || !emitted_file_paths.insert(path.clone()) {
+                    continue;
                 }
+                let ev = json!({ "type": "FileChange", "path": path, "op": op });
+                emit(&t.state, &t.thread_id, &t.turn_id, &ev);
+                save(&ev);
             }
         }
     }
