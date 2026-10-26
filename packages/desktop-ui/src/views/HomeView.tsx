@@ -116,7 +116,7 @@ export function cleanProjectTitle(
         : "Dự án mới");
     return fallback.trim().slice(0, 60);
   }
-  return stripped.slice(0, 60);
+  return stripped.slice(0, 60).trim();
 }
 
 /**
@@ -167,21 +167,29 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const [modelsError, setModelsError] = React.useState<string | null>(null);
 
   // Model list comes from the engine itself, so new models show up without an app update.
+  // Latest requested engine: a slower answer for the previous engine must not win.
+  const modelsForRef = React.useRef<EngineType>("claude");
   const loadEngineModels = React.useCallback(async (targetEngine: EngineType) => {
+    modelsForRef.current = targetEngine;
     setModelsLoading(true);
     setModelsError(null);
+    // Never keep the other engine's model (agy rejects "opus").
+    setModel("");
+    setModelOptions([]);
     try {
       const options = await studioApi.getEngineModels(targetEngine);
+      if (modelsForRef.current !== targetEngine) return;
       setModelOptions(options);
       const remembered = localStorage.getItem(`lcs.model.${targetEngine}`);
       const pick = options.find((o) => o.value === remembered) ?? options[0];
       setModel(pick?.value ?? "");
     } catch (err: any) {
+      if (modelsForRef.current !== targetEngine) return;
       setModelOptions([]);
       setModel("");
       setModelsError(typeof err === "string" ? err : err?.message || "Không lấy được danh sách model.");
     } finally {
-      setModelsLoading(false);
+      if (modelsForRef.current === targetEngine) setModelsLoading(false);
     }
   }, []);
 
@@ -311,7 +319,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
       const thread = await studioApi.createThread({
         project: proj.slug,
         engine,
-        model: model || undefined,
+        model: modelOptions.some((o) => o.value === model) ? model : undefined,
       });
 
       // 3. Compose initial turn prompt with brand/playbook context if selected

@@ -272,6 +272,34 @@ fn build_context(
 }
 
 /// First line of a prompt, shortened to a thread title.
+/// Drops leading `/<playbook>` and `[Áp dụng Brand: …]` tags so titles show the request itself.
+fn strip_prompt_prefixes<'a>(prompt: &'a str, playbooks: &[String]) -> &'a str {
+    let mut names: Vec<&str> = playbooks.iter().map(String::as_str).collect();
+    names.sort_by_key(|n| std::cmp::Reverse(n.len()));
+    let mut rest = prompt.trim_start();
+    loop {
+        if rest.starts_with("[Áp dụng Brand:") {
+            if let Some(end) = rest.find(']') {
+                rest = rest[end + 1..].trim_start();
+                continue;
+            }
+        }
+        let tag = names.iter().find_map(|n| {
+            let after = rest.strip_prefix('/')?.strip_prefix(*n)?;
+            (after.is_empty() || after.starts_with(char::is_whitespace)).then_some(after)
+        });
+        match tag {
+            Some(after) => rest = after.trim_start(),
+            None => break,
+        }
+    }
+    if rest.is_empty() {
+        prompt
+    } else {
+        rest
+    }
+}
+
 fn thread_title_from_prompt(prompt: &str) -> String {
     const MAX_CHARS: usize = 48;
     let line = prompt
@@ -361,7 +389,12 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
     // Name an untitled thread after its first prompt (like chat apps do), so threads are
     // distinguishable in the switcher.
     if index == 0 {
-        let title = thread_title_from_prompt(&prompt);
+        let playbooks: Vec<String> = crate::commands::scope_list_impl(&state, "playbooks".into())
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| v.get("name").and_then(Value::as_str).map(String::from))
+            .collect();
+        let title = thread_title_from_prompt(strip_prompt_prefixes(&prompt, &playbooks));
         let renamed = db.conn().execute(
             "UPDATE threads SET title = ?2 WHERE id = ?1 AND (title IS NULL OR title = 'Hội thoại mới')",
             params![thread_id, title],
@@ -1025,6 +1058,25 @@ mod tests {
         assert_eq!(t.chars().count(), 49);
         assert!(t.ends_with('…'));
         assert_eq!(thread_title_from_prompt("   "), "Hội thoại mới");
+        let pbs = vec![
+            "YouTube Video".to_string(),
+            "YouTube Video Chuẩn".to_string(),
+        ];
+        assert_eq!(
+            strip_prompt_prefixes(
+                "/YouTube Video Chuẩn [Áp dụng Brand: A (id: a)] /YouTube Video Chuẩn làm video",
+                &pbs
+            ),
+            "làm video"
+        );
+        assert_eq!(
+            strip_prompt_prefixes("/YouTube Video Chuẩn", &pbs),
+            "/YouTube Video Chuẩn"
+        );
+        assert_eq!(
+            strip_prompt_prefixes("/khác làm video", &pbs),
+            "/khác làm video"
+        );
     }
 
     #[test]

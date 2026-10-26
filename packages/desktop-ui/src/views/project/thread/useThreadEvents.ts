@@ -115,9 +115,7 @@ export function useThreadEvents({ activeThreadId, onTurnDone }: UseThreadEventsO
         } else if (!finishedTurnsRef.current.has(payload.turnId)) {
           setRunningTurnId((cur) => cur ?? payload.turnId);
         }
-        if (payload.event.type === "Error") {
-          setError(payload.event.message);
-        }
+        // Turn errors are shown inside the agent message (with Retry); no second banner.
       })
       .then((fn) => {
         if (disposed) fn();
