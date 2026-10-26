@@ -45,7 +45,7 @@ describe("turn-reducer", () => {
   });
 
   describe("applyTurnEvent", () => {
-    it("handles UserPrompt event optimistically and with new turnId", () => {
+    it("handles UserPrompt event optimistically and appends agent placeholder", () => {
       const initial: ThreadMessage[] = [
         { id: "opt-1", role: "user", text: "Xin chào" },
       ];
@@ -53,19 +53,71 @@ describe("turn-reducer", () => {
         turnId: "t-1",
         event: { type: "UserPrompt", text: "Xin chào" },
       };
-      const updated = applyTurnEvent(initial, payload);
-      expect(updated).toHaveLength(1);
+      // Optimistic prompt matches: user msg gets turnId, and agent placeholder is added
+      const updated = applyTurnEvent(initial, payload, 1000);
+      expect(updated).toHaveLength(2);
       expect(updated[0].turnId).toBe("t-1");
       expect(updated[0].id).toBe("opt-1");
+      expect(updated[1]).toEqual({
+        id: "turn-t-1",
+        role: "agent",
+        text: "",
+        turnId: "t-1",
+        isStreaming: true,
+        startedAt: 1000,
+      });
 
+      // Subsequent new user prompt: adds user message + agent placeholder
       const payload2: EngineTurnEvent = {
         turnId: "t-2",
         event: { type: "UserPrompt", text: "Câu hỏi tiếp theo" },
       };
       const updated2 = applyTurnEvent(updated, payload2);
-      expect(updated2).toHaveLength(2);
-      expect(updated2[1].id).toBe("user-t-2");
-      expect(updated2[1].text).toBe("Câu hỏi tiếp theo");
+      expect(updated2).toHaveLength(4);
+      expect(updated2[2].id).toBe("user-t-2");
+      expect(updated2[2].text).toBe("Câu hỏi tiếp theo");
+      expect(updated2[3]).toEqual({
+        id: "turn-t-2",
+        role: "agent",
+        text: "",
+        turnId: "t-2",
+        isStreaming: true,
+        startedAt: undefined,
+      });
+    });
+
+    it("creates placeholder for live UserPrompt with timestamp and history UserPrompt without timestamp", () => {
+      // Live scenario
+      const live = applyTurnEvent([], {
+        turnId: "t-live",
+        event: { type: "UserPrompt", text: "Prompt live" },
+      }, 5000);
+      expect(live).toHaveLength(2);
+      expect(live[1].role === "agent" && live[1].startedAt).toBe(5000);
+      expect(live[1].isStreaming).toBe(true);
+
+      // History scenario (now is undefined)
+      const history = applyTurnEvent([], {
+        turnId: "t-hist",
+        event: { type: "UserPrompt", text: "Prompt history" },
+      });
+      expect(history).toHaveLength(2);
+      expect(history[1].role === "agent" && history[1].startedAt).toBeUndefined();
+      expect(history[1].isStreaming).toBe(true);
+    });
+
+    it("does not duplicate placeholder if agent message already exists", () => {
+      const state: ThreadMessage[] = [
+        { id: "user-t-1", role: "user", text: "Hello", turnId: "t-1" },
+        { id: "turn-t-1", role: "agent", text: "Hi", turnId: "t-1", isStreaming: false },
+      ];
+      const payload: EngineTurnEvent = {
+        turnId: "t-1",
+        event: { type: "UserPrompt", text: "Hello" },
+      };
+      const updated = applyTurnEvent(state, payload);
+      expect(updated).toHaveLength(2);
+      expect(updated[1].text).toBe("Hi");
     });
 
     it("ignores Session event", () => {
@@ -203,6 +255,43 @@ describe("turn-reducer", () => {
         reasoningTokens: 15,
         costUsd: 0.002,
         estimatedCostUsd: undefined,
+      });
+    });
+
+    it("attaches FileChange to the correct agent message after Done", () => {
+      let state: ThreadMessage[] = [];
+      // 1. User prompt creates placeholder
+      state = applyTurnEvent(state, {
+        turnId: "turn-done-1",
+        event: { type: "UserPrompt", text: "Make changes" },
+      }, 1000);
+
+      // 2. Text response
+      state = applyTurnEvent(state, {
+        turnId: "turn-done-1",
+        event: { type: "Text", text: "Done making changes" },
+      }, 1100);
+
+      // 3. Turn finishes with Done
+      state = applyTurnEvent(state, {
+        turnId: "turn-done-1",
+        event: { type: "Done", status: "completed" },
+      }, 1200);
+
+      expect(state[1].isStreaming).toBe(false);
+      expect(state[1].fileChanges).toBeUndefined();
+
+      // 4. FileChange arriving after Done (e.g. agy-artifacts sync)
+      state = applyTurnEvent(state, {
+        turnId: "turn-done-1",
+        event: { type: "FileChange", path: "agy-artifacts/output.png", op: "create" },
+      }, 1300);
+
+      expect(state[1].isStreaming).toBe(false);
+      expect(state[1].fileChanges).toHaveLength(1);
+      expect(state[1].fileChanges![0]).toEqual({
+        path: "agy-artifacts/output.png",
+        op: "create",
       });
     });
 

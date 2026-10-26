@@ -44,7 +44,27 @@ export function useThreadEvents({ activeThreadId, onTurnDone }: UseThreadEventsO
           });
         }
         if (cancelled) return;
-        const live = folded.find((m) => m.role === "agent" && m.isStreaming);
+
+        // A2: Only the last agent message is allowed to be isStreaming.
+        // Older agent messages still marked isStreaming (missing Done) get isStreaming: false.
+        let lastAgentIdx = -1;
+        for (let i = folded.length - 1; i >= 0; i--) {
+          if (folded[i].role === "agent") {
+            lastAgentIdx = i;
+            break;
+          }
+        }
+        if (lastAgentIdx !== -1) {
+          folded = folded.map((m, idx) => {
+            if (m.role === "agent" && idx !== lastAgentIdx && m.isStreaming) {
+              return { ...m, isStreaming: false };
+            }
+            return m;
+          });
+        }
+
+        const lastAgent = lastAgentIdx !== -1 ? folded[lastAgentIdx] : undefined;
+        const live = lastAgent && lastAgent.isStreaming ? lastAgent : null;
         setRunningTurnId(live?.turnId ?? null);
         setMessages(folded);
         setHistoryReadyFor(activeThreadId);
@@ -92,6 +112,8 @@ export function useThreadEvents({ activeThreadId, onTurnDone }: UseThreadEventsO
           finishedTurnsRef.current.add(payload.turnId);
           setRunningTurnId((cur) => (cur === null || cur === payload.turnId ? null : cur));
           onTurnDoneRef.current?.();
+        } else if (!finishedTurnsRef.current.has(payload.turnId)) {
+          setRunningTurnId((cur) => cur ?? payload.turnId);
         }
         if (payload.event.type === "Error") {
           setError(payload.event.message);

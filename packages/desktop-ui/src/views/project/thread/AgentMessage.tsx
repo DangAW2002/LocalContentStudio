@@ -10,6 +10,7 @@ import {
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { AskUserQuestionCard } from "./AskUserQuestionCard";
 import { UsageSummary } from "./UsageSummary";
+import { ResultCard } from "./ResultCard";
 
 export interface AgentMessageProps {
   msg: ThreadMessage;
@@ -67,11 +68,6 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
         width: "100%",
       }}
     >
-      {/* Message Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
-        <span style={{ fontWeight: 600 }}>Agent</span>
-      </div>
-
       {/* Message Box */}
       <div
         style={{
@@ -403,38 +399,9 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
           );
         })()}
 
-        {/* File Change Chips */}
+        {/* Results Card */}
         {msg.fileChanges && msg.fileChanges.length > 0 && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-            <span style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
-              Thay đổi tệp:
-            </span>
-            {msg.fileChanges.map((fc, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => onSelectFile(fc.path)}
-                aria-label={`Xem tệp ${fc.path} trên Stage`}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  padding: "2px 6px",
-                  borderRadius: "var(--cs-radius-control)",
-                  backgroundColor: "var(--cs-bg-panel)",
-                  border: "1px solid var(--cs-border-subtle)",
-                  fontSize: "var(--cs-text-xs)",
-                  fontFamily: "var(--cs-font-mono)",
-                  cursor: "pointer",
-                  color: fc.op === "create" ? "var(--cs-success)" : fc.op === "delete" ? "var(--cs-danger)" : "var(--cs-accent)",
-                }}
-                title="Bấm để xem trên Stage"
-              >
-                <span>{fc.op === "create" ? "+" : fc.op === "delete" ? "-" : "~"}</span>
-                <span>{fc.path}</span>
-              </button>
-            ))}
-          </div>
+          <ResultCard fileChanges={msg.fileChanges} onSelectFile={onSelectFile} />
         )}
 
         {/* Permission Requests & AskUserQuestion Cards */}

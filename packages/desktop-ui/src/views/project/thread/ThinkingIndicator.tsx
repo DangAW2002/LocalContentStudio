@@ -1,14 +1,15 @@
 import React from "react";
 import type { ThreadMessage } from "../../../runtime/chat/turn-reducer";
+import { describeActivity } from "../../../runtime/chat/activity-label";
 
-/** Seconds since `since`, ticking every second while mounted. */
+/** Seconds since `since`, ticking every second while mounted and active. */
 function useElapsedSeconds(since: number | undefined, active: boolean): number {
   const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => {
-    if (!active) return;
+    if (!active || since === undefined) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, [active]);
+  }, [active, since]);
   return since === undefined ? 0 : Math.max(0, Math.round((now - since) / 1000));
 }
 
@@ -17,46 +18,65 @@ export interface ThinkingIndicatorProps {
 }
 
 /**
- * Thinking slot of an agent message. Neither CLI hands over thinking text headless (Claude Code
- * redacts it, agy does not report it), so absence is the normal case: show that the agent is
- * working and for how long, and the text only when the engine actually sent some.
+ * Live activity indicator and thinking summary of an agent message.
+ * While streaming: shows a single line with blinking dot, activity label, elapsed time, and step count.
+ * When done: displays the "Đã suy nghĩ..." summary if thinking was recorded.
  */
 export const ThinkingIndicator: React.FC<ThinkingIndicatorProps> = ({ msg }) => {
-  const working =
-    Boolean(msg.isStreaming) && (Boolean(msg.thinkingActive) || (!msg.text && !(msg.toolCalls?.length)));
-  const since = msg.thinkingActive ? msg.thinkingStartedAt ?? msg.startedAt : msg.startedAt;
-  const elapsed = useElapsedSeconds(since, working);
+  const isStreaming = Boolean(msg.isStreaming);
+  const elapsed = useElapsedSeconds(msg.startedAt, isStreaming);
 
-  if (working) {
+  if (isStreaming) {
+    const toolCalls = msg.toolCalls || [];
+    const lastTool = toolCalls.length > 0 ? toolCalls[toolCalls.length - 1] : undefined;
+    const activeTool = lastTool && lastTool.output === undefined && !lastTool.isError ? lastTool : undefined;
+
+    let label: string;
+    if (activeTool) {
+      label = describeActivity(activeTool.name, activeTool.input);
+    } else if (msg.thinkingActive) {
+      label = "Đang suy nghĩ";
+    } else if (msg.text) {
+      label = "Đang viết trả lời";
+    } else {
+      const isPlaceholder =
+        !msg.text &&
+        toolCalls.length === 0 &&
+        !msg.usage &&
+        !msg.thoughtSeen &&
+        !(msg.fileChanges && msg.fileChanges.length > 0);
+      label = isPlaceholder ? "Đang khởi động agent" : "Đang xử lý";
+    }
+
+    const elapsedText = msg.startedAt !== undefined ? `${elapsed}s` : undefined;
+    const stepCount = toolCalls.length;
+    const stepsText = stepCount > 0 ? `${stepCount} bước` : undefined;
+
+    const hasSubsequentContent = Boolean(
+      msg.text ||
+      toolCalls.length > 0 ||
+      msg.errorMessage ||
+      (msg.fileChanges && msg.fileChanges.length > 0)
+    );
+
     return (
       <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: 6,
-          marginBottom: msg.text || msg.toolCalls?.length ? 8 : 0,
+          marginBottom: hasSubsequentContent ? 8 : 0,
           fontSize: "var(--cs-text-xs)",
           color: "var(--cs-fg-secondary)",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
         }}
       >
         <span className="cs-thinking-dot" aria-hidden />
-        <span>{msg.thinkingActive || msg.thoughtSeen ? "Đang suy nghĩ" : "Đang xử lý"}…</span>
-        {since !== undefined && elapsed > 0 && <span style={{ color: "var(--cs-fg-muted)" }}>{elapsed}s</span>}
-        {msg.thinking && (
-          <span
-            style={{
-              flex: 1,
-              minWidth: 0,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              color: "var(--cs-fg-muted)",
-              fontStyle: "italic",
-            }}
-          >
-            {msg.thinking.trim().split("\n").pop()}
-          </span>
-        )}
+        <span style={{ fontWeight: 500 }}>{label}</span>
+        {elapsedText && <span style={{ color: "var(--cs-fg-muted)" }}>· {elapsedText}</span>}
+        {stepsText && <span style={{ color: "var(--cs-fg-muted)" }}>· {stepsText}</span>}
       </div>
     );
   }

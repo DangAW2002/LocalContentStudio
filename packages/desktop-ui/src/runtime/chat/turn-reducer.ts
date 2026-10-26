@@ -99,12 +99,38 @@ export function isMcpLoadFailure(text?: string): boolean {
 export function applyTurnEvent(prev: ThreadMessage[], payload: EngineTurnEvent, now?: number): ThreadMessage[] {
   const event = payload.event;
   if (event.type === "UserPrompt") {
+    const alreadyHasUser = prev.some((m) => m.role === "user" && m.turnId === payload.turnId);
+    const alreadyHasAgent = prev.some((m) => m.role === "agent" && m.turnId === payload.turnId);
+    if (alreadyHasUser && alreadyHasAgent) {
+      return prev;
+    }
+
     const last = prev[prev.length - 1];
+    let nextList: ThreadMessage[];
     // The UI already appended the prompt optimistically: attach the turn id instead of duplicating.
     if (last && last.role === "user" && !last.turnId && last.text === event.text) {
-      return [...prev.slice(0, -1), { ...last, turnId: payload.turnId }];
+      nextList = [...prev.slice(0, -1), { ...last, turnId: payload.turnId }];
+    } else if (alreadyHasUser) {
+      nextList = prev;
+    } else {
+      nextList = [...prev, { id: `user-${payload.turnId}`, role: "user", text: event.text, turnId: payload.turnId }];
     }
-    return [...prev, { id: `user-${payload.turnId}`, role: "user", text: event.text, turnId: payload.turnId }];
+
+    const hasAgent = nextList.some((m) => m.role === "agent" && m.turnId === payload.turnId);
+    if (!hasAgent) {
+      return [
+        ...nextList,
+        {
+          id: `turn-${payload.turnId}`,
+          role: "agent",
+          text: "",
+          turnId: payload.turnId,
+          isStreaming: true,
+          startedAt: now,
+        },
+      ];
+    }
+    return nextList;
   }
   if (event.type === "Session") return prev;
 
@@ -115,6 +141,9 @@ export function applyTurnEvent(prev: ThreadMessage[], payload: EngineTurnEvent, 
     idx = list.length - 1;
   }
   let msg = list[idx];
+  if (msg.startedAt === undefined && now !== undefined) {
+    msg = { ...msg, startedAt: now };
+  }
   // Any non-thinking event closes an open thinking block.
   if (msg.thinkingActive && event.type !== "Thinking" && event.type !== "Usage") {
     const elapsed = now !== undefined && msg.thinkingStartedAt !== undefined ? now - msg.thinkingStartedAt : 0;
