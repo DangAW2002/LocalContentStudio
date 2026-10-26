@@ -404,18 +404,30 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
       {/* Project Bar Header */}
       <div
         style={{
-          height: 40,
+          // Narrow screens wrap the bar instead of pushing the tabs off-screen.
+          minHeight: 40,
           display: "flex",
+          flexWrap: isNarrow ? "wrap" : "nowrap",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "0 var(--cs-space-4)",
+          gap: isNarrow ? "var(--cs-space-2)" : undefined,
+          padding: isNarrow ? "var(--cs-space-2) var(--cs-space-3)" : "0 var(--cs-space-4)",
           backgroundColor: "var(--cs-bg-panel)",
           borderBottom: "1px solid var(--cs-border-subtle)",
           flexShrink: 0,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--cs-space-3)" }}>
-          <div style={{ width: 220 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: isNarrow ? "var(--cs-space-2)" : "var(--cs-space-3)",
+            flexWrap: isNarrow ? "wrap" : "nowrap",
+            minWidth: 0,
+            width: isNarrow ? "100%" : undefined,
+          }}
+        >
+          <div style={isNarrow ? { flex: "1 1 140px", minWidth: 0 } : { width: 220 }}>
             <Select
               size="sm"
               value={currentSlug}
@@ -438,7 +450,7 @@ export const ProjectView: React.FC<ProjectViewProps> = ({
           </Button>
 
           {threads.length > 0 && (
-            <div style={{ width: 240 }}>
+            <div style={isNarrow ? { flex: "1 1 140px", minWidth: 0 } : { width: 240 }}>
               <Select
                 size="sm"
                 aria-label="Chọn hội thoại"

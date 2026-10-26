@@ -191,6 +191,12 @@ try {
   await client.shot(path.join(shots, "c05-done-390.png"));
   const overflow = await client.eval(`document.documentElement.scrollWidth > window.innerWidth + 1`);
   check("390px không tràn ngang", !overflow);
+  const composerBox = await client.eval(`(() => {
+    const ta = [...document.querySelectorAll("textarea")].find(t => t.placeholder.startsWith("Yêu cầu agent"));
+    const r = ta?.getBoundingClientRect();
+    return r ? { x: Math.round(r.x), right: Math.round(r.right), w: innerWidth } : null;
+  })()`);
+  check("390px: ô nhập chat nằm trong màn hình", Boolean(composerBox) && composerBox.x >= 0 && composerBox.right <= composerBox.w, JSON.stringify(composerBox));
   await client.setViewport(1440, 900);
   await client.eval(`document.documentElement.setAttribute('data-theme', 'dark')`);
   await sleep(300);
