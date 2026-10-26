@@ -507,6 +507,7 @@ pub async fn start_turn(state: AppState, thread_id: String, prompt: String) -> C
         token,
         plugin_dir,
         session_key,
+        project_dir: project.as_ref().map(|p| p.root().to_path_buf()),
     };
     tauri::async_runtime::spawn(run_turn(ctx, turn, cancel));
     Ok(turn_id)
@@ -642,6 +643,8 @@ pub struct TurnTask {
     pub token: String,
     pub plugin_dir: Option<PathBuf>,
     pub session_key: String,
+    /// Project folder of the thread; receives agy brain artifacts.
+    pub project_dir: Option<PathBuf>,
 }
 
 pub async fn run_turn(t: TurnTask, turn: Turn, cancel: Arc<Notify>) {
@@ -685,6 +688,9 @@ pub async fn run_turn_inner<C: Clock + 'static>(
     let mut cost: Option<f64> = None;
 
     let mut open_tool_calls: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // agy artifacts touched from here on belong to this turn (slack for coarse mtimes).
+    let turn_started = std::time::SystemTime::now() - std::time::Duration::from_secs(2);
+    let mut conversation_id: Option<String> = None;
     let mut last_event_instant = clock.now();
     let mut last_wall_tick = clock.wall_now();
     let mut resume_grace_deadline: Option<std::time::Instant> = None;
@@ -706,11 +712,16 @@ pub async fn run_turn_inner<C: Clock + 'static>(
                     Event::ToolResult { id, .. } => {
                         open_tool_calls.remove(id);
                     }
-                    Event::Session { id } => with_db(&|d| {
-                        if get_setting(d, &t.session_key).ok().flatten().is_none() {
-                            let _ = set_setting(d, &t.session_key, id);
-                        }
-                    }),
+                    Event::Session { id } => {
+                        conversation_id = Some(id.clone());
+                        with_db(&|d| {
+                            if get_setting(d, &t.session_key).ok().flatten().is_none() {
+                                let _ = set_setting(d, &t.session_key, id);
+                            }
+                        })
+                    }
+                    // Brain edits surface as the synced project copy after the turn.
+                    Event::FileChange { path, .. } if crate::agy_artifacts::is_brain_path(path) => continue,
                     Event::TextDelta(d) => text.push_str(d),
                     Event::Text(full) => text = full.clone(),
                     Event::Usage { cost_usd, .. } => cost = *cost_usd,
@@ -846,6 +857,38 @@ pub async fn run_turn_inner<C: Clock + 'static>(
             "error"
         }
     };
+
+    if t.engine == "agy" {
+        // A resumed conversation may not repeat its id: fall back to the stored session.
+        if conversation_id.is_none() {
+            if let Ok(guard) = db.lock() {
+                conversation_id = guard
+                    .as_ref()
+                    .and_then(|d| get_setting(d, &t.session_key).ok().flatten());
+            }
+        }
+        let src = conversation_id
+            .as_deref()
+            .and_then(crate::agy_artifacts::brain_dir);
+        let dest = t
+            .project_dir
+            .clone()
+            .unwrap_or_else(|| t.ws_root.clone())
+            .join(crate::agy_artifacts::DEST_DIR);
+        if let Some(src) = src {
+            for (path, existed) in crate::agy_artifacts::sync(&src, &dest, turn_started) {
+                let rel = path
+                    .strip_prefix(&t.ws_root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let op = if existed { "modify" } else { "create" };
+                let ev = json!({ "type": "FileChange", "path": rel, "op": op });
+                emit(&t.state, &t.thread_id, &t.turn_id, &ev);
+                save(&ev);
+            }
+        }
+    }
 
     with_db(&|db| {
         let _ = db.conn().execute(
@@ -1126,6 +1169,7 @@ mod tests {
             token: "test-token".to_string(),
             plugin_dir: None,
             session_key: format!("thread.session.{thread_id}"),
+            project_dir: None,
         };
 
         (tmp, ws, db, state, task, cancel)

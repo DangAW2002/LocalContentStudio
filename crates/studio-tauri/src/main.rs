@@ -2,6 +2,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agy_artifacts;
 pub mod assets;
 mod bootstrap;
 mod broker;
