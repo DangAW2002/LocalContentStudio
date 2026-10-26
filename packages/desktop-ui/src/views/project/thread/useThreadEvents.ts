@@ -59,6 +59,10 @@ export function useThreadEvents({ activeThreadId, onTurnDone }: UseThreadEventsO
             if (m.role === "agent" && idx !== lastAgentIdx && m.isStreaming) {
               return { ...m, isStreaming: false };
             }
+            // D3: If the last agent message is streaming but missing startedAt, set startedAt = Date.now()
+            if (m.role === "agent" && idx === lastAgentIdx && m.isStreaming && !m.startedAt) {
+              return { ...m, startedAt: Date.now() };
+            }
             return m;
           });
         }

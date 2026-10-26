@@ -1,9 +1,8 @@
 import React from "react";
 import { Icon } from "../../../components/Icon";
-import { Badge, Button, Callout } from "@studio/design-system";
+import { Button, Callout } from "@studio/design-system";
 import { renderMarkdown } from "../../../runtime/markdown";
 import {
-  groupConsecutiveToolCalls,
   isMcpLoadFailure,
   type ThreadMessage,
 } from "../../../runtime/chat/turn-reducer";
@@ -11,6 +10,7 @@ import { ThinkingIndicator } from "./ThinkingIndicator";
 import { AskUserQuestionCard } from "./AskUserQuestionCard";
 import { UsageSummary } from "./UsageSummary";
 import { ResultCard } from "./ResultCard";
+import { ToolSteps } from "./ToolSteps";
 
 export interface AgentMessageProps {
   msg: ThreadMessage;
@@ -136,268 +136,21 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
           </div>
         )}
 
-        {/* Collapsed Tool Calls */}
-        {msg.toolCalls && msg.toolCalls.length > 0 && (() => {
-          const groups = groupConsecutiveToolCalls(msg.toolCalls, msg.id || String(msgIdx));
-          const hasMcpErr = msg.toolCalls.some((tc) => isMcpLoadFailure(tc.output));
-
-          return (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
-              {groups.map((group) => {
-                const isMulti = group.calls.length > 1;
-                const isExpanded = expandedToolGroups.has(group.key);
-
-                if (!isMulti) {
-                  const tc = group.calls[0];
-                  const mcpFail = isMcpLoadFailure(tc.output);
-
-                  return (
-                    <div
-                      key={tc.id}
-                      style={{
-                        border: tc.isError ? "1px solid var(--cs-danger)" : "1px solid var(--cs-border-subtle)",
-                        backgroundColor: "var(--cs-bg-panel)",
-                        borderRadius: "var(--cs-radius-control)",
-                        fontSize: "var(--cs-text-xs)",
-                        overflow: "hidden",
-                      }}
-                    >
-                      <div
-                        onClick={() => toggleToolCallExpanded(msgIdx, tc.id)}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          padding: "6px 10px",
-                          cursor: "pointer",
-                          backgroundColor: "var(--cs-bg-raised)",
-                          userSelect: "none",
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <Icon
-                            name={tc.isError ? "x-circle" : "terminal"}
-                            size={13}
-                            color={tc.isError ? "var(--cs-danger)" : "var(--cs-accent)"}
-                          />
-                          <span style={{ fontWeight: 600, fontFamily: "var(--cs-font-mono)" }}>
-                            {tc.name}
-                          </span>
-                          {tc.isError && <Badge variant="danger">Lỗi</Badge>}
-                        </div>
-                        <Icon name={tc.expanded ? "chev-up" : "chev-down"} size={12} color="var(--cs-fg-muted)" />
-                      </div>
-                      {tc.expanded && (
-                        <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
-                          <div>
-                            <span style={{ color: "var(--cs-fg-muted)" }}>Đầu vào:</span>
-                            <pre style={{ margin: "2px 0", fontSize: 11, fontFamily: "var(--cs-font-mono)", overflowX: "auto" }}>
-                              {JSON.stringify(tc.input, null, 2)}
-                            </pre>
-                          </div>
-                          {tc.output && (
-                            <div>
-                              <span style={{ color: "var(--cs-fg-muted)" }}>Đầu ra:</span>
-                              <pre style={{ margin: "2px 0", fontSize: 11, fontFamily: "var(--cs-font-mono)", overflowX: "auto", color: tc.isError ? "var(--cs-danger)" : undefined }}>
-                                {tc.output}
-                              </pre>
-                            </div>
-                          )}
-                          {mcpFail && (
-                            <div style={{ marginTop: 4 }}>
-                              <Callout
-                                variant="danger"
-                                title="Lỗi kết nối Studio MCP"
-                                actions={
-                                  <Button
-                                    size="sm"
-                                    variant="primary"
-                                    onClick={handleGoToEngines}
-                                    leftIcon={<Icon name="settings" size={13} />}
-                                  >
-                                    Kết nối agy với Studio
-                                  </Button>
-                                }
-                              >
-                                agy chưa kết nối được Studio — mở Tools & Cài đặt → Engines → Kết nối agy với Studio
-                              </Callout>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                }
-
-                // Multi-call group (e.g. view_file ×14)
-                return (
-                  <div
-                    key={group.key}
-                    style={{
-                      border: group.hasErrors ? "1px solid var(--cs-danger)" : "1px solid var(--cs-border-subtle)",
-                      backgroundColor: "var(--cs-bg-panel)",
-                      borderRadius: "var(--cs-radius-control)",
-                      fontSize: "var(--cs-text-xs)",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div
-                      onClick={() => toggleToolGroup(group.key)}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        padding: "6px 10px",
-                        cursor: "pointer",
-                        backgroundColor: "var(--cs-bg-raised)",
-                        userSelect: "none",
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <Icon
-                          name={group.hasErrors ? "x-circle" : "terminal"}
-                          size={13}
-                          color={group.hasErrors ? "var(--cs-danger)" : "var(--cs-accent)"}
-                        />
-                        <span style={{ fontWeight: 600, fontFamily: "var(--cs-font-mono)" }}>
-                          {group.name} ×{group.calls.length}
-                        </span>
-                        {group.hasErrors && (
-                          <Badge variant="danger">
-                            {group.errorCount} lỗi
-                          </Badge>
-                        )}
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: 11, color: "var(--cs-fg-muted)" }}>
-                          {isExpanded ? "Thu gọn" : "Xem chi tiết"}
-                        </span>
-                        <Icon name={isExpanded ? "chev-up" : "chev-down"} size={12} color="var(--cs-fg-muted)" />
-                      </div>
-                    </div>
-
-                    {isExpanded && (
-                      <div style={{ padding: "6px 10px", display: "flex", flexDirection: "column", gap: 6, backgroundColor: "var(--cs-bg-app)", borderTop: "1px solid var(--cs-border-subtle)" }}>
-                        {group.calls.map((tc, cIdx) => {
-                          const mcpFail = isMcpLoadFailure(tc.output);
-                          const inputSummary =
-                            typeof tc.input === "object" && tc.input !== null
-                              ? String((tc.input as any).path || (tc.input as any).file || (tc.input as any).filePath || "")
-                              : "";
-
-                          return (
-                            <div
-                              key={tc.id}
-                              style={{
-                                border: tc.isError ? "1px solid var(--cs-danger)" : "1px solid var(--cs-border-subtle)",
-                                backgroundColor: "var(--cs-bg-panel)",
-                                borderRadius: "var(--cs-radius-control)",
-                                fontSize: "var(--cs-text-xs)",
-                                overflow: "hidden",
-                              }}
-                            >
-                              <div
-                                onClick={() => toggleToolCallExpanded(msgIdx, tc.id)}
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "space-between",
-                                  padding: "5px 8px",
-                                  cursor: "pointer",
-                                  backgroundColor: "var(--cs-bg-raised)",
-                                  userSelect: "none",
-                                }}
-                              >
-                                <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                                  <Icon
-                                    name={tc.isError ? "x-circle" : "terminal"}
-                                    size={12}
-                                    color={tc.isError ? "var(--cs-danger)" : "var(--cs-accent)"}
-                                  />
-                                  <span style={{ fontWeight: 600, fontFamily: "var(--cs-font-mono)", fontSize: 11 }}>
-                                    #{cIdx + 1}
-                                  </span>
-                                  {inputSummary && (
-                                    <span style={{ color: "var(--cs-fg-muted)", fontFamily: "var(--cs-font-mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                      {inputSummary}
-                                    </span>
-                                  )}
-                                  {tc.isError && <Badge variant="danger">Lỗi</Badge>}
-                                </div>
-                                <Icon name={tc.expanded ? "chev-up" : "chev-down"} size={11} color="var(--cs-fg-muted)" />
-                              </div>
-
-                              {tc.expanded && (
-                                <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
-                                  <div>
-                                    <span style={{ color: "var(--cs-fg-muted)" }}>Đầu vào:</span>
-                                    <pre style={{ margin: "2px 0", fontSize: 11, fontFamily: "var(--cs-font-mono)", overflowX: "auto" }}>
-                                      {JSON.stringify(tc.input, null, 2)}
-                                    </pre>
-                                  </div>
-                                  {tc.output && (
-                                    <div>
-                                      <span style={{ color: "var(--cs-fg-muted)" }}>Đầu ra:</span>
-                                      <pre style={{ margin: "2px 0", fontSize: 11, fontFamily: "var(--cs-font-mono)", overflowX: "auto", color: tc.isError ? "var(--cs-danger)" : undefined }}>
-                                        {tc.output}
-                                      </pre>
-                                    </div>
-                                  )}
-                                  {mcpFail && (
-                                    <div style={{ marginTop: 4 }}>
-                                      <Callout
-                                        variant="danger"
-                                        title="Lỗi kết nối Studio MCP"
-                                        actions={
-                                          <Button
-                                            size="sm"
-                                            variant="primary"
-                                            onClick={handleGoToEngines}
-                                            leftIcon={<Icon name="settings" size={13} />}
-                                          >
-                                            Kết nối agy với Studio
-                                          </Button>
-                                        }
-                                      >
-                                        agy chưa kết nối được Studio — mở Tools & Cài đặt → Engines → Kết nối agy với Studio
-                                      </Callout>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-
-              {/* Clear banner for MCP load failure */}
-              {hasMcpErr && (
-                <div style={{ marginTop: 4 }}>
-                  <Callout
-                    variant="danger"
-                    title="Lỗi kết nối Studio MCP"
-                    actions={
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        onClick={handleGoToEngines}
-                        leftIcon={<Icon name="settings" size={13} />}
-                      >
-                        Kết nối agy với Studio
-                      </Button>
-                    }
-                  >
-                    agy chưa kết nối được Studio — mở Tools & Cài đặt → Engines → Kết nối agy với Studio
-                  </Callout>
-                </div>
-              )}
-            </div>
-          );
-        })()}
+        {/* Collapsed Tool Calls (Task D: ToolSteps summary & progressive disclosure) */}
+        {msg.toolCalls && msg.toolCalls.length > 0 && (
+          <ToolSteps
+            toolCalls={msg.toolCalls}
+            turnId={msg.turnId}
+            msgId={msg.id}
+            msgIdx={msgIdx}
+            isStreaming={msg.isStreaming}
+            errorMessage={msg.errorMessage}
+            expandedToolGroups={expandedToolGroups}
+            toggleToolGroup={toggleToolGroup}
+            toggleToolCallExpanded={toggleToolCallExpanded}
+            onNavigateEngines={handleGoToEngines}
+          />
+        )}
 
         {/* Results Card */}
         {msg.fileChanges && msg.fileChanges.length > 0 && (
@@ -512,50 +265,50 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
         )}
       </div>
 
-              {/* Pinned Artifact Warning Banner */}
-        {msg.pinnedWarning && (
-          <div
-            style={{
-              marginTop: 8,
-              padding: "10px 12px",
-              backgroundColor: "var(--cs-status-warning-bg)",
-              border: "1px solid var(--cs-warning)",
-              borderRadius: "var(--cs-radius-control)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
+      {/* Pinned Artifact Warning Banner */}
+      {msg.pinnedWarning && (
+        <div
+          style={{
+            marginTop: 8,
+            padding: "10px 12px",
+            backgroundColor: "var(--cs-status-warning-bg)",
+            border: "1px solid var(--cs-warning)",
+            borderRadius: "var(--cs-radius-control)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 8,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--cs-text-xs)", color: "var(--cs-warning)" }}>
+            <Icon name="shield-alert" size={15} color="var(--cs-warning)" />
+            <span style={{ fontWeight: 600 }}>
+              {`Artifact khoá "${msg.pinnedWarning.artifactId}" đã bị thay đổi file trong lượt này.`}
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={async () => {
+              const proj = window.location.pathname.split("/").pop() || "";
+              try {
+                await (window as any).__studioApi_restorePinned?.(msg.pinnedWarning!.artifactId, msg.pinnedWarning!.checkpointId);
+              } catch {
+                // Fallback or trigger via event
+              }
+              window.dispatchEvent(
+                new CustomEvent("studio:restore-pinned", {
+                  detail: msg.pinnedWarning,
+                })
+              );
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--cs-text-xs)", color: "var(--cs-warning)" }}>
-              <Icon name="shield-alert" size={15} color="var(--cs-warning)" />
-              <span style={{ fontWeight: 600 }}>
-                {`Artifact khoá "${msg.pinnedWarning.artifactId}" đã bị thay đổi file trong lượt này.`}
-              </span>
-            </div>
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={async () => {
-                const proj = window.location.pathname.split("/").pop() || "";
-                try {
-                  await (window as any).__studioApi_restorePinned?.(msg.pinnedWarning!.artifactId, msg.pinnedWarning!.checkpointId);
-                } catch {
-                  // Fallback or trigger via event
-                }
-                window.dispatchEvent(
-                  new CustomEvent("studio:restore-pinned", {
-                    detail: msg.pinnedWarning,
-                  })
-                );
-              }}
-            >
-              Hoàn tác phần này
-            </Button>
-          </div>
-        )}
+            Hoàn tác phần này
+          </Button>
+        </div>
+      )}
 
-        {/* Per-Turn Footer (Usage / Undo) */}
+      {/* Per-Turn Footer (Usage / Undo) */}
       <div
         style={{
           display: "flex",

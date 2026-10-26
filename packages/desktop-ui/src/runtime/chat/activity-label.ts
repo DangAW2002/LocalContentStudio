@@ -64,7 +64,8 @@ export function describeActivity(name: string, input?: unknown): string {
     trimmedName === "Đọc tệp" ||
     trimmedName === "Read" ||
     trimmedName === "read_file" ||
-    trimmedName === "read"
+    trimmedName === "read" ||
+    trimmedName === "view_file"
   ) {
     const file = extractFilePath(input);
     return file ? `Đang đọc ${file}` : "Đang đọc tệp";
@@ -93,6 +94,11 @@ export function describeActivity(name: string, input?: unknown): string {
     return file ? `Đang sửa ${file}` : "Đang sửa tệp";
   }
 
+  // Image generation
+  if (trimmedName === "Tạo ảnh" || trimmedName === "generate_image") {
+    return "Đang tạo ảnh";
+  }
+
   // Shell command
   if (
     trimmedName === "Chạy lệnh shell" ||
@@ -105,9 +111,15 @@ export function describeActivity(name: string, input?: unknown): string {
     return cmd ? `Đang chạy lệnh: ${cmd}` : "Đang chạy lệnh shell";
   }
 
+  // Web read
+  if (trimmedName === "Đọc trang web" || trimmedName === "read_url_content") {
+    return "Đang đọc trang web";
+  }
+
   // Web search / browse / fetch
   if (
     trimmedName === "Tìm kiếm & duyệt web" ||
+    trimmedName === "Tìm kiếm web" ||
     trimmedName === "WebSearch" ||
     trimmedName === "WebFetch" ||
     trimmedName === "web_search" ||
@@ -115,6 +127,49 @@ export function describeActivity(name: string, input?: unknown): string {
   ) {
     const q = extractQuery(input);
     return q ? `Đang tìm web: "${q}"` : "Đang tìm kiếm web";
+  }
+
+  // Web browse
+  if (
+    trimmedName === "Duyệt web" ||
+    trimmedName.startsWith("browser_") ||
+    trimmedName === "open_browser_url" ||
+    trimmedName === "read_browser_page"
+  ) {
+    return "Đang duyệt web";
+  }
+
+  // Wait / command status
+  if (
+    trimmedName === "Chờ lệnh" ||
+    trimmedName === "command_status" ||
+    trimmedName === "wait" ||
+    trimmedName === "wait_5_seconds"
+  ) {
+    return "Đang chờ lệnh";
+  }
+
+  // Ask user
+  if (
+    trimmedName === "Hỏi người dùng" ||
+    trimmedName === "ask_question" ||
+    trimmedName === "ask_permission"
+  ) {
+    return "Đang hỏi người dùng";
+  }
+
+  // Run workflow
+  if (trimmedName === "Chạy quy trình" || trimmedName === "run_workflow") {
+    return "Đang chạy quy trình";
+  }
+
+  // Resources
+  if (
+    trimmedName === "Đọc tài nguyên" ||
+    trimmedName === "list_resources" ||
+    trimmedName === "read_resource"
+  ) {
+    return "Đang đọc tài nguyên";
   }
 
   // Studio tool
@@ -132,7 +187,10 @@ export function describeActivity(name: string, input?: unknown): string {
     trimmedName === "Điều phối tác vụ con" ||
     trimmedName === "Task" ||
     trimmedName === "task" ||
-    trimmedName === "invoke_subagent"
+    trimmedName === "invoke_subagent" ||
+    trimmedName === "manage_task" ||
+    trimmedName === "define_subagent" ||
+    trimmedName === "manage_subagents"
   ) {
     return "Đang giao việc cho agent con";
   }
@@ -155,4 +213,15 @@ export function describeActivity(name: string, input?: unknown): string {
   }
 
   return `Đang dùng công cụ ${trimmedName}`;
+}
+
+/**
+ * Formats a tool call name and input into a neutral or past-tense action label
+ * for completed or expanded steps (e.g. "Đọc script.md", "Chạy lệnh: npm run build", "Tạo ảnh").
+ */
+export function describeStep(name: string, input?: unknown): string {
+  const active = describeActivity(name, input);
+  const stripped = active.replace(/^Đang\s+/, "");
+  if (!stripped) return active;
+  return stripped.charAt(0).toUpperCase() + stripped.slice(1);
 }
