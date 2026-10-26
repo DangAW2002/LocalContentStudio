@@ -39,6 +39,8 @@ export interface ThreadMessage {
   errorMessage?: string;
   pinnedWarning?: { artifactId: string; checkpointId: string };
   model?: string;
+  /** Final status from the engine's Done event ("success" | "error" | "cancelled"). */
+  doneStatus?: string;
 }
 
 export interface ToolCallItem {
@@ -218,6 +220,7 @@ export function applyTurnEvent(prev: ThreadMessage[], payload: EngineTurnEvent, 
       next = {
         ...msg,
         isStreaming: false,
+        doneStatus: event.status,
         text: msg.text || event.text || "",
         errorMessage: err,
       };

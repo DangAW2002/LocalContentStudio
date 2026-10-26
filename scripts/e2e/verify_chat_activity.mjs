@@ -91,6 +91,8 @@ try {
     const sec = Math.round((Date.now() - t0) / 1000);
     if (s.activity) {
       const label = s.activity.replace(/·.*$/, "").trim();
+      const shown = Number(s.activity.match(/· (\d+)s/)?.[1]);
+      if (Number.isFinite(shown)) results.maxClockLag = Math.max(results.maxClockLag ?? 0, sec - shown);
       if (!results.activityLabels.includes(label)) {
         results.activityLabels.push(label);
         results.timeline.push(`${sec}s ${s.activity}`);
@@ -106,6 +108,7 @@ try {
   }
   const doneSec = Math.round((Date.now() - t0) / 1000);
   check("lượt kết thúc trong thời hạn", idleTicks >= 4, `${doneSec}s`);
+  check("đồng hồ không trễ quá 10s so với thực", (results.maxClockLag ?? 0) <= 10, `trễ tối đa ${results.maxClockLag ?? 0}s`);
   check("dòng hoạt động đổi theo bước (≥2 nhãn)", results.activityLabels.length >= 2, results.activityLabels.join(" | "));
 
   // Artifact sync runs right after Done; give the fs events a moment.
@@ -114,21 +117,74 @@ try {
   results.resultText = end.resultText;
   check("có thẻ Kết quả", end.hasResult, end.resultText?.replace(/\s+/g, " ").slice(0, 200) ?? "");
   const errorShown = /Engine báo lỗi/.test(end.body);
+  const steps = await client.eval(`({
+    summary: document.querySelector('[data-testid=tool-steps-summary]')?.innerText ?? null,
+    expanded: Boolean(document.querySelector('[data-testid=tool-steps-expanded]')),
+  })`);
+  check("danh sách bước thu gọn thành 1 hàng", Boolean(steps.summary) && !steps.expanded, steps.summary?.replace(/\s+/g, " ") ?? "không có");
+  check("không còn bước tên chung chung 'Công cụ'", !/^Công cụ( ×\d+)?$/m.test(end.body));
   check("lượt không báo lỗi engine", !errorShown);
 
   const projects = readdirSync(path.join(run.wsDir, "projects")).filter((d) => d !== "demo");
   const proj = projects.map((p) => path.join(run.wsDir, "projects", p)).find((p) => existsSync(path.join(p, "project.yaml")));
   const projYaml = proj ? readFileSync(path.join(proj, "project.yaml"), "utf-8") : "";
   check("tên dự án không bắt đầu bằng /playbook", !/^title: "?\//m.test(projYaml), projYaml.match(/^title:.*$/m)?.[0] ?? "");
+  // 3. Follow-up turn from the composer, then a cancelled turn.
+  const composer = `[...document.querySelectorAll("textarea")].find(t => t.placeholder.startsWith("Yêu cầu agent"))`;
+  const sendFromComposer = async (text) => {
+    await setField(composer, text);
+    await client.eval(`[...document.querySelectorAll("button")].find(b => b.innerText.trim() === "Gửi").click()`);
+  };
+  const waitIdle = async (limitMs) => {
+    const t = Date.now();
+    let idle = 0;
+    while (Date.now() - t < limitMs) {
+      await sleep(1000);
+      const s = await chatState();
+      idle = !s.activity && !s.cancel ? idle + 1 : 0;
+      if (idle >= 3) return Math.round((Date.now() - t) / 1000);
+    }
+    return null;
+  };
+  const bubblesBefore = await client.eval(`document.querySelectorAll(".cs-md").length`);
+  await sendFromComposer(
+    "Nếu lượt trước chưa xong thì làm nốt (tạo dan-y.md và ảnh thumbnail bằng generate_image). Cuối cùng trả lời một câu: dàn ý có mấy ý?",
+  );
+  await sleep(700);
+  const f1 = await chatState();
+  check("lượt tiếp theo hiện trạng thái ngay", Boolean(f1.activity) && f1.cancel, f1.activity ?? "");
+  const f1Done = await waitIdle(5 * 60_000);
+  check("lượt tiếp theo hoàn tất", f1Done !== null, `${f1Done}s`);
+  const bubblesAfter = await client.eval(`document.querySelectorAll(".cs-md").length`);
+  check("có câu trả lời của lượt tiếp theo", bubblesAfter > bubblesBefore, `${bubblesBefore} → ${bubblesAfter}`);
+  await sleep(2000);
+
+  // Files from the whole thread: agy brain sync + files made via Studio MCP/shell.
+  const cards = await client.eval(`[...document.querySelectorAll("div")]
+    .filter(d => /^Kết quả · \d+ tệp/.test(d.innerText || "") && d.children.length >= 2)
+    .map(d => d.innerText)`);
+  const allResults = cards.join("\n");
+  results.resultCards = cards;
+  check("có thẻ Kết quả trong hội thoại", cards.length > 0, cards.map((c) => c.split("\n")[0]).join(", "));
+  check("thẻ Kết quả có tệp tạo qua công cụ Studio/shell (.md)", /\.md\b/.test(allResults));
   const artDir = proj && path.join(proj, "agy-artifacts");
   const artifacts = artDir && existsSync(artDir) ? readdirSync(artDir) : [];
   results.syncedArtifacts = artifacts;
   check("artifact brain agy đã đồng bộ về dự án", artifacts.length > 0, artifacts.join(", ") || "thư mục trống/không có");
   if (artifacts.length) {
-    check("thẻ Kết quả liệt kê artifact đồng bộ", artifacts.some((a) => end.resultText?.includes(a)));
+    check("thẻ Kết quả liệt kê artifact đồng bộ", artifacts.some((a) => allResults.includes(a.slice(0, 12))));
   }
+  await sendFromComposer("Viết một bài 2000 chữ về lịch sử cà phê Việt Nam rồi lưu thành tệp lich-su.md.");
+  await sleep(4000);
+  await client.clickText("Hủy lượt", 5000);
+  const cDone = await waitIdle(60_000);
+  check("Hủy lượt dừng được agent", cDone !== null, `${cDone}s sau khi bấm`);
+  const afterCancel = await chatState();
+  check("lượt huỷ không để kẹt chỉ báo", !afterCancel.activity && !afterCancel.cancel);
+  check("bong bóng lượt huỷ ghi rõ đã huỷ", /Đã huỷ lượt\.|Engine báo lỗi|bước/.test(afterCancel.body.split("Viết một bài 2000 chữ").pop()));
+  await client.shot(path.join(shots, "c07-after-cancel.png"));
 
-  // 3. Layout at other widths + dark theme.
+  // 4. Layout at other widths + dark theme.
   await client.shot(path.join(shots, "c04-done-1440.png"));
   await client.setViewport(390, 844);
   await sleep(400);

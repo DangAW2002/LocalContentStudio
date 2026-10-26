@@ -85,6 +85,19 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({
         {/* Thinking / working indicator */}
         <ThinkingIndicator msg={msg} />
 
+        {/* A finished turn with nothing to show must still say what happened. */}
+        {!msg.isStreaming &&
+          !msg.text &&
+          !msg.errorMessage &&
+          !msg.toolCalls?.length &&
+          !msg.fileChanges?.length &&
+          !msg.permissionRequests?.length &&
+          !msg.deniedActions?.length && (
+            <div style={{ fontSize: "var(--cs-text-xs)", color: "var(--cs-fg-muted)" }}>
+              {msg.doneStatus === "cancelled" ? "Đã huỷ lượt." : "Agent kết thúc mà không trả lời."}
+            </div>
+          )}
+
         {/* Main Text */}
         {msg.text && (
           <div className="cs-md" style={{ whiteSpace: "normal" }}>

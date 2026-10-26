@@ -180,6 +180,9 @@ export const ResultCard: React.FC<ResultCardProps> = ({ fileChanges, onSelectFil
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
+                    // The name matters more than the folder: shrink the folder first.
+                    flexShrink: 0,
+                    maxWidth: "70%",
                   }}
                 >
                   {item.fileName}
@@ -192,9 +195,13 @@ export const ResultCard: React.FC<ResultCardProps> = ({ fileChanges, onSelectFil
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
+                      minWidth: 0,
+                      direction: "rtl",
+                      textAlign: "left",
                     }}
                   >
-                    {item.dirPath}/
+                    {/* rtl keeps the nearest folders visible when the path is cut */}
+                    <bdi>{item.dirPath.replace(/^projects\/[^/]+\/?/, "") || "gốc dự án"}</bdi>
                   </span>
                 )}
               </div>
