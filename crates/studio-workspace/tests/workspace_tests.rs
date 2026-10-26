@@ -972,3 +972,59 @@ fn test_project_meta_series_yaml_round_trip() {
     let meta3: studio_workspace::ProjectMeta = serde_yaml::from_str(&yaml2).unwrap();
     assert_eq!(meta3.series.as_deref(), Some("my-series"));
 }
+
+#[test]
+fn test_checkpoint_changed_since() {
+    let temp = tempdir().unwrap();
+    let ws_dir = temp.path().join("ws");
+    fs::create_dir_all(ws_dir.join("docs")).unwrap();
+
+    let ws = Workspace::create(&ws_dir, "Test Workspace").unwrap();
+
+    // 1. Create initial files
+    let file_old = ws_dir.join("docs/old.txt");
+    let file_mod = ws_dir.join("docs/mod.txt");
+    let file_del = ws_dir.join("docs/del.txt");
+    let file_same = ws_dir.join("docs/same.txt");
+
+    fs::write(&file_old, "Old Content").unwrap();
+    fs::write(&file_mod, "Initial Mod Content").unwrap();
+    fs::write(&file_del, "To Be Deleted").unwrap();
+    fs::write(&file_same, "Same Content").unwrap();
+
+    // Create Checkpoint
+    let cp =
+        CheckpointService::create(&ws, "Pre-turn Checkpoint", Some("turn-1".to_string())).unwrap();
+
+    // Sleep briefly to ensure separation between file creation and `since`
+    std::thread::sleep(std::time::Duration::from_millis(60));
+    let since = std::time::SystemTime::now();
+    std::thread::sleep(std::time::Duration::from_millis(60));
+
+    // 2. Perform changes:
+    // - Add new file
+    let file_new = ws_dir.join("docs/new.txt");
+    fs::write(&file_new, "New File Content").unwrap();
+
+    // - Modify mod.txt
+    fs::write(&file_mod, "Updated Mod Content").unwrap();
+
+    // - Delete del.txt
+    fs::remove_file(&file_del).unwrap();
+
+    // - Touch same.txt (write same content) -> mtime >= since, but hash identical!
+    fs::write(&file_same, "Same Content").unwrap();
+
+    // - old.txt is not touched at all -> mtime < since (skipped from hashing)
+
+    // 3. Call changed_since
+    let diff = CheckpointService::changed_since(&ws, &cp, since).unwrap();
+
+    assert_eq!(diff.added, vec!["docs/new.txt"]);
+    assert_eq!(diff.modified, vec!["docs/mod.txt"]);
+    assert_eq!(diff.deleted, vec!["docs/del.txt"]);
+
+    // Check non-existent checkpoint returns error
+    let err = CheckpointService::changed_since(&ws, "cp-nonexistent", since);
+    assert!(err.is_err());
+}

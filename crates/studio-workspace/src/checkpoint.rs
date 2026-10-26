@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 use walkdir::WalkDir;
 
 /// Checkpoint identifier (e.g. `cp-20261016-123456-abc12345`).
@@ -374,6 +375,93 @@ impl CheckpointService {
         for path_a in files_a.keys() {
             if !files_b.contains_key(path_a) {
                 deleted.push(path_a.clone());
+            }
+        }
+
+        added.sort();
+        modified.sort();
+        deleted.sort();
+
+        Ok(CheckpointDiff {
+            added,
+            modified,
+            deleted,
+        })
+    }
+
+    /// Compare current workspace files against a checkpoint and return added, modified, deleted paths.
+    ///
+    /// Optimization:
+    /// - Files present in the checkpoint whose mtime is earlier than `since` are considered unchanged (skipped from hashing).
+    /// - Files not present in the checkpoint are considered `added`.
+    /// - Files present in the checkpoint with mtime >= `since` are hashed to detect actual content modification (`modified`).
+    /// - Files present in the checkpoint that no longer exist on disk are considered `deleted`.
+    pub fn changed_since(ws: &Workspace, id: &str, since: SystemTime) -> Result<CheckpointDiff> {
+        let db = WorkspaceDb::open(ws)?;
+
+        let exists: bool = db
+            .conn()
+            .query_row(
+                "SELECT 1 FROM checkpoints WHERE id = ?1",
+                params![id],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        if !exists {
+            return Err(WorkspaceError::CheckpointNotFound(id.to_string()));
+        }
+
+        let mut stmt = db.conn().prepare(
+            "SELECT rel_path, blob_sha256 FROM checkpoint_files WHERE checkpoint_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        let mut expected: HashMap<String, String> = HashMap::new();
+        for r in rows {
+            let (rel, sha) = r?;
+            expected.insert(rel.replace('\\', "/"), sha);
+        }
+
+        let current = Self::scan_source_files(ws)?;
+        let mut seen_current = HashSet::new();
+
+        let mut added = Vec::new();
+        let mut modified = Vec::new();
+        let mut deleted = Vec::new();
+
+        for (rel, abs) in current {
+            let rel_norm = rel.replace('\\', "/");
+            seen_current.insert(rel_norm.clone());
+
+            match expected.get(&rel_norm) {
+                None => {
+                    added.push(rel_norm);
+                }
+                Some(sha_expected) => {
+                    let mtime = fs::metadata(&abs).and_then(|m| m.modified()).ok();
+
+                    // Files in checkpoint whose mtime is earlier than `since` are considered unchanged (no hash).
+                    if let Some(mt) = mtime {
+                        if mt < since {
+                            continue;
+                        }
+                    }
+
+                    // Otherwise (mtime >= since, or mtime unavailable), hash to check content
+                    if let Ok((sha_actual, _)) = hash_and_read_file(&abs) {
+                        if &sha_actual != sha_expected {
+                            modified.push(rel_norm);
+                        }
+                    }
+                }
+            }
+        }
+
+        for rel_expected in expected.keys() {
+            if !seen_current.contains(rel_expected) {
+                deleted.push(rel_expected.clone());
             }
         }
 

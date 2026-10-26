@@ -721,6 +721,8 @@ pub async fn run_turn_inner<C: Clock + 'static>(
     let mut cost: Option<f64> = None;
 
     let mut open_tool_calls: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut emitted_file_paths: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     // agy artifacts touched from here on belong to this turn (slack for coarse mtimes).
     let turn_started = std::time::SystemTime::now() - std::time::Duration::from_secs(2);
     let mut conversation_id: Option<String> = None;
@@ -770,6 +772,11 @@ pub async fn run_turn_inner<C: Clock + 'static>(
                 emit(&t.state, &t.thread_id, &t.turn_id, &ui);
                 if !matches!(ev, Event::TextDelta(_) | Event::Text(_) | Event::Session { .. }) {
                     save(&ui);
+                }
+                if let Event::FileChange { .. } = &ev {
+                    if let Some(p) = ui.get("path").and_then(|v| v.as_str()) {
+                        emitted_file_paths.insert(p.replace('\\', "/"));
+                    }
                 }
             }
             _ = cancel.notified() => {
@@ -919,6 +926,55 @@ pub async fn run_turn_inner<C: Clock + 'static>(
                 let ev = json!({ "type": "FileChange", "path": rel, "op": op });
                 emit(&t.state, &t.thread_id, &t.turn_id, &ev);
                 save(&ev);
+                emitted_file_paths.insert(rel);
+            }
+        }
+    }
+
+    // Synchronize workspace file changes that were not explicitly emitted as events
+    // (e.g. files created via Studio MCP, custom tools, or shell commands).
+    let ws = t.state.workspace().or_else(|_| Workspace::open(&t.ws_root));
+    if let Ok(ws) = ws {
+        if let Ok(cps) = CheckpointService::list(&ws) {
+            if let Some(pre_cp) = cps
+                .into_iter()
+                .find(|c| c.turn_id.as_deref() == Some(&t.turn_id))
+            {
+                if let Ok(diff) = CheckpointService::changed_since(&ws, &pre_cp.id, turn_started) {
+                    for path in diff.added {
+                        if !path.starts_with(".studio/")
+                            && !path.starts_with(".studio\\")
+                            && !emitted_file_paths.contains(&path)
+                        {
+                            let ev = json!({ "type": "FileChange", "path": path, "op": "create" });
+                            emit(&t.state, &t.thread_id, &t.turn_id, &ev);
+                            save(&ev);
+                            emitted_file_paths.insert(path);
+                        }
+                    }
+                    for path in diff.modified {
+                        if !path.starts_with(".studio/")
+                            && !path.starts_with(".studio\\")
+                            && !emitted_file_paths.contains(&path)
+                        {
+                            let ev = json!({ "type": "FileChange", "path": path, "op": "modify" });
+                            emit(&t.state, &t.thread_id, &t.turn_id, &ev);
+                            save(&ev);
+                            emitted_file_paths.insert(path);
+                        }
+                    }
+                    for path in diff.deleted {
+                        if !path.starts_with(".studio/")
+                            && !path.starts_with(".studio\\")
+                            && !emitted_file_paths.contains(&path)
+                        {
+                            let ev = json!({ "type": "FileChange", "path": path, "op": "delete" });
+                            emit(&t.state, &t.thread_id, &t.turn_id, &ev);
+                            save(&ev);
+                            emitted_file_paths.insert(path);
+                        }
+                    }
+                }
             }
         }
     }
@@ -1746,5 +1802,74 @@ mod tests {
         assert!(ctx.contains("Đã khóa: hero"));
         assert!(ctx.contains("hero: \"Giữ nguyên font chữ và màu logo\""));
         assert!(ctx.len() < 4000);
+    }
+
+    #[tokio::test]
+    async fn test_run_turn_syncs_unemitted_file_changes() {
+        let (_tmp, ws, db, _state, task, cancel) =
+            setup_test_turn_env("turn-sync", "thread-sync").await;
+
+        // 1. Create a checkpoint before the turn (mimicking start_turn)
+        CheckpointService::create(&ws, "Trước lượt", Some("turn-sync".to_string())).unwrap();
+
+        // 2. Mock engine that emits one FileChange for `emitted.md`, and Done
+        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let turn = Turn::mock(rx, None);
+        let clock = Arc::new(RealClock);
+        let config = StallWatchdogConfig::default();
+
+        // Also simulate an out-of-band file creation (e.g. from Studio tool or shell)
+        // like `dan-y.md` created directly on disk
+        let unemitted_path = ws.root().join("dan-y.md");
+        std::fs::write(&unemitted_path, "# Dàn ý video").unwrap();
+
+        let emitted_path = ws.root().join("emitted.md");
+        std::fs::write(&emitted_path, "# Emitted file").unwrap();
+
+        let handle = tokio::spawn(run_turn_inner(task, turn, cancel, config, clock));
+
+        // Send an emitted FileChange event and Done
+        tx.send(Event::FileChange {
+            path: std::path::PathBuf::from("emitted.md"),
+            op: FileOp::Write,
+        })
+        .await
+        .unwrap();
+
+        tx.send(Event::Done {
+            status: DoneStatus::Success,
+            text: Some("Hoàn thành".to_string()),
+        })
+        .await
+        .unwrap();
+        drop(tx);
+
+        let _ = handle.await.unwrap();
+
+        // Verify that events table has FileChange for both `emitted.md` AND `dan-y.md`
+        let mut stmt = db
+            .conn()
+            .prepare(
+                "SELECT payload_json FROM events WHERE turn_id = 'turn-sync' AND event_type = 'FileChange'",
+            )
+            .unwrap();
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+
+        let mut paths: Vec<String> = rows
+            .iter()
+            .filter_map(|json_str| {
+                let v: serde_json::Value = serde_json::from_str(json_str).ok()?;
+                v.get("path")
+                    .and_then(|p| p.as_str())
+                    .map(ToString::to_string)
+            })
+            .collect();
+        paths.sort();
+
+        assert_eq!(paths, vec!["dan-y.md", "emitted.md"]);
     }
 }

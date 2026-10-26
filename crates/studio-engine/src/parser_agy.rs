@@ -1,6 +1,7 @@
 //! Stateful parser for Antigravity (agy) CLI stream-json output.
 
 use serde_json::Value;
+use std::borrow::Cow;
 use std::path::PathBuf;
 
 use crate::types::{DoneStatus, Event, FileOp};
@@ -250,18 +251,28 @@ fn extract_agy_target_file(params: &Value) -> Option<&str> {
 }
 
 /// Map internal agy tool names to friendly Vietnamese readable step names.
-fn friendly_agy_tool_name(tool_name: &str) -> &'static str {
+/// If no friendly name is matched, returns the original tool name.
+pub fn friendly_agy_tool_name<'a>(tool_name: &'a str) -> Cow<'a, str> {
     match tool_name {
-        "view_file" => "Đọc tệp",
-        "write_to_file" => "Tạo tệp",
-        "replace_file_content" | "multi_replace_file_content" | "sed_file" => "Sửa tệp",
-        "run_command" | "send_command_input" => "Chạy lệnh shell",
-        "read_url_content" | "search_web" | "read_browser_page" | "open_browser_url" => {
-            "Tìm kiếm & duyệt web"
+        "generate_image" => Cow::Borrowed("Tạo ảnh"),
+        "read_url_content" => Cow::Borrowed("Đọc trang web"),
+        "search_web" => Cow::Borrowed("Tìm kiếm web"),
+        "open_browser_url" | "read_browser_page" => Cow::Borrowed("Duyệt web"),
+        "command_status" | "wait" | "wait_5_seconds" => Cow::Borrowed("Chờ lệnh"),
+        "ask_question" | "ask_permission" => Cow::Borrowed("Hỏi người dùng"),
+        "manage_task" | "define_subagent" | "manage_subagents" | "invoke_subagent"
+        | "send_message" => Cow::Borrowed("Điều phối tác vụ con"),
+        "run_workflow" => Cow::Borrowed("Chạy quy trình"),
+        "list_resources" | "read_resource" => Cow::Borrowed("Đọc tài nguyên"),
+        "view_file" => Cow::Borrowed("Đọc tệp"),
+        "write_to_file" => Cow::Borrowed("Tạo tệp"),
+        "replace_file_content" | "multi_replace_file_content" | "sed_file" => {
+            Cow::Borrowed("Sửa tệp")
         }
-        "call_mcp_tool" => "Gọi công cụ Studio",
-        "invoke_subagent" | "send_message" => "Điều phối tác vụ con",
-        "list_dir" | "find_by_name" | "grep_search" => "Tìm kiếm tệp",
-        _ => "Công cụ",
+        "run_command" | "send_command_input" => Cow::Borrowed("Chạy lệnh shell"),
+        "call_mcp_tool" => Cow::Borrowed("Gọi công cụ Studio"),
+        "list_dir" | "find_by_name" | "grep_search" => Cow::Borrowed("Tìm kiếm tệp"),
+        other if other.starts_with("browser_") => Cow::Borrowed("Duyệt web"),
+        other => Cow::Borrowed(other),
     }
 }
