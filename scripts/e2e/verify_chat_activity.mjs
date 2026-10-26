@@ -161,7 +161,7 @@ try {
 
   // Files from the whole thread: agy brain sync + files made via Studio MCP/shell.
   const cards = await client.eval(`[...document.querySelectorAll("div")]
-    .filter(d => /^Kết quả · \d+ tệp/.test(d.innerText || "") && d.children.length >= 2)
+    .filter(d => /^Kết quả · \\d+ tệp/.test(d.innerText || "") && d.children.length >= 2)
     .map(d => d.innerText)`);
   const allResults = cards.join("\n");
   results.resultCards = cards;
