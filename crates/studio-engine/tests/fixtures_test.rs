@@ -403,4 +403,66 @@ fn agy_tool_calls_mapped_to_friendly_names() {
             }
         ]
     );
+
+    // Test new mappings and fallback to original name
+    use studio_engine::parser_agy::friendly_agy_tool_name;
+    assert_eq!(friendly_agy_tool_name("generate_image"), "Tạo ảnh");
+    assert_eq!(friendly_agy_tool_name("read_url_content"), "Đọc trang web");
+    assert_eq!(friendly_agy_tool_name("search_web"), "Tìm kiếm web");
+    assert_eq!(friendly_agy_tool_name("browser_navigate"), "Duyệt web");
+    assert_eq!(friendly_agy_tool_name("open_browser_url"), "Duyệt web");
+    assert_eq!(friendly_agy_tool_name("read_browser_page"), "Duyệt web");
+    assert_eq!(friendly_agy_tool_name("command_status"), "Chờ lệnh");
+    assert_eq!(friendly_agy_tool_name("wait"), "Chờ lệnh");
+    assert_eq!(friendly_agy_tool_name("wait_5_seconds"), "Chờ lệnh");
+    assert_eq!(friendly_agy_tool_name("ask_question"), "Hỏi người dùng");
+    assert_eq!(friendly_agy_tool_name("ask_permission"), "Hỏi người dùng");
+    assert_eq!(
+        friendly_agy_tool_name("manage_task"),
+        "Điều phối tác vụ con"
+    );
+    assert_eq!(
+        friendly_agy_tool_name("define_subagent"),
+        "Điều phối tác vụ con"
+    );
+    assert_eq!(
+        friendly_agy_tool_name("manage_subagents"),
+        "Điều phối tác vụ con"
+    );
+    assert_eq!(
+        friendly_agy_tool_name("invoke_subagent"),
+        "Điều phối tác vụ con"
+    );
+    assert_eq!(
+        friendly_agy_tool_name("send_message"),
+        "Điều phối tác vụ con"
+    );
+    assert_eq!(friendly_agy_tool_name("run_workflow"), "Chạy quy trình");
+    assert_eq!(friendly_agy_tool_name("list_resources"), "Đọc tài nguyên");
+    assert_eq!(friendly_agy_tool_name("read_resource"), "Đọc tài nguyên");
+    assert_eq!(friendly_agy_tool_name("view_file"), "Đọc tệp");
+    assert_eq!(friendly_agy_tool_name("write_to_file"), "Tạo tệp");
+    assert_eq!(friendly_agy_tool_name("replace_file_content"), "Sửa tệp");
+    assert_eq!(friendly_agy_tool_name("run_command"), "Chạy lệnh shell");
+    assert_eq!(
+        friendly_agy_tool_name("call_mcp_tool"),
+        "Gọi công cụ Studio"
+    );
+    assert_eq!(friendly_agy_tool_name("list_dir"), "Tìm kiếm tệp");
+
+    // Unmatched tool returns original name
+    assert_eq!(
+        friendly_agy_tool_name("custom_plugin_tool"),
+        "custom_plugin_tool"
+    );
+
+    let unk_ev = p.feed(r#"{"event":"step_update","step_update":{"step_index":3,"state":"ACTIVE","step_type":"tool","tool_name":"custom_plugin_tool","tool_info":{"name":"custom_plugin_tool","parameters":{}}}}"#);
+    assert_eq!(
+        unk_ev,
+        vec![studio_engine::Event::ToolCall {
+            id: "step-3".to_string(),
+            name: "custom_plugin_tool".to_string(),
+            input: serde_json::json!({}),
+        }]
+    );
 }
