@@ -441,6 +441,12 @@ export const ThreadPane: React.FC<ThreadPaneProps> = ({
           opacity: 1 !important;
           pointer-events: auto !important;
         }
+        @media (hover: none) {
+          .cs-user-bubble-container .cs-user-edit-btn {
+            opacity: 1;
+            pointer-events: auto;
+          }
+        }
       `}</style>
 
       {/* Thread Header: Compact single row with model selector & cancel button */}
